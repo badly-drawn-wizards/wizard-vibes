@@ -127,15 +127,34 @@ def leather_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
           in mix (scale worn base) (vec 0.55 0.45 0.3) s
 
 ---------------------------------------------------------------------
+-- Hair: fine strands within each beard lock, faded by footprint, and the
+-- locks' colours varying from white through cream to light grey.
+
+def hair (pose: pose) (fp: f32) (p: vec3) : f32 =
+  let l = beard_lock (beard_space pose p)
+  -- six strands per lock; a lock is ~0.035 across, so ~0.006 per strand
+  let strand = f32.abs (f32.sin (f32.pi * fract (l.phase * 6 + 0.3 * f32.sin (l.h * 20))))
+  in 0.0003 * strand * keep fp 0.006
+
+def hair_albedo (pose: pose) (p: vec3) : vec3 =
+  let l = beard_lock (beard_space pose p)
+  let tint = mix (vec 0.93 0.92 0.88) (vec 0.78 0.79 0.82) l.rnd
+  in scale (0.62 + 0.38 * l.crown) tint
+
+-- Direction the hair runs (down the beard), in the wizard's local space.
+def hair_tangent : vec3 = normalise (beard_tip -^ beard_top)
+
+---------------------------------------------------------------------
 
 -- Height field of material m, or 0 where it has none.
 def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
   if m == m_staff then (bark fp p).0
   else if m == m_robe then cloth pose fp p
   else if m == m_leather then leather pose fp p
+  else if m == m_beard then hair pose fp p
   else 0
 
-def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather
+def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather || m == m_beard
 
 -- Tilts normal n by the gradient of the height field h across the surface.
 -- The gradient comes from four taps on a tetrahedron, small enough for the

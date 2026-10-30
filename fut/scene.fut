@@ -217,14 +217,24 @@ def beard_space (pose: pose) (p: vec3) : vec3 =
   let sway = 0.03 * f32.sin (2 * tm) * saturate ((1.5 - p.y) / 0.5)
   in {x = (p.x - sway) / 1.45, y = p.y, z = p.z}
 
--- Strand grooves around the beard's axis, as a value in [0, 1] (0 = groove).
--- Shared by the shape and the material, so shading follows the strands.
-def beard_strands (q: vec3) : f32 =
+-- The beard's locks, at a point in beard space. Around the beard's axis
+-- the angle is divided into about 18 locks; noise warps the divisions so
+-- locks vary in width and wander as they hang. Shared by the shape and the
+-- material, so shading follows the locks.
+type lock = { h: f32 -- along the beard, 0 at the cheeks .. 1 at the tip
+            , phase: f32 -- across the locks: lock k spans [k, k + 1)
+            , crown: f32 -- 0 in the groove between locks .. 1 on a lock's crown
+            , rnd: f32 } -- per-lock random value
+
+def beard_lock (q: vec3) : lock =
   let ba = beard_tip -^ beard_top
   let h = saturate (dot (q -^ beard_top) ba / dot ba ba)
   let rv = q -^ (beard_top +^ scale h ba)
   let phi = f32.atan2 rv.x rv.z
-  in f32.abs (f32.sin (10 * phi + 5 * h + 0.6 * f32.sin (9 * h)))
+  let warp = 1.6 * vnoise2 (h * 3) (phi * 1.5 + 7) + 0.4 * f32.sin (h * 9 + phi * 2)
+  let phase = phi * 18 / (2 * f32.pi) + warp
+  let id = i32.f32 (f32.floor phase)
+  in {h, phase, crown = f32.sin (f32.pi * fract phase) ** 0.7, rnd = hash2 id 51}
 
 def sd_beard (pose: pose) (p: vec3) : f32 =
   let q = beard_space pose p
@@ -233,15 +243,19 @@ def sd_beard (pose: pose) (p: vec3) : f32 =
   let fork = 0.035 * smoothstep 1.3 0.98 q.y
   let fq = {x = f32.abs q.x - fork, y = q.y, z = q.z}
   let body = sd_round_cone_ab fq beard_top beard_tip 0.13 0.018
-  -- grooves cut in proportion to the local radius, keeping the field smooth
-  let ba = beard_tip -^ beard_top
-  let h = saturate (dot (q -^ beard_top) ba / dot ba ba)
-  let groove = 0.006 * (1 - h * 0.5) * (1 - beard_strands q)
+  -- grooves between the locks, deeper for some locks than others, and each
+  -- lock ending at its own length, so the tip is ragged rather than cut
+  let l = beard_lock q
+  let groove = 0.008 * (1 - l.h * 0.5) * (1 - l.crown) * (0.6 + 0.8 * l.rnd)
+  let len = length (beard_tip -^ beard_top)
+  let cut = (l.h - (0.86 + 0.14 * l.rnd)) * len
+  let body = smax 0.02 (body + groove) cut
   let jaw = sd_ellipsoid (p -^ vec 0 1.53 0.05) (vec 0.155 0.1 0.13)
   let moustache =
     let m = {x = f32.abs p.x, y = p.y, z = p.z}
     in sd_round_cone_ab m (vec 0.01 1.548 0.178) (vec 0.105 1.49 0.13) 0.024 0.01
-  in smin 0.03 (smin 0.06 (body + groove) jaw) moustache
+  -- (the warped locks stretch the field a little; scale to stay safe)
+  in 0.85 * smin 0.03 (smin 0.06 body jaw) moustache
 
 def hat_base : vec3 = vec 0 1.74 0
 def hat_bend (tm: f32) : f32 = 0.9 + 0.15 * f32.sin tm

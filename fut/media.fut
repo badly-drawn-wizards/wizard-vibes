@@ -19,9 +19,9 @@ def rune_glow_colour : vec3 = vec 0.25 0.5 1
 def orb_glow_density (g: glow) (od: f32) : f32 =
   if od < 0 then 0 else 0.95 * g.level * f32.exp (-od / 0.1)
 
--- The rune letters glow the same way, in a thin layer hugging the strokes.
-def rune_glow_density (g: glow) (gd: f32) : f32 =
-  4 * g.level * f32.exp (-gd / 0.05)
+-- The rune letters glow in a thin layer hugging the strokes, pulsing gently.
+def rune_glow_density (tm: f32) (gd: f32) : f32 =
+  4 * rune_pulse tm * f32.exp (-gd / 0.05)
 
 -- Inside a glass orb, a faint glowing haze.
 def globe_haze : f32 = 0.3
@@ -38,7 +38,7 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let haze = if od < 0 then globe_haze else 0
   in { cap = f32.min bolts.cap (f32.min (0.3 * f32.abs od + 0.015) (0.3 * gd + 0.01))
      , radiance = scale (orb_glow_density g od) orb_glow_colour
-                  +^ scale (rune_glow_density g gd) rune_glow_colour
+                  +^ scale (rune_glow_density tm gd) rune_glow_colour
                   +^ scale haze orb_glow_colour
                   +^ bolts.radiance
      , extinction = 0 }
