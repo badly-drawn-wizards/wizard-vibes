@@ -2,6 +2,7 @@
 // drawer lays it out. From it this generates
 //   fut/params.fut  the uniforms' `params` record and their defaults;
 //   fut/render.fut  the entry points, render taking a params record;
+//   fut/reference.fut  the CPU reference renderer's entry point;
 //   fut/config.fut  the compile-time constants, from their defaults overlaid
 //                   with the values the drawer saved in config.local.json.
 // Both are generated (and gitignored); files are only rewritten when their
@@ -122,8 +123,18 @@ entry probe (tm: f32) (prm: params) (dr: drive) (pts: []f32) : []f32 =
 
 -- How many spells may be in flight at once (a compile-time parameter).
 entry spell_limit (_: i32) : i32 = max_spells
+`;
+}
 
--- CPU reference image, with the default uniforms (see dev/ref-render.ts).
+// The CPU reference renderer's entry point, in a program of its own: in the
+// browser's it would be one more pipeline holding all the shading, which
+// Chrome compiles at load for nothing.
+function referenceFut(): string {
+  return `${HEADER}
+import "params"
+import "wizard"
+
+-- CPU reference image, with the default uniforms (see dev/cpu-render.ts).
 entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
                  (tx: f32) (ty: f32) (tz: f32) : [][][3]u8 =
   render_rgb_frame default_params w h tm yaw pitch dst tx ty tz
@@ -152,5 +163,6 @@ export function generate(dir = "fut", local = true): boolean {
   const a = writeIfChanged(`${dir}/params.fut`, paramsFut(s));
   const b = writeIfChanged(`${dir}/config.fut`, configFut(s, local));
   const c = writeIfChanged(`${dir}/render.fut`, renderFut());
+  writeIfChanged(`${dir}/reference.fut`, referenceFut());
   return a || b || c;
 }

@@ -347,10 +347,12 @@ function reload(version: string): Promise<void> {
   loading = loading.then(() =>
     load().catch((e) => {
       const message = String(e?.message ?? e);
-      // WebGPU failing before any build has run here (not a shader error,
-      // which a later build fixes): fall back to WebGL, saying why, if
-      // there is WebGL to fall back to, and only once
-      if (!glr && !inst && loaded.size === 0 && !failure && !message.startsWith("WGSL compilation failed")) {
+      // WebGPU itself failing before any build has run here (not a shader
+      // error, which a later build fixes, nor a missing build): fall back
+      // to WebGL, saying why, if there is WebGL to fall back to, and only
+      // once
+      const webGpuError = /webgpu|device|adapter|program exited/i.test(message) && !message.startsWith("WGSL compilation failed");
+      if (!glr && !inst && loaded.size === 0 && !failure && webGpuError) {
         if (!hasWebGl2()) {
           console.warn(`WebGPU failed, and there is no WebGL2: ${message}`);
           noRendererAfter(message);

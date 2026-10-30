@@ -132,23 +132,21 @@ def edge_supersample [h][w] (threshold: f32) (shade_at: f32 -> f32 -> vec3) (img
 -- for canvases; Firefox crashes copying buffers into rgba8unorm ones).
 -- (The entry points are generated into render.fut, which passes the
 -- uniforms in as a params record.)
--- With anti-aliasing (prm.aa: 1 FXAA, 2 edge supersampling) the image is
--- made first and then passed over.
+-- The image is made first, by one kernel whatever the anti-aliasing, and
+-- then passed over (prm.aa: 1 FXAA, 2 edge supersampling) and packed: each
+-- kernel holding all the shading is another pipeline the browser compiles
+-- at load, and Chrome compiles them slowly (only edge supersampling's has
+-- its own; putting its rays through this one too cost Firefox ~5 ms a frame).
 def render_frame (prm: params) (dr: drive) (spells: []f32) (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) : []u32 =
   let pack (c: vec3) = to_u8 c.z | (to_u8 c.y << 8) | (to_u8 c.x << 16) | 0xff000000
   let shade_at = sample prm dr spells default_target vw h tm yaw pitch dst
-  in if prm.aa == 0 then
-       tabulate (i64.i32 w * i64.i32 h) (\i ->
-         let x = i32.i64 (i % i64.i32 w)
-         let y = i32.i64 (i / i64.i32 w)
-         in if x >= vw then 0xff000000 else pack (shade_at (f32.i32 x + 0.5) (f32.i32 y + 0.5)).0)
-     else
-       let img = tabulate_2d (i64.i32 h) (i64.i32 vw) (\y x -> shade_at (f32.i64 x + 0.5) (f32.i64 y + 0.5))
-       let img = if prm.aa == 1 then fxaa prm.aa_threshold (map (map (.0)) img)
-                 else edge_supersample (3 * prm.aa_threshold) (\x y -> (shade_at x y).0) img
-       in tabulate (i64.i32 w * i64.i32 h) (\i ->
-            let x = i % i64.i32 w
-            in if x >= i64.i32 vw then 0xff000000 else pack (#[unsafe] img[i / i64.i32 w, x]))
+  let img = tabulate_2d (i64.i32 h) (i64.i32 vw) (\y x -> shade_at (f32.i64 x + 0.5) (f32.i64 y + 0.5))
+  let img = if prm.aa == 1 then fxaa prm.aa_threshold (map (map (.0)) img)
+            else if prm.aa == 2 then edge_supersample (3 * prm.aa_threshold) (\x y -> (shade_at x y).0) img
+            else map (map (.0)) img
+  in tabulate (i64.i32 w * i64.i32 h) (\i ->
+       let x = i % i64.i32 w
+       in if x >= i64.i32 vw then 0xff000000 else pack (#[unsafe] img[i / i64.i32 w, x]))
 
 -- CPU reference image, orbiting an arbitrary target (for close-ups).
 def render_rgb_frame (prm: params) (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
