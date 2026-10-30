@@ -17,6 +17,7 @@
   #hud button { font: inherit; color: var(--dim); background: none; border: 1px solid #2c2950;
                 border-radius: 4px; padding: 2px 6px; cursor: pointer; }
   #hud button[aria-pressed="true"] { color: var(--fg); border-color: var(--fg); }
+  #hud button:disabled { opacity: 0.35; cursor: not-allowed; }
   /* the parameter drawer, on the right */
   #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 100vw); box-sizing: border-box;
             overflow-y: auto; padding: 48px 12px 12px; background: rgb(5 4 13 / 0.85);
@@ -90,6 +91,9 @@
   <span id="status">loading…</span>
   <span id="scale">
     <button data-scale="0.25">¼</button><button data-scale="0.5">½</button><button data-scale="1">1×</button>
+  </span>
+  <span id="backend">
+    <button data-backend="webgpu">WebGPU</button><button data-backend="webgl">WebGL</button>
   </span>
 </div>
 <button id="drawer-toggle" type="button" title="Parameters">⚙</button>

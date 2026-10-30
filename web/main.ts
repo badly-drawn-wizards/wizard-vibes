@@ -21,9 +21,40 @@ const entries = new Entries(params);
 document.getElementById("drawer-toggle")!.onclick = () => document.body.classList.toggle("drawer-open");
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
-// Without WebGPU (or with ?webgl), the WebGL2 fallback draws the scene from
-// a fragment shader instead (see webgl.ts); the canvas takes one or the other.
-const useGl = !navigator.gpu || new URLSearchParams(location.search).has("webgl");
+// Without WebGPU, the WebGL2 fallback draws the scene from a fragment shader
+// instead (see webgl.ts). It can also be chosen with the WebGPU / WebGL
+// buttons (remembered), or forced with ?webgl. A canvas takes one kind of
+// context for good, so switching reloads the page (the camera, flight and
+// uniforms are kept in storage).
+const BACKEND = "wizard-backend";
+const storedBackend = (() => {
+  try {
+    return localStorage.getItem(BACKEND);
+  } catch {
+    return null;
+  }
+})();
+const useGl = !navigator.gpu || new URLSearchParams(location.search).has("webgl") || storedBackend === "webgl";
+for (const b of document.querySelectorAll<HTMLButtonElement>("#backend button")) {
+  const gl = b.dataset.backend === "webgl";
+  b.setAttribute("aria-pressed", String(gl === useGl));
+  if (!gl && !navigator.gpu) {
+    b.disabled = true;
+    b.title = "WebGPU is not available in this browser";
+  }
+  b.onclick = () => {
+    if (gl === useGl) return;
+    try {
+      localStorage.setItem(BACKEND, gl ? "webgl" : "webgpu");
+    } catch {
+      // storage unavailable: ?webgl still chooses for this page
+    }
+    const url = new URL(location.href);
+    if (gl) url.searchParams.set("webgl", "");
+    else url.searchParams.delete("webgl");
+    location.replace(url.toString().replace(/webgl=(&|$)/, "webgl$1"));
+  };
+}
 let glr: GlRenderer | null = null;
 if (useGl) {
   try {
@@ -208,7 +239,7 @@ function tick(now: number): void {
     last = now;
     fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
     frameGl(glr, dt);
-    setStatus(`${glr.version!.slice(0, 8)} · WebGL fallback (no WebGPU: no spells, collisions or anti-aliasing) · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
+    setStatus(`${glr.version!.slice(0, 8)} · ${navigator.gpu ? "WebGL" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
     return;
   }
   if (!inst || inFlight) return;
