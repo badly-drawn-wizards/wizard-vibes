@@ -9,6 +9,7 @@ import "scene"
 import "lightning"
 import "media"
 import "world"
+import "textures"
 
 
 ---------------------------------------------------------------------
@@ -61,14 +62,16 @@ def sky (rd: vec3) : vec3 =
 -- Materials
 
 -- Metals tint their highlights with their albedo and have little diffuse.
-type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: bool, metal: bool}
+-- sheen: a cloth-like glow at grazing angles, tinted by the albedo.
+type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: bool, metal: bool, sheen: f32}
 
 def plain (albedo: vec3) : material =
-  {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false}
+  {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false, sheen = 0}
 
-def material (pose: pose) (g: glow) (m: i32) (p: vec3) (n: vec3) : material =
+def material (pose: pose) (g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
-  if m == m_robe then plain (vec 0.07 0.05 0.33)
+  if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = 0.9 with ks = 0.03
+  else if m == m_staff then plain (bark_albedo fp p) with ks = 0.05
   else if m == m_skin then plain (vec 0.85 0.6 0.48) with ks = 0.15 with shininess = 16
   else if m == m_beard then plain (scale (0.75 + 0.25 * beard_strands (beard_space pose p)) (vec 0.88 0.88 0.92))
   else if m == m_hat then
@@ -91,7 +94,7 @@ def material (pose: pose) (g: glow) (m: i32) (p: vec3) (n: vec3) : material =
     let c = mix stone moss (smoothstep 0.7 0.85 up)
     let c = mix c snow (smoothstep 7 8.5 w.y * smoothstep 0.6 0.8 up)
     in plain (scale grain c) with rim = false
-  else if m == m_leather then plain (vec 0.16 0.09 0.05) with ks = 0.2 with shininess = 20
+  else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28
   else if m == m_tome then plain (vec 0.32 0.05 0.06) with ks = 0.15 with shininess = 16
   else if m == m_pages then plain (vec 0.85 0.8 0.66)
   else if m >= m_potion && m < m_potion + 3 then
@@ -127,9 +130,14 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
           then let w = to_world pose.fl p
                in to_local_dir pose.fl (terrain_normal (terrain_detail p) w.x w.z)
           else normal (dist pose) p
-  let mat = material pose g m p n
-  let occ = if m == m_terrain then 1 else ambient_occlusion (dist pose) p n
-  let po = p +^ scale 0.002 n
+  -- textures tilt the normal used for lighting; shadows and AO keep the
+  -- geometric one
+  let fp = t * pose.pix
+  let ng = n
+  let n = if has_bump m then bumped (bump_height pose fp m) p ng else ng
+  let mat = material pose g fp m p n
+  let occ = if m == m_terrain then 1 else ambient_occlusion (dist pose) p ng
+  let po = p +^ scale 0.002 ng
   let moon_shadow = soft_shadow (occluder_dist pose) po pose.moon 12
   let moon = light mat n rd pose.moon moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
   let to_orb = orb_pos -^ p
@@ -140,7 +148,10 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
   -- Stop short of the orb: the staff pokes into its underside, and a
   -- penumbra estimate taken right next to the light bands badly.
   -- (skipped where the orb's light is negligible, e.g. on the far terrain)
-  let orb_shadow = if od < orb_radius then 1
+  -- The staff holds the orb on its tip, so its shadow rays towards the orb
+  -- run along its own surface and graze every swelling and knot; a branch
+  -- cannot really shadow a light at its own tip, so it is left unshadowed.
+  let orb_shadow = if od < orb_radius || m == m_staff then 1
                    else if atten < 0.01 then 0
                    else soft_shadow (occluder_dist pose) po ol (od - orb_radius - 0.15)
   let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
@@ -157,7 +168,14 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
          let disc = f32.cos (f32.asin (f32.min 1 (orb_radius / od)))
          let orb_seen = smoothstep (disc - 0.05) disc cos_orb + 0.25 * pow (saturate cos_orb) 6
          in mat.albedo *^ (scale 0.6 (sky (to_world_dir pose.fl r)) +^ scale (1.6 * g.level * orb_seen) (vec 0.75 0.9 1))
-  let c = moon +^ orb +^ fill +^ rim +^ mirror +^ mat.emission
+  -- cloth sheen: brightest where the surface turns away from view, lit by
+  -- the moon where it reaches and a little by the sky everywhere
+  let sheen =
+    if mat.sheen <= 0 then splat 0
+    else let f = pow (1 - saturate (-(dot n rd))) 4
+         let lit = 0.3 * occ + 0.7 * moon_shadow * saturate (dot n pose.moon + 0.4)
+         in scale (mat.sheen * f * lit) (scale 2.2 mat.albedo +^ vec 0.05 0.05 0.1)
+  let c = moon +^ orb +^ fill +^ rim +^ mirror +^ sheen +^ mat.emission
   let fog = 1 - f32.exp (-0.0007 * t * t)
   in mix c (sky (to_world_dir pose.fl rd)) fog
 
@@ -229,9 +247,9 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
          else (ro, rd, w, acc +^ (w *^ sky (to_world_dir pose.fl rd)), inside, true, refl)
   in (acc, refl)
 
-def shade (secs: f32) (ro: vec3) (rd: vec3) : vec3 =
+def shade (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
   -- worked out once per pixel, not per march step
-  let pose = pose_at secs
+  let pose = pose_at secs with pix = pix
   let g = glow_now pose.tm
   -- Path 0 is the camera ray; path 1 its reflection off the orb, if any.
   -- A loop, so that follow (and all the shading) is compiled only once.

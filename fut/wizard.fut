@@ -25,7 +25,8 @@ def camera_ray (target: vec3) (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f
 
 def pixel (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : vec3 =
   let (ro, rd) = camera_ray target vw h yaw pitch dst x y
-  let c = shade tm ro rd -- tm in seconds
+  -- tm in seconds; the last argument is the angle one pixel spans
+  let c = shade tm (2 / (f32.i32 h * 2.414)) ro rd
   let c = vmap aces (scale 1.1 c)
   let c = vmap (\v -> (v ** (1 / 2.2))) c
   let ux = (f32.i32 x / f32.i32 vw - 0.5)

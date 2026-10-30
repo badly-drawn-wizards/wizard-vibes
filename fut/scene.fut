@@ -23,6 +23,7 @@ def m_pages : i32 = 12
 def m_potion : i32 = 20 -- 20, 21, 22: one per flask
 def m_rock : i32 = 13
 def m_terrain : i32 = 14
+def m_staff : i32 = 15
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -70,6 +71,7 @@ type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, loca
             , head: vec3 -- offset of the head, beard and hat
             , look: f32 -- head turn (radians, towards +x)
             , point: f32 -- 0 idle .. 1 pointing with the left hand
+            , pix: f32 -- angle one pixel spans (for texture filtering)
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3 }
 
@@ -99,7 +101,7 @@ def pose_at (secs: f32) : pose =
   let aim = l_shoulder +^ scale 0.62 (normalise aim_dir)
   let (l_elbow, l_wrist) = two_bone l_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
   in { tm, secs, fl, moon = to_local_dir fl moon_world
-     , breath = b, lean, head, look = 0.45 * point * side, point
+     , breath = b, lean, head, look = 0.45 * point * side, point, pix = 0.0008
      , r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist }
 
 def orb_radius : f32 = 0.11
@@ -255,7 +257,35 @@ def sd_hat (pose: pose) (p: vec3) : f32 =
 
 def sd_band (pose: pose) (p: vec3) : f32 = sd_torus (head_space pose p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0.025
 
-def sd_staff (p: vec3) : f32 = sd_capsule p staff_foot staff_top staff_radius
+-- A frame around the staff: (along the axis from the foot, and two unit
+-- vectors across it).
+def staff_frame : (vec3, vec3) =
+  let e1 = normalise (cross staff_dir (vec 0 0 1))
+  in (e1, cross staff_dir e1)
+
+-- Coordinates in the staff's frame: x, z across the axis, y along it.
+def staff_local (p: vec3) : vec3 =
+  let (e1, e2) = staff_frame
+  let v = p -^ staff_foot
+  in vec (dot v e1) (dot v staff_dir) (dot v e2)
+
+def staff_length : f32 = length (staff_top -^ staff_foot)
+
+-- Knots: swellings at a few heights, each on one side of the branch.
+def staff_knots : [3](f32, f32) = [(0.55, 0.6), (1.32, 2.6), (1.72, 4.4)] -- (height, angle)
+
+-- A branch rather than a pole: the radius swells and narrows along the
+-- length, thickening a little towards the foot, with a few knots. (The
+-- field is stretched by under 2%, so it stays safe to trace.)
+def sd_staff (p: vec3) : f32 =
+  let q = staff_local p
+  let y = clamp 0 staff_length q.y
+  let r = staff_radius * (1.12 - 0.12 * y / staff_length + 0.07 * f32.sin (y * 6.3 + 1) + 0.04 * f32.sin (y * 17.1))
+  let shaft = length (q -^ vec 0 y 0) - r
+  let knots = loop d = 1e9f32 for (ky, ka) in staff_knots do
+                let c = vec (staff_radius * 0.75 * f32.cos ka) ky (staff_radius * 0.75 * f32.sin ka)
+                in f32.min d (sd_ellipsoid (q -^ c) (vec 0.022 0.035 0.022))
+  in smin 0.015 shaft knots
 
 ---------------------------------------------------------------------
 -- Belt, buckle, potions and tome
@@ -369,7 +399,7 @@ def wizard (pose: pose) (p: vec3) : hit =
   |> umin (sd_beard pose p, m_beard)
   |> umin (sd_hat pose p, m_hat)
   |> umin (sd_band pose p, m_gold)
-  |> umin (sd_staff p, m_wood)
+  |> umin (sd_staff p, m_staff)
   |> umin (sd_cradle p, m_gold)
   |> umin (waist_gear (body_space pose p))
 
