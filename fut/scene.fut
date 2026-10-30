@@ -414,27 +414,60 @@ def sd_buckle (p: vec3) : f32 =
   in f32.min star ring
 
 -- Three potions hanging from the belt on the left hip: two round flasks
--- either side of a tall bottle, each with a short neck and a cork.
+-- either side of a tall bottle, each with a short neck and a cork. The glass
+-- is not part of the marched scene (rays pass through it; see potion_glass
+-- and glass in shading.fut); the liquid inside is, and glows.
 def potion_angle (i: i32) : f32 = deg (70 + 24 * f32.i32 i)
 
-def potion (i: i32) (p: vec3) : hit =
+-- (outer glass surface, cork, liquid surface height) of potion i
+def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
   let a = potion_angle i
   let neck_top_y = belt_y - 0.026
   let neck_len = 0.03
   let neck_top = scale (robe_radius neck_top_y + 0.02) (around a) +^ vec 0 neck_top_y 0
   let body_top = neck_top -^ vec 0 neck_len 0
-  let glass =
+  let (glass, level) =
     if i == 1 then
-      -- tall bottle: a rounded cylinder under the neck
+      -- tall bottle: a rounded cylinder under the neck, four-fifths full
       let c = body_top -^ vec 0 0.055 0
-      in smin 0.01 (sd_capsule p (c -^ vec 0 0.03 0) (c +^ vec 0 0.025 0) 0.03)
-                   (sd_capsule p body_top neck_top 0.012)
+      in ( smin 0.01 (sd_capsule p (c -^ vec 0 0.03 0) (c +^ vec 0 0.025 0) 0.03)
+                     (sd_capsule p body_top neck_top 0.012)
+         , c.y + 0.03 )
     else
+      -- round flask, two-thirds full
       let r = 0.04
       let c = body_top -^ vec 0 (r * 0.8) 0
-      in smin 0.015 (sd_sphere (p -^ c) r) (sd_capsule p body_top neck_top 0.013)
+      in (smin 0.015 (sd_sphere (p -^ c) r) (sd_capsule p body_top neck_top 0.013), c.y + 0.25 * r)
   let cork = sd_capsule p (neck_top -^ vec 0 0.008 0) (neck_top +^ vec 0 0.01 0) 0.015
-  in umin (glass, m_potion + i) (cork, m_wood)
+  in (glass, cork, level)
+
+-- The liquid fills the inside of the glass (0.004 thick) up to its level.
+def potion_liquid (i: i32) (p: vec3) : f32 =
+  let (glass, _, level) = potion_parts i p
+  in smax 0.004 (glass + 0.004) (p.y - level)
+
+def potion (i: i32) (p: vec3) : hit =
+  let (_, cork, _) = potion_parts i p
+  in umin (potion_liquid i p, m_potion + i) (cork, m_wood)
+
+-- Where the potions hang, in body space, and a sphere holding all three.
+def potions_at : vec3 = scale (robe_radius 0.84 + 0.05) (around (potion_angle 1)) +^ vec 0 0.84 0
+def potions_radius : f32 = 0.26
+
+-- The potions' glass: distance to the nearest outer glass surface, in the
+-- figure's local space.
+def potion_glass (pose: pose) (p: vec3) : f32 =
+  let q = body_space pose p
+  let b = length (q -^ potions_at) - potions_radius
+  in if b > 0.05 then b
+     else f32.min (potion_parts 0 q).0 (f32.min (potion_parts 1 q).0 (potion_parts 2 q).0)
+
+-- The nearest potion's liquid: (distance, material id), for the glow.
+def nearest_liquid (pose: pose) (p: vec3) : hit =
+  let q = body_space pose p
+  let b = length (q -^ potions_at) - potions_radius
+  in if b > 0.1 then (b, m_potion)
+     else (potion_liquid 0 q, m_potion) |> umin (potion_liquid 1 q, m_potion + 1) |> umin (potion_liquid 2 q, m_potion + 2)
 
 -- A flat strap (0.022 wide, 0.005 thick) from a to b, its face along n.
 def sd_strap (p: vec3) (a: vec3) (b: vec3) (n: vec3) : f32 =
@@ -477,11 +510,10 @@ def bounded (centre: vec3) (radius: f32) (f: vec3 -> hit) (p: vec3) : hit =
   in if b > 0.15 then (b, m_leather) else f p
 
 def waist_gear (p: vec3) : hit =
-  let potions_at = scale (robe_radius 0.84 + 0.05) (around (potion_angle 1)) +^ vec 0 0.84 0
   let tome_at = scale (robe_radius 0.8 + 0.035) (around (deg (-100))) +^ vec 0 0.82 0
   in (sd_belt p, m_leather)
      |> umin (bounded buckle_centre 0.07 (\q -> (sd_buckle q, m_gold)) p)
-     |> umin (bounded potions_at 0.26 (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
+     |> umin (bounded potions_at potions_radius (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
      |> umin (bounded tome_at 0.19 tome p)
 
 def wizard (pose: pose) (p: vec3) : hit =

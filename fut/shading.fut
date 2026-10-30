@@ -68,7 +68,7 @@ type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: boo
 def plain (albedo: vec3) : material =
   {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false, sheen = 0}
 
-def material (pose: pose) (g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
+def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
   if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = 0.9 with ks = 0.03
   else if m == m_staff then plain (bark_albedo fp p) with ks = 0.05
@@ -102,11 +102,9 @@ def material (pose: pose) (g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : mat
   else if m == m_tome then plain (vec 0.32 0.05 0.06) with ks = 0.15 with shininess = 16
   else if m == m_pages then plain (vec 0.85 0.8 0.66)
   else if m >= m_potion && m < m_potion + 3 then
-    -- dark glass with glowing liquid
-    let liquid = if m == m_potion then vec 1 0.12 0.2
-                 else if m == m_potion + 1 then vec 0.2 1 0.35
-                 else vec 0.65 0.25 1
-    in plain (scale 0.15 liquid) with emission = scale (0.45 * g.level) liquid with ks = 1.2 with shininess = 90
+    -- the glowing liquid (its glass is drawn by `glass`)
+    let c = glow_colour m
+    in plain (scale 0.3 c) with emission = scale 0.8 c with ks = 0.6 with shininess = 60
   else if m == m_ground then
     let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
     in plain (scale (0.8 + 0.4 * tile) (vec 0.3 0.14 0.08))
@@ -227,6 +225,38 @@ def fresnel (cosi: f32) : f32 =
   let r0 = ((1 - orb_ior) / (1 + orb_ior)) ** 2
   in r0 + (1 - r0) * pow (1 - saturate cosi) 5
 
+-- The potions' glass, a thin wall rays pass through. Finds where the ray
+-- (up to t_end) first meets it and returns what the wall adds there (a
+-- Fresnel reflection of the sky, highlights from the moon and the orb, and a
+-- faint rim) and what it lets through (Fresnel transmission, slightly
+-- tinted). Only rays passing near the potions are traced.
+def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec3) =
+  -- the potions' bounding sphere, in local space (body space leans)
+  let c = potions_at +^ vec (pose.lean * f32.max 0 (potions_at.y - 0.45)) 0 0
+  let r = potions_radius + 0.02
+  let oc = c -^ ro
+  let b = dot oc rd
+  let disc = b * b - (dot oc oc - r * r)
+  in if disc <= 0 then (splat 0, splat 1) else
+  let t0 = f32.max 0.02 (b - f32.sqrt disc)
+  let t1 = f32.min t_end (b + f32.sqrt disc)
+  let (t, _, hit) =
+    loop (t, i, hit) = (t0, 0i32, false) while !hit && i < 64 && t < t1 do
+      let d = potion_glass pose (ro +^ scale t rd)
+      in if d < 0.0004 * t then (t, i + 1, true) else (t + d * 0.9, i + 1, false)
+  in if !hit then (splat 0, splat 1) else
+  let p = ro +^ scale t rd
+  let n = normal (\_ q -> potion_glass pose q) p
+  let n = if dot n rd > 0 then scale (-1) n else n
+  let cosi = saturate (-(dot n rd))
+  let f = 0.04 + 0.96 * pow (1 - cosi) 5
+  let rr = reflect rd n
+  let to_orb = normalise (orb_pos -^ p)
+  let highlights = scale (2 * pow (saturate (dot rr pose.moon)) 300) (vec 0.8 0.85 1)
+                   +^ scale (2.5 * g.level * pow (saturate (dot rr to_orb)) 120) (vec 0.7 0.85 1)
+  let added = scale f (sky (to_world_dir pose.fl rr)) +^ highlights +^ scale (0.08 * pow (1 - cosi) 2) (vec 0.6 0.7 0.9)
+  in (added, scale (1 - f) (vec 0.9 0.95 0.97))
+
 -- Where a reflected path starts: (exists, point, direction, weight).
 type reflection = (bool, vec3, vec3, f32)
 
@@ -258,6 +288,11 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, m_terrain) else (t, m)
       -- the glows are above the cloud slab, so in front of the clouds
       let (cloud_rad, cloud_tr) = clouds pose ro rd (if m >= 0 then t else tmax)
+      -- the potions' glass, in front of whatever this segment reaches
+      let (glass_added, glass_through) =
+        if inside then (splat 0, splat 1) else glass pose g ro rd (if m >= 0 then t else local_max)
+      let acc = acc +^ (w *^ glass_added)
+      let w = w *^ glass_through
       let acc = acc +^ (w *^ emitted) +^ (scale tr w *^ cloud_rad)
       -- whatever lies beyond this segment is seen through its media
       let w = scale (tr * cloud_tr) w

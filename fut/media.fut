@@ -31,17 +31,33 @@ def globe_haze : f32 = 0.3
 def cloud_colour (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (0.12 + 0.3 * h) (vec 0.42 0.46 0.62)
 
 #[noinline] -- compiled once (see scene in scene.fut)
+-- The colour a glowing material gives off, used both for its surface and
+-- for the glow around it, so the two always match. 0 for materials that do
+-- not glow.
+def glow_colour (m: i32) : vec3 =
+  if m == m_potion then vec 1 0.12 0.2
+  else if m == m_potion + 1 then vec 0.2 1 0.35
+  else if m == m_potion + 2 then vec 0.65 0.25 1
+  else splat 0
+
+-- The potions' liquids glow in a thin halo, coloured by whichever liquid is
+-- nearest.
+def potion_glow_density (ld: f32) : f32 = 1.6 * f32.exp (-(f32.max ld 0) / 0.012)
+
 def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let tm = pose.tm
   let od = sd_orb p
   let gd = glyph_dist tm p
   let bolts = lightning_media tm p
   let haze = if od < 0 then globe_haze else 0
+  let (ld, lm) = nearest_liquid pose p
   in { cap = f32.min bolts.cap (f32.min (0.3 * f32.abs od + 0.015) (0.3 * gd + 0.01))
+             |> f32.min (0.3 * f32.abs ld + 0.004)
      , radiance = scale (orb_glow_density g od) orb_glow_colour
                   +^ scale (rune_glow_density tm gd) rune_glow_colour
                   +^ scale haze orb_glow_colour
                   +^ bolts.radiance
+                  +^ scale (potion_glow_density ld) (glow_colour lm)
      , extinction = 0 }
 
 -- The clouds are integrated separately from the march (see `clouds`): their
