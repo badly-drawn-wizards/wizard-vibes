@@ -55,547 +55,753 @@
       ]
     },
     {
-      "name": "Sky",
-      "params": [
-        {
-          "id": "sky_horizon",
-          "label": "Horizon",
-          "kind": "color",
-          "default": [
-            0.06,
-            0.04,
-            0.14
-          ]
-        },
-        {
-          "id": "sky_zenith",
-          "label": "Zenith",
-          "kind": "color",
-          "default": [
-            0.004,
-            0.006,
-            0.03
-          ]
-        },
-        {
-          "id": "star_density",
-          "label": "Star density",
-          "kind": "slider",
-          "min": 0,
-          "max": 0.01,
-          "step": 0.0001,
-          "default": 0.0025
-        },
-        {
-          "id": "star_brightness",
-          "label": "Star brightness",
-          "kind": "slider",
-          "min": 0,
-          "max": 8000,
-          "step": 50,
-          "default": 2500
-        },
-        {
-          "id": "twinkle",
-          "label": "Twinkle",
-          "kind": "slider",
-          "min": 0,
-          "max": 1,
-          "step": 0.01,
-          "default": 0.45
-        }
-      ]
-    },
-    {
-      "name": "Moon",
-      "params": [
-        {
-          "id": "moon_colour",
-          "label": "Colour",
-          "kind": "color",
-          "default": [
-            0.375,
-            0.45,
-            0.75
-          ]
-        },
-        {
-          "id": "moon_strength",
-          "label": "Strength",
-          "kind": "slider",
-          "min": 0,
-          "max": 3,
-          "step": 0.01,
-          "default": 1
-        },
-        {
-          "id": "moon_azimuth",
-          "label": "Azimuth",
-          "kind": "slider",
-          "min": -180,
-          "max": 180,
-          "step": 1,
-          "default": -37
-        },
-        {
-          "id": "moon_elevation",
-          "label": "Elevation",
-          "kind": "slider",
-          "min": 2,
-          "max": 85,
-          "step": 0.5,
-          "default": 41
-        },
-        {
-          "id": "moon_size",
-          "label": "Size",
-          "kind": "slider",
-          "min": 0.01,
-          "max": 0.15,
-          "step": 0.002,
-          "default": 0.05
-        },
-        {
-          "id": "moon_brightness",
-          "label": "Disc brightness",
-          "kind": "slider",
-          "min": 0,
-          "max": 3,
-          "step": 0.01,
-          "default": 0.9
-        },
-        {
-          "id": "moon_halo",
-          "label": "Halo",
-          "kind": "slider",
-          "min": 0,
-          "max": 0.5,
-          "step": 0.005,
-          "default": 0.12
-        }
-      ]
-    },
-    {
-      "name": "Orb",
-      "params": [
-        {
-          "id": "orb_light",
-          "label": "Light",
-          "kind": "slider",
-          "min": 0,
-          "max": 8,
-          "step": 0.05,
-          "default": 2.4
-        },
-        {
-          "id": "orb_glow",
-          "label": "Glow",
-          "kind": "slider",
-          "min": 0,
-          "max": 3,
-          "step": 0.01,
-          "default": 0.95
-        },
-        {
-          "id": "orb_glow_extent",
-          "label": "Glow extent",
-          "kind": "slider",
-          "min": 0.02,
-          "max": 0.3,
-          "step": 0.005,
-          "default": 0.1
-        },
-        {
-          "id": "orb_ior",
-          "label": "Index of refraction",
-          "kind": "slider",
-          "min": 1,
-          "max": 2.4,
-          "step": 0.01,
-          "default": 1.45
-        },
-        {
-          "id": "orb_reflections",
-          "label": "Reflections",
-          "kind": "checkbox",
-          "default": true
-        },
-        {
-          "id": "orb_glow_colour",
-          "label": "Glow colour",
-          "kind": "color",
-          "default": [
-            0.35,
-            0.55,
-            1
-          ]
-        },
-        {
-          "id": "lightning",
-          "label": "Lightning brightness",
-          "kind": "slider",
-          "min": 0,
-          "max": 3,
-          "step": 0.01,
-          "default": 1
-        }
-      ]
-    },
-    {
-      "name": "Runes",
-      "params": [
-        {
-          "id": "rune_glow",
-          "label": "Glow",
-          "kind": "slider",
-          "min": 0,
-          "max": 12,
-          "step": 0.1,
-          "default": 4
-        },
-        {
-          "id": "rune_pulse",
-          "label": "Pulse",
-          "kind": "slider",
-          "min": 0,
-          "max": 0.5,
-          "step": 0.01,
-          "default": 0.08
-        },
-        {
-          "id": "rune_colour",
-          "label": "Colour",
-          "kind": "color",
-          "default": [
-            0.25,
-            0.5,
-            1
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Potions",
-      "params": [
-        {
-          "id": "potion_light",
-          "label": "Light",
-          "kind": "slider",
-          "min": 0,
-          "max": 4,
-          "step": 0.05,
-          "default": 1.2
-        },
-        {
-          "id": "potion_glow",
-          "label": "Glow",
-          "kind": "slider",
-          "min": 0,
-          "max": 5,
-          "step": 0.05,
-          "default": 1.6
-        },
-        {
-          "id": "potion_colour_1",
-          "label": "Left",
-          "kind": "color",
-          "default": [
-            1,
-            0.12,
-            0.2
-          ]
-        },
-        {
-          "id": "potion_colour_2",
-          "label": "Middle",
-          "kind": "color",
-          "default": [
-            0.2,
-            1,
-            0.35
-          ]
-        },
-        {
-          "id": "potion_colour_3",
-          "label": "Right",
-          "kind": "color",
-          "default": [
-            0.65,
-            0.25,
-            1
-          ]
-        }
-      ]
-    },
-    {
       "name": "Wizard",
-      "params": [
+      "groups": [
         {
-          "id": "robe_colour",
-          "label": "Robe",
-          "kind": "color",
-          "default": [
-            0.2,
-            0.035,
-            0.3
+          "name": "Robe & body",
+          "params": [
+            {
+              "id": "robe_colour",
+              "label": "Robe",
+              "kind": "color",
+              "default": [
+                0.2,
+                0.035,
+                0.3
+              ]
+            },
+            {
+              "id": "robe_hem",
+              "label": "Robe hem radius",
+              "kind": "slider",
+              "min": 0.35,
+              "max": 0.8,
+              "step": 0.01,
+              "default": 0.55
+            },
+            {
+              "id": "belt_height",
+              "label": "Belt height",
+              "kind": "slider",
+              "min": 0.75,
+              "max": 1.15,
+              "step": 0.005,
+              "default": 0.92
+            },
+            {
+              "id": "breath",
+              "label": "Breathing",
+              "kind": "slider",
+              "min": 0,
+              "max": 3,
+              "step": 0.05,
+              "default": 1
+            },
+            {
+              "id": "lean",
+              "label": "Lean into turns",
+              "kind": "slider",
+              "min": 0,
+              "max": 2,
+              "step": 0.05,
+              "default": 0.9
+            }
           ]
         },
         {
-          "id": "iris_colour",
-          "label": "Eyes",
-          "kind": "color",
-          "default": [
-            0.25,
-            0.48,
-            0.78
+          "name": "Face",
+          "params": [
+            {
+              "id": "skin_colour",
+              "label": "Skin",
+              "kind": "color",
+              "default": [
+                0.85,
+                0.6,
+                0.48
+              ]
+            },
+            {
+              "id": "iris_colour",
+              "label": "Eyes",
+              "kind": "color",
+              "default": [
+                0.25,
+                0.48,
+                0.78
+              ]
+            },
+            {
+              "id": "beard_tint",
+              "label": "Beard tint",
+              "kind": "color",
+              "default": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "id": "brow_colour",
+              "label": "Eyebrows",
+              "kind": "color",
+              "default": [
+                0.82,
+                0.82,
+                0.86
+              ]
+            }
           ]
         },
         {
-          "id": "lean",
-          "label": "Lean into turns",
-          "kind": "slider",
-          "min": 0,
-          "max": 2,
-          "step": 0.05,
-          "default": 0.9
-        },
-        {
-          "id": "hat_droop",
-          "label": "Hat droop",
-          "kind": "slider",
-          "min": 0,
-          "max": 1.5,
-          "step": 0.01,
-          "default": 0.6
-        },
-        {
-          "id": "band_height",
-          "label": "Hat band height",
-          "kind": "slider",
-          "min": 0.01,
-          "max": 0.2,
-          "step": 0.002,
-          "default": 0.064
-        },
-        {
-          "id": "band_colour",
-          "label": "Hat band",
-          "kind": "color",
-          "default": [
-            1,
-            0.6,
-            0.14
+          "name": "Hat",
+          "params": [
+            {
+              "id": "hat_colour",
+              "label": "Hat",
+              "kind": "color",
+              "default": [
+                0.09,
+                0.08,
+                0.36
+              ]
+            },
+            {
+              "id": "hat_droop",
+              "label": "Hat droop",
+              "kind": "slider",
+              "min": 0,
+              "max": 1.5,
+              "step": 0.01,
+              "default": 0.6
+            },
+            {
+              "id": "band_height",
+              "label": "Hat band height",
+              "kind": "slider",
+              "min": 0.01,
+              "max": 0.2,
+              "step": 0.002,
+              "default": 0.064
+            },
+            {
+              "id": "band_colour",
+              "label": "Hat band",
+              "kind": "color",
+              "default": [
+                1,
+                0.6,
+                0.14
+              ]
+            },
+            {
+              "id": "star_colour",
+              "label": "Hat stars",
+              "kind": "color",
+              "default": [
+                1,
+                0.8,
+                0.3
+              ]
+            },
+            {
+              "id": "star_glow",
+              "label": "Hat star glow",
+              "kind": "slider",
+              "min": 0,
+              "max": 2,
+              "step": 0.01,
+              "default": 0.6
+            }
           ]
         },
         {
-          "id": "belt_height",
-          "label": "Belt height",
-          "kind": "slider",
-          "min": 0.75,
-          "max": 1.15,
-          "step": 0.005,
-          "default": 0.92
-        },
-        {
-          "id": "robe_hem",
-          "label": "Robe hem radius",
-          "kind": "slider",
-          "min": 0.35,
-          "max": 0.8,
-          "step": 0.01,
-          "default": 0.55
-        },
-        {
-          "id": "breath",
-          "label": "Breathing",
-          "kind": "slider",
-          "min": 0,
-          "max": 3,
-          "step": 0.05,
-          "default": 1
-        }
-      ]
-    },
-    {
-      "name": "Materials",
-      "params": [
-        {
-          "id": "skin_colour",
-          "label": "Skin",
-          "kind": "color",
-          "default": [
-            0.85,
-            0.6,
-            0.48
+          "name": "Gear",
+          "params": [
+            {
+              "id": "gold_colour",
+              "label": "Gold (cradle, buckle)",
+              "kind": "color",
+              "default": [
+                1,
+                0.6,
+                0.14
+              ]
+            },
+            {
+              "id": "leather_colour",
+              "label": "Leather",
+              "kind": "color",
+              "default": [
+                0.17,
+                0.095,
+                0.05
+              ]
+            },
+            {
+              "id": "tome_colour",
+              "label": "Tome",
+              "kind": "color",
+              "default": [
+                0.32,
+                0.05,
+                0.06
+              ]
+            },
+            {
+              "id": "wood_colour",
+              "label": "Staff wood",
+              "kind": "color",
+              "default": [
+                0.4,
+                0.28,
+                0.16
+              ]
+            }
           ]
         },
         {
-          "id": "beard_tint",
-          "label": "Beard tint",
-          "kind": "color",
-          "default": [
-            1,
-            1,
-            1
+          "name": "Orb",
+          "params": [
+            {
+              "id": "orb_light",
+              "label": "Light",
+              "kind": "slider",
+              "min": 0,
+              "max": 8,
+              "step": 0.05,
+              "default": 2.4
+            },
+            {
+              "id": "orb_glow",
+              "label": "Glow",
+              "kind": "slider",
+              "min": 0,
+              "max": 3,
+              "step": 0.01,
+              "default": 0.95
+            },
+            {
+              "id": "orb_glow_extent",
+              "label": "Glow extent",
+              "kind": "slider",
+              "min": 0.02,
+              "max": 0.3,
+              "step": 0.005,
+              "default": 0.1
+            },
+            {
+              "id": "orb_ior",
+              "label": "Index of refraction",
+              "kind": "slider",
+              "min": 1,
+              "max": 2.4,
+              "step": 0.01,
+              "default": 1.45
+            },
+            {
+              "id": "orb_reflections",
+              "label": "Reflections",
+              "kind": "checkbox",
+              "default": true
+            },
+            {
+              "id": "orb_glow_colour",
+              "label": "Glow colour",
+              "kind": "color",
+              "default": [
+                0.35,
+                0.55,
+                1
+              ]
+            },
+            {
+              "id": "lightning",
+              "label": "Lightning brightness",
+              "kind": "slider",
+              "min": 0,
+              "max": 3,
+              "step": 0.01,
+              "default": 1
+            }
           ]
         },
         {
-          "id": "brow_colour",
-          "label": "Eyebrows",
-          "kind": "color",
-          "default": [
-            0.82,
-            0.82,
-            0.86
-          ]
-        },
-        {
-          "id": "hat_colour",
-          "label": "Hat",
-          "kind": "color",
-          "default": [
-            0.09,
-            0.08,
-            0.36
-          ]
-        },
-        {
-          "id": "star_colour",
-          "label": "Hat stars",
-          "kind": "color",
-          "default": [
-            1,
-            0.8,
-            0.3
-          ]
-        },
-        {
-          "id": "star_glow",
-          "label": "Hat star glow",
-          "kind": "slider",
-          "min": 0,
-          "max": 2,
-          "step": 0.01,
-          "default": 0.6
-        },
-        {
-          "id": "gold_colour",
-          "label": "Gold (cradle, buckle)",
-          "kind": "color",
-          "default": [
-            1,
-            0.6,
-            0.14
-          ]
-        },
-        {
-          "id": "leather_colour",
-          "label": "Leather",
-          "kind": "color",
-          "default": [
-            0.17,
-            0.095,
-            0.05
-          ]
-        },
-        {
-          "id": "tome_colour",
-          "label": "Tome",
-          "kind": "color",
-          "default": [
-            0.32,
-            0.05,
-            0.06
-          ]
-        },
-        {
-          "id": "wood_colour",
-          "label": "Staff wood",
-          "kind": "color",
-          "default": [
-            0.4,
-            0.28,
-            0.16
+          "name": "Potions",
+          "params": [
+            {
+              "id": "potion_light",
+              "label": "Light",
+              "kind": "slider",
+              "min": 0,
+              "max": 4,
+              "step": 0.05,
+              "default": 1.2
+            },
+            {
+              "id": "potion_glow",
+              "label": "Glow",
+              "kind": "slider",
+              "min": 0,
+              "max": 5,
+              "step": 0.05,
+              "default": 1.6
+            },
+            {
+              "id": "potion_colour_1",
+              "label": "Left",
+              "kind": "color",
+              "default": [
+                1,
+                0.12,
+                0.2
+              ]
+            },
+            {
+              "id": "potion_colour_2",
+              "label": "Middle",
+              "kind": "color",
+              "default": [
+                0.2,
+                1,
+                0.35
+              ]
+            },
+            {
+              "id": "potion_colour_3",
+              "label": "Right",
+              "kind": "color",
+              "default": [
+                0.65,
+                0.25,
+                1
+              ]
+            }
           ]
         }
       ]
     },
     {
       "name": "Rock",
-      "params": [
+      "groups": [
         {
-          "id": "rock_dark",
-          "label": "Dark bands",
-          "kind": "color",
-          "default": [
-            0.55,
-            0.15,
-            0.05
+          "name": "Stone",
+          "params": [
+            {
+              "id": "rock_dark",
+              "label": "Dark bands",
+              "kind": "color",
+              "default": [
+                0.55,
+                0.15,
+                0.05
+              ]
+            },
+            {
+              "id": "rock_light",
+              "label": "Light bands",
+              "kind": "color",
+              "default": [
+                0.72,
+                0.33,
+                0.1
+              ]
+            },
+            {
+              "id": "rock_top",
+              "label": "Top",
+              "kind": "color",
+              "default": [
+                0.3,
+                0.14,
+                0.08
+              ]
+            }
           ]
         },
         {
-          "id": "rock_light",
-          "label": "Light bands",
-          "kind": "color",
-          "default": [
-            0.72,
-            0.33,
-            0.1
-          ]
-        },
-        {
-          "id": "rock_top",
-          "label": "Top",
-          "kind": "color",
-          "default": [
-            0.3,
-            0.14,
-            0.08
+          "name": "Runes",
+          "params": [
+            {
+              "id": "rune_glow",
+              "label": "Glow",
+              "kind": "slider",
+              "min": 0,
+              "max": 12,
+              "step": 0.1,
+              "default": 4
+            },
+            {
+              "id": "rune_pulse",
+              "label": "Pulse",
+              "kind": "slider",
+              "min": 0,
+              "max": 0.5,
+              "step": 0.01,
+              "default": 0.08
+            },
+            {
+              "id": "rune_colour",
+              "label": "Colour",
+              "kind": "color",
+              "default": [
+                0.25,
+                0.5,
+                1
+              ]
+            }
           ]
         }
       ]
     },
     {
-      "name": "Terrain",
-      "params": [
+      "name": "Sky",
+      "groups": [
         {
-          "id": "moss_colour",
-          "label": "Moss",
-          "kind": "color",
-          "default": [
-            0.09,
-            0.14,
-            0.08
+          "name": "Sky & stars",
+          "params": [
+            {
+              "id": "sky_horizon",
+              "label": "Horizon",
+              "kind": "color",
+              "default": [
+                0.06,
+                0.04,
+                0.14
+              ]
+            },
+            {
+              "id": "sky_zenith",
+              "label": "Zenith",
+              "kind": "color",
+              "default": [
+                0.004,
+                0.006,
+                0.03
+              ]
+            },
+            {
+              "id": "star_density",
+              "label": "Star density",
+              "kind": "slider",
+              "min": 0,
+              "max": 0.01,
+              "step": 0.0001,
+              "default": 0.0025
+            },
+            {
+              "id": "star_brightness",
+              "label": "Star brightness",
+              "kind": "slider",
+              "min": 0,
+              "max": 8000,
+              "step": 50,
+              "default": 2500
+            },
+            {
+              "id": "twinkle",
+              "label": "Twinkle",
+              "kind": "slider",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.45
+            }
           ]
         },
         {
-          "id": "stone_colour",
-          "label": "Stone",
-          "kind": "color",
-          "default": [
-            0.2,
-            0.18,
-            0.17
+          "name": "Moon",
+          "params": [
+            {
+              "id": "moon_colour",
+              "label": "Colour",
+              "kind": "color",
+              "default": [
+                0.375,
+                0.45,
+                0.75
+              ]
+            },
+            {
+              "id": "moon_strength",
+              "label": "Strength",
+              "kind": "slider",
+              "min": 0,
+              "max": 3,
+              "step": 0.01,
+              "default": 1
+            },
+            {
+              "id": "moon_azimuth",
+              "label": "Azimuth",
+              "kind": "slider",
+              "min": -180,
+              "max": 180,
+              "step": 1,
+              "default": -37
+            },
+            {
+              "id": "moon_elevation",
+              "label": "Elevation",
+              "kind": "slider",
+              "min": 2,
+              "max": 85,
+              "step": 0.5,
+              "default": 41
+            },
+            {
+              "id": "moon_size",
+              "label": "Size",
+              "kind": "slider",
+              "min": 0.01,
+              "max": 0.15,
+              "step": 0.002,
+              "default": 0.05
+            },
+            {
+              "id": "moon_brightness",
+              "label": "Disc brightness",
+              "kind": "slider",
+              "min": 0,
+              "max": 3,
+              "step": 0.01,
+              "default": 0.9
+            },
+            {
+              "id": "moon_halo",
+              "label": "Halo",
+              "kind": "slider",
+              "min": 0,
+              "max": 0.5,
+              "step": 0.005,
+              "default": 0.12
+            }
           ]
         },
         {
-          "id": "snow_colour",
-          "label": "Snow",
-          "kind": "color",
-          "default": [
-            0.75,
-            0.8,
-            0.88
+          "name": "Atmosphere",
+          "params": [
+            {
+              "id": "fog",
+              "label": "Fog",
+              "kind": "slider",
+              "min": 0,
+              "max": 0.005,
+              "step": 5e-05,
+              "default": 0.0001
+            },
+            {
+              "id": "view_distance",
+              "label": "View distance",
+              "kind": "slider",
+              "min": 30,
+              "max": 500,
+              "step": 5,
+              "default": 185
+            },
+            {
+              "id": "cloud_cover",
+              "label": "Cloud cover",
+              "kind": "slider",
+              "min": 0,
+              "max": 0.7,
+              "step": 0.01,
+              "default": 0.34
+            },
+            {
+              "id": "cloud_density",
+              "label": "Cloud density",
+              "kind": "slider",
+              "min": 0,
+              "max": 4,
+              "step": 0.05,
+              "default": 1.2
+            },
+            {
+              "id": "cloud_colour",
+              "label": "Cloud colour",
+              "kind": "color",
+              "default": [
+                0.42,
+                0.46,
+                0.62
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Land",
+      "groups": [
+        {
+          "name": "Terrain",
+          "params": [
+            {
+              "id": "moss_colour",
+              "label": "Moss",
+              "kind": "color",
+              "default": [
+                0.09,
+                0.14,
+                0.08
+              ]
+            },
+            {
+              "id": "stone_colour",
+              "label": "Stone",
+              "kind": "color",
+              "default": [
+                0.2,
+                0.18,
+                0.17
+              ]
+            },
+            {
+              "id": "snow_colour",
+              "label": "Snow",
+              "kind": "color",
+              "default": [
+                0.75,
+                0.8,
+                0.88
+              ]
+            },
+            {
+              "id": "snow_line",
+              "label": "Snow line",
+              "kind": "slider",
+              "min": 3,
+              "max": 11,
+              "step": 0.1,
+              "default": 7
+            }
           ]
         },
         {
-          "id": "snow_line",
-          "label": "Snow line",
-          "kind": "slider",
-          "min": 3,
-          "max": 11,
-          "step": 0.1,
-          "default": 7
+          "name": "Water",
+          "params": [
+            {
+              "id": "sea_level",
+              "label": "Sea level",
+              "kind": "slider",
+              "min": -3,
+              "max": 3,
+              "step": 0.05,
+              "default": 0
+            },
+            {
+              "id": "river_width",
+              "label": "River width",
+              "kind": "slider",
+              "min": 0,
+              "max": 0.08,
+              "step": 0.002,
+              "default": 0.03
+            },
+            {
+              "id": "water_colour",
+              "label": "Water",
+              "kind": "color",
+              "default": [
+                0.01,
+                0.03,
+                0.06
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Buildings",
+          "params": [
+            {
+              "id": "structure_density",
+              "label": "Buildings",
+              "kind": "slider",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6
+            },
+            {
+              "id": "brick_size",
+              "label": "Brick size",
+              "kind": "slider",
+              "min": 0.08,
+              "max": 0.5,
+              "step": 0.01,
+              "default": 0.2
+            },
+            {
+              "id": "wall_colour",
+              "label": "Cottage walls",
+              "kind": "color",
+              "default": [
+                0.62,
+                0.58,
+                0.5
+              ]
+            },
+            {
+              "id": "thatch_colour",
+              "label": "Cottage roofs",
+              "kind": "color",
+              "default": [
+                0.3,
+                0.18,
+                0.08
+              ]
+            },
+            {
+              "id": "tower_colour",
+              "label": "Tower stone",
+              "kind": "color",
+              "default": [
+                0.35,
+                0.34,
+                0.36
+              ]
+            },
+            {
+              "id": "slate_colour",
+              "label": "Tower roofs",
+              "kind": "color",
+              "default": [
+                0.12,
+                0.14,
+                0.25
+              ]
+            },
+            {
+              "id": "sandstone_colour",
+              "label": "Pyramids",
+              "kind": "color",
+              "default": [
+                0.62,
+                0.5,
+                0.32
+              ]
+            },
+            {
+              "id": "window_colour",
+              "label": "Window light",
+              "kind": "color",
+              "default": [
+                1,
+                0.6,
+                0.25
+              ]
+            },
+            {
+              "id": "window_glow",
+              "label": "Window glow",
+              "kind": "slider",
+              "min": 0,
+              "max": 8,
+              "step": 0.05,
+              "default": 2
+            }
+          ]
         }
       ]
     },
@@ -632,177 +838,6 @@
       ]
     },
     {
-      "name": "Land",
-      "params": [
-        {
-          "id": "sea_level",
-          "label": "Sea level",
-          "kind": "slider",
-          "min": -3,
-          "max": 3,
-          "step": 0.05,
-          "default": 0
-        },
-        {
-          "id": "river_width",
-          "label": "River width",
-          "kind": "slider",
-          "min": 0,
-          "max": 0.08,
-          "step": 0.002,
-          "default": 0.03
-        },
-        {
-          "id": "water_colour",
-          "label": "Water",
-          "kind": "color",
-          "default": [
-            0.01,
-            0.03,
-            0.06
-          ]
-        },
-        {
-          "id": "structure_density",
-          "label": "Buildings",
-          "kind": "slider",
-          "min": 0,
-          "max": 1,
-          "step": 0.01,
-          "default": 0.6
-        },
-        {
-          "id": "wall_colour",
-          "label": "Cottage walls",
-          "kind": "color",
-          "default": [
-            0.62,
-            0.58,
-            0.5
-          ]
-        },
-        {
-          "id": "thatch_colour",
-          "label": "Cottage roofs",
-          "kind": "color",
-          "default": [
-            0.3,
-            0.18,
-            0.08
-          ]
-        },
-        {
-          "id": "tower_colour",
-          "label": "Tower stone",
-          "kind": "color",
-          "default": [
-            0.35,
-            0.34,
-            0.36
-          ]
-        },
-        {
-          "id": "slate_colour",
-          "label": "Tower roofs",
-          "kind": "color",
-          "default": [
-            0.12,
-            0.14,
-            0.25
-          ]
-        },
-        {
-          "id": "sandstone_colour",
-          "label": "Pyramids",
-          "kind": "color",
-          "default": [
-            0.62,
-            0.5,
-            0.32
-          ]
-        },
-        {
-          "id": "window_colour",
-          "label": "Window light",
-          "kind": "color",
-          "default": [
-            1,
-            0.6,
-            0.25
-          ]
-        },
-        {
-          "id": "window_glow",
-          "label": "Window glow",
-          "kind": "slider",
-          "min": 0,
-          "max": 8,
-          "step": 0.05,
-          "default": 2
-        },
-        {
-          "id": "brick_size",
-          "label": "Brick size",
-          "kind": "slider",
-          "min": 0.08,
-          "max": 0.5,
-          "step": 0.01,
-          "default": 0.2
-        }
-      ]
-    },
-    {
-      "name": "Atmosphere",
-      "params": [
-        {
-          "id": "fog",
-          "label": "Fog",
-          "kind": "slider",
-          "min": 0,
-          "max": 0.005,
-          "step": 5e-05,
-          "default": 0.0007
-        },
-        {
-          "id": "view_distance",
-          "label": "View distance",
-          "kind": "slider",
-          "min": 30,
-          "max": 500,
-          "step": 5,
-          "default": 60
-        },
-        {
-          "id": "cloud_cover",
-          "label": "Cloud cover",
-          "kind": "slider",
-          "min": 0,
-          "max": 0.7,
-          "step": 0.01,
-          "default": 0.34
-        },
-        {
-          "id": "cloud_density",
-          "label": "Cloud density",
-          "kind": "slider",
-          "min": 0,
-          "max": 4,
-          "step": 0.05,
-          "default": 1.2
-        },
-        {
-          "id": "cloud_colour",
-          "label": "Cloud colour",
-          "kind": "color",
-          "default": [
-            0.42,
-            0.46,
-            0.62
-          ]
-        }
-      ]
-    },
-    {
       "name": "Flight",
       "params": [
         {
@@ -819,6 +854,42 @@
     {
       "name": "Shader (recompiles)",
       "params": [
+        {
+          "id": "march_steps",
+          "label": "March steps",
+          "kind": "int",
+          "min": 32,
+          "max": 512,
+          "default": 300,
+          "compile": true
+        },
+        {
+          "id": "terrain_steps",
+          "label": "Terrain steps",
+          "kind": "int",
+          "min": 32,
+          "max": 512,
+          "default": 256,
+          "compile": true
+        },
+        {
+          "id": "shadow_steps",
+          "label": "Shadow steps",
+          "kind": "int",
+          "min": 16,
+          "max": 192,
+          "default": 32,
+          "compile": true
+        },
+        {
+          "id": "cloud_samples",
+          "label": "Cloud samples",
+          "kind": "int",
+          "min": 6,
+          "max": 64,
+          "default": 24,
+          "compile": true
+        },
         {
           "id": "orb_tendrils",
           "label": "Lightning inside the orb",
@@ -840,42 +911,6 @@
           "min": 1,
           "max": 8,
           "default": 4,
-          "compile": true
-        },
-        {
-          "id": "cloud_samples",
-          "label": "Cloud samples",
-          "kind": "int",
-          "min": 6,
-          "max": 64,
-          "default": 24,
-          "compile": true
-        },
-        {
-          "id": "march_steps",
-          "label": "March steps",
-          "kind": "int",
-          "min": 32,
-          "max": 512,
-          "default": 300,
-          "compile": true
-        },
-        {
-          "id": "terrain_steps",
-          "label": "Terrain steps",
-          "kind": "int",
-          "min": 32,
-          "max": 512,
-          "default": 300,
-          "compile": true
-        },
-        {
-          "id": "shadow_steps",
-          "label": "Shadow steps",
-          "kind": "int",
-          "min": 16,
-          "max": 192,
-          "default": 32,
           "compile": true
         }
       ]

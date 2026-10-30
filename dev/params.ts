@@ -22,15 +22,22 @@ export interface Param {
   options?: string[];
   compile?: boolean;
 }
+// Groups nest: each holds parameters, subgroups, or both.
+export interface Group {
+  name: string;
+  params?: Param[];
+  groups?: Group[];
+}
 export interface Schema {
-  groups: { name: string; params: Param[] }[];
+  groups: Group[];
 }
 
 export const SCHEMA = "params.json";
 export const LOCAL = "config.local.json";
 
 export const loadSchema = (): Schema => JSON.parse(readFileSync(SCHEMA, "utf8"));
-export const allParams = (s: Schema): Param[] => s.groups.flatMap((g) => g.params);
+const groupParams = (g: Group): Param[] => [...(g.params ?? []), ...(g.groups ?? []).flatMap(groupParams)];
+export const allParams = (s: Schema): Param[] => s.groups.flatMap(groupParams);
 
 // The compile-time values in force: defaults overlaid with saved changes.
 export function compileValues(s: Schema): Record<string, Value> {

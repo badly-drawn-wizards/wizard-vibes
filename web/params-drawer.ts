@@ -1,7 +1,10 @@
 // The parameter drawer: built from the schema the dev server serves
-// (params.json). The uniforms' values are passed to `render` as its params
-// record; compile-time parameters are sent to the server, which rebuilds
-// the shader once they settle. Native inputs throughout.
+// (params.json), as nested accordions, each with a button resetting
+// everything in it. The uniforms' values are passed to `render` as its
+// params record; compile-time parameters are sent to the server, which
+// rebuilds the shader once they settle. Native inputs throughout. At the top,
+// "Copy changes" puts every value that differs from its default on the
+// clipboard as JSON (to hand over as new defaults).
 
 type Kind = "slider" | "int" | "color" | "checkbox" | "select" | "flags";
 type Value = number | boolean | number[];
@@ -16,11 +19,19 @@ interface Param {
   options?: string[];
   compile?: boolean;
 }
+interface Group {
+  name: string;
+  params?: Param[];
+  groups?: Group[];
+}
 interface Schema {
-  groups: { name: string; params: Param[] }[];
+  groups: Group[];
 }
 
 const STORE = "wizard-params";
+const OPEN = "wizard-drawer-open"; // the open accordions, by path
+
+const groupParams = (g: Group): Param[] => [...(g.params ?? []), ...(g.groups ?? []).flatMap(groupParams)];
 
 // Colours are linear RGB; the colour input shows them gamma-encoded.
 const toHex = (c: number[]) =>
@@ -42,6 +53,59 @@ function save(values: Record<string, Value>): void {
   }
 }
 
+function loadOpen(): Set<string> | null {
+  try {
+    const s = localStorage.getItem(OPEN);
+    return s ? new Set(JSON.parse(s)) : null;
+  } catch {
+    return null;
+  }
+}
+function saveOpen(open: Set<string>): void {
+  try {
+    localStorage.setItem(OPEN, JSON.stringify([...open]));
+  } catch {
+    // ignore
+  }
+}
+
+const same = (a: Value, b: Value): boolean =>
+  Array.isArray(a) && Array.isArray(b) ? a.every((x, i) => Math.abs(x - b[i]) < 1e-4) : typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 1e-9 : a === b;
+
+// Rounded for reading: colours to 4 decimals, numbers to 6 significant digits.
+const tidy = (v: Value): Value =>
+  Array.isArray(v) ? v.map((x) => Math.round(x * 1e4) / 1e4) : typeof v === "number" ? Number(v.toPrecision(6)) : v;
+
+// Puts text on the clipboard: the Clipboard API needs a secure context (not
+// plain http over the network), so fall back to a selected textarea, and
+// failing that leave it shown for copying by hand.
+async function copyText(text: string, host: HTMLElement): Promise<string> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.readOnly = true;
+    area.className = "export";
+    host.after(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      // unsupported
+    }
+    if (ok) {
+      area.remove();
+      return "copied";
+    }
+    area.onblur = () => area.remove();
+    area.focus();
+    return "select and copy below";
+  }
+}
+
 export interface Params {
   // the uniforms by id (colours as [r, g, b]); `version` changes with them
   readonly values: Record<string, Value>;
@@ -50,7 +114,8 @@ export interface Params {
 
 export async function createDrawer(host: HTMLElement): Promise<Params> {
   const { schema, compile } = (await (await fetch("/params")).json()) as { schema: Schema; compile: Record<string, Value> };
-  const uniforms = schema.groups.flatMap((g) => g.params).filter((p) => !p.compile);
+  const all = schema.groups.flatMap(groupParams);
+  const uniforms = all.filter((p) => !p.compile);
   const stored = load();
   const current: Record<string, Value> = {};
   for (const p of uniforms) current[p.id] = p.id in stored ? stored[p.id] : p.default;
@@ -75,20 +140,104 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
   };
 
   host.replaceChildren();
-  for (const g of schema.groups) {
+  const compileNow = { ...compile }; // what the drawer last set them to
+  const resets: (() => void)[] = [];
+
+  // the toolbar: copy the changes from the defaults, reset everything
+  const bar = document.createElement("div");
+  bar.className = "drawer-bar";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy changes";
+  copy.title = "Copy every value that differs from its default, as JSON";
+  const note = document.createElement("span");
+  copy.onclick = async () => {
+    const diff: Record<string, Value> = {};
+    for (const p of all) {
+      const v = p.compile ? compileNow[p.id] : current[p.id];
+      if (v !== undefined && !same(v, p.default)) diff[p.id] = tidy(v);
+    }
+    const n = Object.keys(diff).length;
+    note.textContent = n ? `${await copyText(JSON.stringify(diff, null, 2), bar)} (${n} change${n > 1 ? "s" : ""})` : "no changes";
+  };
+  const resetAll = document.createElement("button");
+  resetAll.type = "button";
+  resetAll.textContent = "Reset all";
+  resetAll.onclick = () => resets.forEach((r) => r());
+  bar.append(copy, resetAll, note);
+  host.append(bar);
+
+  // the accordions; top-level ones start open (except the shader's), until
+  // the user opens and closes them
+  const open = loadOpen() ?? new Set(schema.groups.filter((g) => !groupParams(g).some((p) => p.compile)).map((g) => g.name));
+  const build = (g: Group, path: string): { el: HTMLElement; reset: () => void } => {
     const box = document.createElement("details");
-    box.open = !g.params.some((p) => p.compile);
+    box.open = open.has(path);
+    box.ontoggle = () => {
+      if (box.open) open.add(path);
+      else open.delete(path);
+      saveOpen(open);
+    };
     const summary = document.createElement("summary");
-    summary.textContent = g.name;
+    const name = document.createElement("span");
+    name.textContent = g.name;
+    const mine: (() => void)[] = [];
+    const reset = () => mine.forEach((r) => r());
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "↺";
+    button.title = `Reset ${g.name} to its defaults`;
+    button.onclick = (e) => {
+      e.preventDefault(); // (don't toggle the accordion)
+      reset();
+    };
+    summary.append(name, button);
     box.append(summary);
-    for (const p of g.params) box.append(row(p, p.compile ? compile[p.id] : current[p.id], (v) => set(p, v)));
-    host.append(box);
+    for (const p of g.params ?? []) {
+      const r = row(p, p.compile ? compile[p.id] : current[p.id], (v) => {
+        if (p.compile) compileNow[p.id] = v;
+        set(p, v);
+      });
+      box.append(r.el);
+      mine.push(r.reset);
+    }
+    for (const sub of g.groups ?? []) {
+      const s = build(sub, `${path}/${sub.name}`);
+      box.append(s.el);
+      mine.push(s.reset);
+    }
+    return { el: box, reset };
+  };
+  for (const g of schema.groups) {
+    const b = build(g, g.name);
+    host.append(b.el);
+    resets.push(b.reset);
   }
   return state;
 }
 
-// One labelled control, with a reset-to-default button.
-function row(p: Param, initial: Value, onChange: (v: Value) => void): HTMLElement {
+// One labelled control, with a reset-to-default button; `reset` does the same
+// (only if the value differs, so a group reset does not trigger needless
+// shader rebuilds).
+function row(p: Param, initial: Value, onChange: (v: Value) => void): { el: HTMLElement; reset: () => void } {
+  let value = initial;
+  const changed = onChange;
+  onChange = (v) => {
+    value = v;
+    changed(v);
+  };
+  let reset = () => {};
+  const el = rowElement(p, initial, onChange, (show) => {
+    reset = () => {
+      if (same(value, p.default)) return;
+      show(p.default);
+      onChange(p.default);
+    };
+  });
+  return { el, reset: () => reset() };
+}
+
+function rowElement(p: Param, initial: Value, onChange: (v: Value) => void, expose: (show: (v: Value) => void) => void): HTMLElement {
   const label = document.createElement("label");
   label.className = "param";
   const name = document.createElement("span");
@@ -112,6 +261,7 @@ function row(p: Param, initial: Value, onChange: (v: Value) => void): HTMLElemen
     });
     show = (v) => checks.forEach((c, i) => (c.checked = ((v as number) & (1 << i)) !== 0));
     show(initial);
+    expose(show);
     const reset = resetButton(p, show, onChange);
     label.classList.add("wide");
     label.append(name, box, reset);
@@ -152,6 +302,7 @@ function row(p: Param, initial: Value, onChange: (v: Value) => void): HTMLElemen
     }
   }
   show(initial);
+  expose(show);
 
   label.append(name, input, out, resetButton(p, show, onChange));
   return label;
