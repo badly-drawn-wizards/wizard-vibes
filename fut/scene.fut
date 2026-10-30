@@ -379,7 +379,15 @@ def sd_hat (pose: pose) (p: vec3) : f32 =
   let brim = f32.min (sd_torus hp 0.25 0.012) (sd_cylinder hp 0.255 0.01)
   in smin 0.04 cone brim
 
-def sd_band (pose: pose) (p: vec3) : f32 = sd_torus (head_space pose p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0.025
+-- A flat gold band round the hat just above the brim: a short frustum
+-- following the cone's slope, standing a few millimetres proud of it, with
+-- softened edges. (The hat's bend is negligible this low.)
+def sd_band (pose: pose) (p: vec3) : f32 =
+  let y0 = 0.018
+  let y1 = 0.082
+  let proud = 0.006
+  let q = head_space pose p -^ (hat_base +^ vec 0 y0 0)
+  in sd_capped_cone q (y1 - y0) (hat_radius y0 + proud - 0.002) (hat_radius y1 + proud - 0.002) - 0.002
 
 -- A frame around the staff: (along the axis from the foot, and two unit
 -- vectors across it).
