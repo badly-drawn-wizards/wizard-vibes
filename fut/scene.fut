@@ -443,7 +443,10 @@ def rock (p: vec3) : hit =
   let b = length (p -^ vec 0 (-1.2) 0) - 2.3
   in if b > 0.3 then (b, m_rock) else
   let cone = sd_capped_cone (p -^ vec 0 (-rock_depth) 0) rock_depth 0.3 rock_radius
-  let rough = saturate (-p.y * 2.5) * (0.22 * vnoise3 (scale 2.2 p) + 0.1 * vnoise3 (scale 5.3 p) - 0.16)
+  -- (the weight is 0 at and above the top face, where the wizard is, so the
+  -- noise is only evaluated below it)
+  let rough = if p.y >= 0 then 0
+              else saturate (-p.y * 2.5) * (0.22 * vnoise3 (scale 2.2 p) + 0.1 * vnoise3 (scale 5.3 p) - 0.16)
   -- the noise steepens the field; scale it back to keep tracing safe
   in (0.6 * (cone + rough), if p.y > -0.03 then m_ground else m_rock)
 
