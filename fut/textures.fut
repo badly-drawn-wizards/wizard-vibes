@@ -7,6 +7,7 @@
 -- surface, fp (distance times the angle one pixel spans).
 
 import "vec3"
+import "hash"
 import "sdf"
 import "world"
 import "scene"
@@ -165,6 +166,60 @@ def eye_albedo (pose: pose) (p: vec3) : vec3 =
   in mix (mix sclera blue iris) (splat 0.02) pupil
 
 ---------------------------------------------------------------------
+-- Hat stars: five-pointed stars stitched onto the cone, standing slightly
+-- proud of it.
+
+-- Signed distance to a five-pointed star with outer radius r and inner
+-- radius rf * r, pointing up (after Inigo Quilez).
+def sd_star5 (x: f32) (y: f32) (r: f32) (rf: f32) : f32 =
+  let (k1x, k1y) = (0.809016994, -0.587785252)
+  let (k2x, k2y) = (-k1x, k1y)
+  let x = f32.abs x
+  let d1 = 2 * f32.max (k1x * x + k1y * y) 0
+  let (x, y) = (x - d1 * k1x, y - d1 * k1y)
+  let d2 = 2 * f32.max (k2x * x + k2y * y) 0
+  let (x, y) = (x - d2 * k2x, y - d2 * k2y)
+  let x = f32.abs x
+  let y = y - r
+  let (bax, bay) = (rf * -k1y, rf * k1x - 1)
+  let h = clamp 0 r ((x * bax + y * bay) / (bax * bax + bay * bay))
+  let dx = x - bax * h
+  let dy = y - bay * h
+  in f32.sqrt (dx * dx + dy * dy) * f32.sgn (y * bax - x * bay)
+
+-- (coverage in [0, 1], height above the cloth). The pattern lives in the
+-- same bent space as the cone's SDF, so it follows the drooping tip. Rows of
+-- square cells run up the cone, each row with as many cells as fit around
+-- it, and the star is measured in arc length, so stars keep their shape as
+-- the cone narrows. Each star has its own size and tilt; its edge is
+-- antialiased by the pixel footprint fp, and its bevel fades out with it.
+def hat_stars (pose: pose) (fp: f32) (p: vec3) : (f32, f32) =
+  let bp = bend pose.prm.hat_droop (head_space pose p -^ hat_base)
+  let cell = 0.085
+  let y0 = band_top pose.prm + 0.012 -- start above the band
+  let v = (bp.y - y0) / cell
+  let cv = f32.floor v
+  let row_radius = hat_radius (y0 + (cv + 0.5) * cell)
+  let cells = f32.max 1 (f32.round (2 * f32.pi * row_radius / cell))
+  let u = (f32.atan2 bp.z bp.x / (2 * f32.pi) + 0.5) * cells
+  let cu = f32.floor u
+  let iu = i32.f32 cu
+  let iv = i32.f32 cv
+  in if bp.y < y0 || row_radius < 0.035 || hash2 iu iv >= 0.55 then (0, 0) else
+  let ox = 0.32 + 0.36 * hash2 (iu + 17) iv
+  let oy = 0.32 + 0.36 * hash2 iu (iv + 31)
+  -- arc length per u unit at this point, in cell units
+  let stretch = 2 * f32.pi * length2 (vec2 bp.x bp.z) / cells / cell
+  let tilt = 0.5 * (hash2 (iu + 3) (iv + 5) - 0.5)
+  let size = 0.22 + 0.1 * hash2 (iu + 11) (iv + 7)
+  let r = rot2 tilt (vec2 ((u - cu - ox) * stretch) (v - cv - oy))
+  let d = sd_star5 r.x r.y size 0.45 -- in cell units
+  let aa = f32.max 0.02 (fp / cell)
+  let cover = smoothstep aa (-aa) d
+  let height = 0.0025 * smoothstep 0.01 (-0.06) d * keep fp 0.01
+  in (cover, height)
+
+---------------------------------------------------------------------
 -- Cork: tan, with dark speckled pores (small pits in the bump).
 
 def cork_pores (fp: f32) (p: vec3) : f32 =
@@ -184,10 +239,11 @@ def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
   else if m == m_robe then cloth pose fp p
   else if m == m_leather then leather pose fp p
   else if m == m_cork then cork fp p
+  else if m == m_hat then (hat_stars pose fp p).1
   else if m == m_beard then hair pose fp p
   else 0
 
-def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork
+def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork || m == m_hat
 
 -- Tilts normal n by the gradient of the height field h across the surface.
 -- The gradient comes from four taps on a tetrahedron, small enough for the

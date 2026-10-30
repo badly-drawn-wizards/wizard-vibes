@@ -30,6 +30,7 @@ def m_terrain : i32 = 14
 def m_staff : i32 = 15
 def m_cork : i32 = 16
 def m_brow : i32 = 17
+def m_band : i32 = 18
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -382,9 +383,12 @@ def sd_hat (pose: pose) (p: vec3) : f32 =
 -- A flat gold band round the hat just above the brim: a short frustum
 -- following the cone's slope, standing a few millimetres proud of it, with
 -- softened edges. (The hat's bend is negligible this low.)
+def band_bottom : f32 = 0.018 -- above the hat's base
+def band_top (prm: params) : f32 = band_bottom + prm.band_height
+
 def sd_band (pose: pose) (p: vec3) : f32 =
-  let y0 = 0.018
-  let y1 = 0.082
+  let y0 = band_bottom
+  let y1 = band_top pose.prm
   let proud = 0.006
   let q = head_space pose p -^ (hat_base +^ vec 0 y0 0)
   in sd_capped_cone q (y1 - y0) (hat_radius y0 + proud - 0.002) (hat_radius y1 + proud - 0.002) - 0.002
@@ -667,7 +671,7 @@ def wizard (mask: i32) (pose: pose) (p: vec3) : hit =
          |> umin (sd_brows pose p, m_brow)
          |> umin (sd_beard pose p, m_beard)
          |> umin (sd_hat pose p, m_hat)
-         |> umin (sd_band pose p, m_gold)
+         |> umin (sd_band pose p, m_band)
          |> tag layers_figure
   let staff = if !(has mask layers_staff) then nothing
               else (sd_staff p, m_staff) |> umin (sd_cradle p, m_gold) |> tag layers_staff

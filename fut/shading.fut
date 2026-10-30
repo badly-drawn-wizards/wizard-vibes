@@ -16,37 +16,6 @@ import "textures"
 ---------------------------------------------------------------------
 -- Surface detail
 
--- Five-pointed star mask around a point in 2D local coords.
-def star_mask (x: f32) (y: f32) (size: f32) : f32 =
-  let r = f32.sqrt (x * x + y * y)
-  let a = f32.atan2 y x
-  let shape = size * (0.68 + 0.32 * f32.cos (5 * a))
-  in 1 - smoothstep (shape * 0.8) shape r
-
--- Stars scattered over the hat's cone. The pattern lives in the same bent
--- space as the cone's SDF, so it follows the drooping tip. Rows of square
--- cells run up the cone, each row with as many cells as fit around it, and
--- the star is measured in arc length, so stars keep their shape as the cone
--- narrows.
-def hat_stars (pose: pose) (p: vec3) : f32 =
-  let bp = bend pose.prm.hat_droop (head_space pose p -^ hat_base)
-  let cell = 0.085
-  let y0 = 0.08 -- start above the band, keeping the brim clear
-  let v = (bp.y - y0) / cell
-  let cv = f32.floor v
-  let row_radius = hat_radius (y0 + (cv + 0.5) * cell)
-  let cells = f32.max 1 (f32.round (2 * f32.pi * row_radius / cell))
-  let u = (f32.atan2 bp.z bp.x / (2 * f32.pi) + 0.5) * cells
-  let cu = f32.floor u
-  let iu = i32.f32 cu
-  let iv = i32.f32 cv
-  let ox = 0.3 + 0.4 * hash2 (iu + 17) iv
-  let oy = 0.3 + 0.4 * hash2 iu (iv + 31)
-  -- arc length per u unit at this point, in cell units
-  let stretch = 2 * f32.pi * length2 (vec2 bp.x bp.z) / cells / cell
-  in if bp.y < y0 || row_radius < 0.035 || hash2 iu iv >= 0.55 then 0
-     else star_mask ((u - cu - ox) * stretch) (v - cv - oy) 0.28
-
 -- The night sky in a world direction: a gradient, the moon, and stars.
 def sky (pose: pose) (rd: vec3) : vec3 =
   let up = saturate (rd.y * 0.5 + 0.5)
@@ -101,9 +70,10 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m == m_skin then plain (vec 0.85 0.6 0.48) with ks = 0.15 with shininess = 16
   else if m == m_beard then plain (hair_albedo pose p) with ks = 0
   else if m == m_hat then
-    let s = hat_stars pose p
+    let s = (hat_stars pose fp p).0
     in plain (mix (vec 0.09 0.08 0.36) (vec 1 0.8 0.3) s) with emission = scale (0.6 * s) (vec 1 0.75 0.3)
   else if m == m_gold then plain (vec 1 0.6 0.14) with ks = 1.6 with shininess = 48 with metal = true
+  else if m == m_band then plain pose.prm.band_colour with ks = 1.6 with shininess = 48 with metal = true
   else if m == m_eye then plain (eye_albedo pose p) with ks = 1 with shininess = 150 with rim = false
   else if m == m_brow then plain (vec 0.82 0.82 0.86)
   else if m == m_wood then
