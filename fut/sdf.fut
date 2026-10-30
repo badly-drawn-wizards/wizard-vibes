@@ -14,16 +14,6 @@ def sd_capsule (p: vec3) (a: vec3) (b: vec3) (r: f32) : f32 =
   let h = saturate (dot pa ba / dot ba ba)
   in length (pa -^ scale h ba) - r
 
--- Vertical capsule-ish cone: radius r1 at y=0, r2 at y=h.
-def sd_round_cone (p: vec3) (r1: f32) (r2: f32) (h: f32) : f32 =
-  let b = (r1 - r2) / h
-  let a = f32.sqrt (1 - b * b)
-  let q = vec2 (length2 (vec2 p.x p.z)) p.y
-  let k = q.x * (-b) + q.y * a
-  in if k < 0 then length2 q - r1
-     else if k > a * h then length2 (vec2 q.x (q.y - h)) - r2
-     else q.x * a + q.y * b - r1
-
 -- Cone frustum: radius r1 at y=0, r2 at y=h.
 def sd_capped_cone (p: vec3) (h: f32) (r1: f32) (r2: f32) : f32 =
   let hh = h * 0.5
@@ -100,3 +90,25 @@ def sd_round_cone_ab (p: vec3) (a: vec3) (b: vec3) (ra: f32) (rb: f32) : f32 =
   in if f32.sgn z * a2 * z2 > k then f32.sqrt (x2 + z2) * il2 - rb
      else if f32.sgn y * a2 * y2 < k then f32.sqrt (x2 + y2) * il2 - ra
      else (f32.sqrt (x2 * a2 * il2) + y * rr) * il2 - ra
+
+-- Where the ray ro + t rd (rd of unit length) meets the sphere (c, r):
+-- (entry, exit), with entry > exit if it misses.
+def ray_sphere (c: vec3) (r: f32) (ro: vec3) (rd: vec3) : (f32, f32) =
+  let oc = c -^ ro
+  let b = dot oc rd
+  let disc = b * b - (dot oc oc - r * r)
+  in if disc <= 0 then (f32.inf, -f32.inf)
+     else let s = f32.sqrt disc in (b - s, b + s)
+
+-- Bounding spheres. Detailed geometry inside the sphere (c, r) need only be
+-- evaluated within `margin` of it: farther out, the distance to the sphere
+-- is a lower bound that is safe to step by. (The margin must cover what
+-- callers need exactly; see the tolerance contract in march.fut.)
+def sphere_bounded (c: vec3) (r: f32) (margin: f32) (exact: vec3 -> f32) (p: vec3) : f32 =
+  let b = length (p -^ c) - r
+  in if b > margin then b else exact p
+
+-- The same for geometry with materials; far away it reports material m.
+def sphere_bounded_hit (c: vec3) (r: f32) (margin: f32) (m: i32) (exact: vec3 -> hit) (p: vec3) : hit =
+  let b = length (p -^ c) - r
+  in if b > margin then (b, m) else exact p

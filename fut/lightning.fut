@@ -21,7 +21,7 @@ def orb_tendrils : bool = true
 def kind_arc : i32 = 0
 def kind_tendril : i32 = 1
 def kind_enabled (kind: i32) : bool =
-  if kind == kind_arc then orb_arcs else orb_tendrils
+  (kind == kind_arc && orb_arcs) || (kind == kind_tendril && orb_tendrils)
 
 def bolts_per_kind : i32 = 4
 def segments : i32 = 7

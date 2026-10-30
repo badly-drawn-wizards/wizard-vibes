@@ -80,8 +80,6 @@ def fbm2_lod (octaves: i32) (detail: f32) (x: f32) (z: f32) : f32 =
          , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3 )
   in sum / norm
 
-def fbm2 (octaves: i32) (x: f32) (z: f32) : f32 = fbm2_lod octaves (f32.i32 octaves) x z
-
 -- vnoise2 with its gradient: (value, d/dx, d/dz). The smoothstep weight
 -- u = f^2 (3 - 2f) has derivative 6 f (1 - f).
 def vnoise2_grad (x: f32) (z: f32) : (f32, f32, f32) =

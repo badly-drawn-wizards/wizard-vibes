@@ -14,8 +14,18 @@ render scale.
 
 ## How it works
 
-- `fut/wizard.fut` holds the scene SDF, the ray marcher and the shading.
-  `render` returns one frame as `[]u32` packed RGBA8.
+- The Futhark sources, in `fut/`:
+
+  | Module | Contents |
+  |---|---|
+  | `wizard.fut` | camera, tone mapping, entry points (`render` returns one frame as `[]u32`, packed BGRA8) |
+  | `shading.fut` | materials, lights, glass (orb and potions), the per-ray passes |
+  | `scene.fut` | geometry: the figure and its pose (IK, breathing, lean), rock, terrain bounds |
+  | `march.fut` | sphere tracing, normals, soft shadows, AO |
+  | `media.fut`, `lightning.fut` | glows, haze, potion halos, clouds, lightning |
+  | `textures.fut` | bump-mapped bark, cloth, leather, hair, cork |
+  | `world.fut` | flight path, terrain, noise |
+  | `sdf.fut`, `vec3.fut`, `hash.fut`, `anim.fut` | primitives, ray–sphere and bounding-sphere helpers, maths, timing |
 - The WebGPU backend only exists on the `webgpu` branch of diku-dk/futhark,
   so `flake.nix` builds futhark from that branch. The first `nix develop`
   compiles it from source, which takes a while.
@@ -27,10 +37,12 @@ render scale.
   - Each frame is then a single `copyBufferToTexture` into the canvas texture
     (`bgra8unorm`; Futhark packs pixels as BGRA).
   - Rows are padded to 64 pixels so `bytesPerRow` is 256-byte aligned.
-- `dev/server.ts` watches `fut/` and runs `futhark check`, then
-  `futhark webgpu --library`, writing to a new `build/fut/v<N>/` directory.
-  It notifies the page over server-sent events. Compile errors appear in an
-  overlay while the last good build keeps running.
+- `dev/server.ts` watches `fut/` and builds with `dev/build-fut.ts`.
+  - Builds are content-addressed: `build/fut/<id>`, where the id hashes the
+    sources, the shim, the compiler flags and the exact toolchain. Unchanged
+    inputs reuse the build instantly.
+  - The page is notified over server-sent events. Compile errors appear in
+    an overlay while the last good build keeps running.
 - WGSL compile errors are caught too. `web/shader-check.ts` wraps
   `createShaderModule` and reads `getCompilationInfo()` for every module.
   - Each error is reported with the module, the enclosing `fn`, line and column,
@@ -38,15 +50,18 @@ render scale.
   - An error while loading fails the hot swap and keeps the previous build.
   - An error after loading shows in the overlay.
   - Warnings go to the console.
-- The animation loops every 12 s (`loop_seconds`). Every animated term is a
-  whole-number harmonic of the loop.
+- Time is in seconds. The flight never repeats; periodic motion (breathing,
+  lightning, runes) is a whole-number harmonic of a 12 s loop
+  (`loop_seconds`).
 
 ## Other scripts
 
 | Command | Output |
 |---|---|
 | `npm run ref -- [w h t yaw pitch dist]` | CPU reference frame, `build/ref.png` (`futhark multicore`) |
-| `npm run gif -- [w h fps yaw pitch dist]` | one loop as `build/wizard.gif` |
+| `npm run gif -- [w h fps yaw pitch dist]` | 12 s as `build/wizard.gif` |
+| `dev/variant.sh name [file sed-expr]...` | builds a modified copy of `fut/` and prints its build id |
+| `node dev/bench-daemon.ts`, then `dev/bench.sh id1,id2` | 1080p GPU ms per build in Chromium and Firefox, interleaved (set `CHROME`, `FIREFOX`) |
 | `CHROME=$(which chromium) node dev/screenshot.ts [url] [out] [ms]` | headless Chromium screenshot of the live page |
 | `FIREFOX=$(which firefox) node dev/firefox.ts [probe \| url] [out] [ms]` | the same in Firefox, via WebDriver BiDi (`DUMPIO=1` for its stderr) |
 

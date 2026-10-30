@@ -121,11 +121,7 @@ def prong_end : f32 = 1.37 -- 78 degrees: 40% of the way up the orb
 def prong_twist : f32 = 1.2 -- radians around the orb per radian climbed
 def prong_radius : f32 = 0.013
 
-def sd_cradle (p: vec3) : f32 =
-  -- The whole cradle fits in a sphere of radius 0.15 around this point; skip
-  -- the detail beyond it (exact within 0.15, which march and AO need).
-  let bound = length (p -^ (orb_pos -^ scale 0.04 staff_dir)) - 0.15
-  in if bound > 0.15 then bound else
+def sd_cradle_exact (p: vec3) : f32 =
   -- a frame around the staff's axis
   let ax = staff_dir
   let e1 = normalise (cross ax (vec 0 0 1))
@@ -155,6 +151,10 @@ def sd_cradle (p: vec3) : f32 =
   let ring = length2 (vec2 (length (w -^ scale h ax) - ring_r) h) - 0.014
   let cup = sd_round_cone_ab p (staff_top -^ scale 0.05 ax) ring_centre staff_radius (0.85 * ring_r)
   in f32.min (smin 0.02 ring cup) (smin 0.01 prong tip)
+
+-- (the whole cradle fits in a sphere of radius 0.15 round this point)
+def sd_cradle (p: vec3) : f32 =
+  sphere_bounded (orb_pos -^ scale 0.04 staff_dir) 0.15 0.15 sd_cradle_exact p
 
 def sd_robe (pose: pose) (p: vec3) : f32 =
   let a = f32.atan2 p.z p.x
@@ -253,13 +253,10 @@ def sd_right_hand (pose: pose) (p: vec3) : f32 =
   let wrist = sd_wrist pose.r_wrist centre p
   in smin 0.012 (smin 0.02 palm wrist) (f32.min (f32.min index middle) (f32.min ring thumb))
 
+-- (each hand, with its wrist, fits in a sphere of radius 0.14)
 def sd_hands (pose: pose) (p: vec3) : f32 =
-  -- each hand (with its wrist) fits in a sphere of radius 0.14; skip its
-  -- detail beyond
-  let near (c: vec3) (f: vec3 -> f32) =
-    let b = length (p -^ c) - 0.14
-    in if b > 0.15 then b else f p
-  in f32.min (near left_palm sd_left_hand) (near (right_palm pose) (sd_right_hand pose))
+  f32.min (sphere_bounded left_palm 0.14 0.15 sd_left_hand p)
+          (sphere_bounded (right_palm pose) 0.14 0.15 (sd_right_hand pose) p)
 
 -- The head, beard and hat move together: offset by the pose, and turned
 -- about the neck to look where he points.
@@ -507,17 +504,15 @@ def from_body_space (pose: pose) (q: vec3) : vec3 =
 -- The potions' glass: distance to the nearest outer glass surface, in the
 -- figure's local space.
 def potion_glass (pose: pose) (p: vec3) : f32 =
-  let q = body_space pose p
-  let b = length (q -^ potions_at) - potions_radius
-  in if b > 0.05 then b
-     else f32.min (potion_parts 0 q).0 (f32.min (potion_parts 1 q).0 (potion_parts 2 q).0)
+  sphere_bounded potions_at potions_radius 0.05
+                 (\q -> f32.min (potion_parts 0 q).0 (f32.min (potion_parts 1 q).0 (potion_parts 2 q).0))
+                 (body_space pose p)
 
 -- The nearest potion's liquid: (distance, material id), for the glow.
 def nearest_liquid (pose: pose) (p: vec3) : hit =
-  let q = body_space pose p
-  let b = length (q -^ potions_at) - potions_radius
-  in if b > 0.1 then (b, m_potion)
-     else (potion_liquid 0 q, m_potion) |> umin (potion_liquid 1 q, m_potion + 1) |> umin (potion_liquid 2 q, m_potion + 2)
+  sphere_bounded_hit potions_at potions_radius 0.1 m_potion
+    (\q -> (potion_liquid 0 q, m_potion) |> umin (potion_liquid 1 q, m_potion + 1) |> umin (potion_liquid 2 q, m_potion + 2))
+    (body_space pose p)
 
 -- A tome hanging on the right hip, lying against the robe's slope.
 def tome (p: vec3) : hit =
@@ -543,18 +538,12 @@ def tome (p: vec3) : hit =
               |> f32.min (sd_strap p belt_front belt_top out)
   in (f32.min covers spine, m_tome) |> umin (pages, m_pages) |> umin (clasp, m_gold) |> umin (strap, m_leather)
 
--- Evaluates f only within 0.15 of a bounding sphere around it; beyond, the
--- sphere's distance is a safe stand-in (the tolerance contract in march.fut).
-def bounded (centre: vec3) (radius: f32) (f: vec3 -> hit) (p: vec3) : hit =
-  let b = length (p -^ centre) - radius
-  in if b > 0.15 then (b, m_leather) else f p
-
 def waist_gear (p: vec3) : hit =
   let tome_at = scale (robe_radius 0.8 + 0.035) (around (deg (-100))) +^ vec 0 0.82 0
   in (sd_belt p, m_leather)
-     |> umin (bounded buckle_centre 0.07 (\q -> (sd_buckle q, m_gold)) p)
-     |> umin (bounded potions_at potions_radius (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
-     |> umin (bounded tome_at 0.19 tome p)
+     |> umin (sphere_bounded_hit buckle_centre 0.07 0.15 m_gold (\q -> (sd_buckle q, m_gold)) p)
+     |> umin (sphere_bounded_hit potions_at potions_radius 0.15 m_leather (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
+     |> umin (sphere_bounded_hit tome_at 0.19 0.15 m_tome tome p)
 
 def wizard (pose: pose) (p: vec3) : hit =
   (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
@@ -635,9 +624,7 @@ def bounded_figure (pose: pose) (tol: f32) (p: vec3) : hit =
 def rock_radius : f32 = 1.6
 def rock_depth : f32 = 2.8
 
-def rock (p: vec3) : hit =
-  let b = length (p -^ vec 0 (-1.2) 0) - 2.3
-  in if b > 0.3 then (b, m_rock) else
+def rock_exact (p: vec3) : hit =
   let cone = sd_capped_cone (p -^ vec 0 (-rock_depth) 0) rock_depth 0.3 rock_radius
   -- (the weight is 0 at and above the top face, where the wizard is, so the
   -- noise is only evaluated below it)
@@ -645,6 +632,9 @@ def rock (p: vec3) : hit =
               else saturate (-p.y * 2.5) * (0.22 * vnoise3 (scale 2.2 p) + 0.1 * vnoise3 (scale 5.3 p) - 0.16)
   -- the noise steepens the field; scale it back to keep tracing safe
   in (0.6 * (cone + rough), if p.y > -0.03 then m_ground else m_rock)
+
+-- (the rock fits in a sphere of radius 2.3; its noise needs a wider margin)
+def rock (p: vec3) : hit = sphere_bounded_hit (vec 0 (-1.2) 0) 2.3 0.3 m_rock rock_exact p
 
 -- The terrain far below, sampled through the flight frame. No peak is above
 -- terrain_max, so well above it the height over terrain_max is a cheap lower
@@ -677,7 +667,9 @@ def terrain (pose: pose) (p: vec3) : hit =
 -- - a GPU function whose name contains a 'z' cannot be called from another
 --   GPU function: the call site escapes the name ('zz') but the definition
 --   does not, so the call has no target. Hence bounded_figure, not
---   bounded_wizard. See dev/futhark-bugs/z-name-mangling.fut.
+--   bounded_wizard. Fixed upstream; the pinned compiler predates the fix,
+--   so keep the name until flake.lock is updated. See
+--   dev/futhark-bugs/z-name-mangling.fut.
 -- The scene near the wizard: the figure and its rock. (Primary rays march
 -- this and the terrain in separate passes, see follow in shading.fut.)
 #[noinline]

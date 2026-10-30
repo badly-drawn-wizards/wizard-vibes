@@ -248,12 +248,7 @@ def orb_ior : f32 = 1.45
 def glass_tint : vec3 = vec 0.93 0.97 1
 
 -- Distances (entry, exit) where the ray meets the orb; entry > exit on a miss.
-def orb_hit (ro: vec3) (rd: vec3) : (f32, f32) =
-  let oc = ro -^ orb_pos
-  let b = dot oc rd
-  let disc = b * b - (dot oc oc - orb_radius * orb_radius)
-  in if disc <= 0 then (1e9, -1e9)
-     else let s = f32.sqrt disc in (-b - s, -b + s)
+def orb_hit (ro: vec3) (rd: vec3) : (f32, f32) = ray_sphere orb_pos orb_radius ro rd
 
 -- Refraction of i at a surface with normal n facing against i, for the ratio
 -- eta of refractive indices (from / to). Reflects on total internal reflection.
@@ -275,14 +270,12 @@ def fresnel (cosi: f32) : f32 =
 -- tinted). Only rays passing near the potions are traced.
 def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec3) =
   -- the potions' bounding sphere, in local space (body space leans)
-  let c = potions_at +^ vec (pose.lean * f32.max 0 (potions_at.y - 0.45)) 0 0
+  let c = from_body_space pose potions_at
   let r = potions_radius + 0.02
-  let oc = c -^ ro
-  let b = dot oc rd
-  let disc = b * b - (dot oc oc - r * r)
-  in if disc <= 0 then (splat 0, splat 1) else
-  let t0 = f32.max 0.02 (b - f32.sqrt disc)
-  let t1 = f32.min t_end (b + f32.sqrt disc)
+  let (enter, exit) = ray_sphere c r ro rd
+  in if enter > exit then (splat 0, splat 1) else
+  let t0 = f32.max 0.02 enter
+  let t1 = f32.min t_end exit
   let (t, _, hit) =
     loop (t, i, hit) = (t0, 0i32, false) while !hit && i < 64 && t < t1 do
       let d = potion_glass pose (ro +^ scale t rd)
@@ -321,11 +314,7 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       -- holds it (the peaks reach into that sphere, so the terrain goes
       -- first). Neither pass evaluates the other's geometry at every step.
       let t_terrain = if inside || enters then f32.inf else march_terrain pose ro rd tmax
-      let local_end =
-        let oc = occluder_centre -^ ro
-        let b = dot oc rd
-        let disc = b * b - (dot oc oc - local_radius * local_radius)
-        in if disc <= 0 then 0 else f32.max 0 (b + f32.sqrt disc)
+      let local_end = f32.max 0 (ray_sphere occluder_centre local_radius ro rd).1
       let local_max = f32.min tmax (f32.min t_terrain local_end)
       let (t, m, emitted, tr) = march (local_scene pose) (media pose g) ro rd local_max
       let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, m_terrain) else (t, m)

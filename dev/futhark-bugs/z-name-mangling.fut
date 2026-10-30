@@ -15,3 +15,5 @@ entry main (xs: []f32) : []f32 = map outerfn xs
 -- shows `fn futrts_wizard_N` defined but `futrts_wizzard_N(` called from
 -- outerfn, so the browser rejects the shader ("unresolved call target").
 -- Renaming `wizard` to anything without a 'z' makes it work.
+--
+-- Status: fixed upstream; the compiler pinned in flake.lock predates the fix.
