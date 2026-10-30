@@ -102,7 +102,7 @@ export async function buildId(src: string): Promise<string> {
     entry: ENTRY,
     files,
     shim: sha(readFileSync(SHIM)), // by content: the flag carries its path
-    emccWrapper: sha(readFileSync(join(EMCC_WRAPPER, "emcc"))),
+    emccWrapper: ["emcc", "async-pipeline.c"].map((f) => sha(readFileSync(join(EMCC_WRAPPER, f)))),
     // the WebGL fallback's generator, and the transforms and schema it uses
     webgl: ["dev/webgl.ts", "web/wgsl-f32.ts", "web/wgsl-portable.ts", "params.json"].map((f) => sha(readFileSync(f))),
     cflags: CFLAGS,

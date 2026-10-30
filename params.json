@@ -944,5 +944,25 @@
         }
       ]
     }
-  ]
+  ],
+  "quality": {
+    "low": {
+      "march_steps": 120,
+      "terrain_steps": 96,
+      "shadow_steps": 12,
+      "cloud_samples": 10
+    },
+    "med": {
+      "march_steps": 200,
+      "terrain_steps": 160,
+      "shadow_steps": 20,
+      "cloud_samples": 16
+    },
+    "high": {
+      "march_steps": 300,
+      "terrain_steps": 256,
+      "shadow_steps": 32,
+      "cloud_samples": 24
+    }
+  }
 }

@@ -22,6 +22,14 @@ gathers the pixels where the hit distance jumps or the contrast is high
 into a list and traces four more rays for each, one GPU thread per ray
 (about 11 ms at 1080p in Chrome; slower in Firefox).
 
+The quality panel (Auto / Low / Med / High) picks a preset of the
+compile-time step counts (params.json's "quality"). The static site ships a
+build per level and loads the one chosen; under the dev server a level sets
+the preset, which the server builds as usual. A new build loads and compiles
+while the current one keeps drawing (its pipelines are created
+asynchronously: dev/emcc/async-pipeline.c), and Auto steps down below 40 fps
+and up while frames keep near the display's rate.
+
 Drag to orbit, scroll to zoom, P to pause. The ¼ / ½ / 1× buttons set the
 render scale. The controls panel (bottom right; ✕ hides it, ? brings it
 back) shows the keys, or a controller's buttons once one is used.

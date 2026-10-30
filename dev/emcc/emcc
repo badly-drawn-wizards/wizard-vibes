@@ -7,10 +7,21 @@
 # as one byte into the 4-byte i32 slot WGSL reads it from, so the other three
 # bytes are left over from the heap and a false can read as true. Allocating
 # the block cleared fixes it. See dev/futhark-bugs/bool-scalars.fut.
+#
+# And it creates compute pipelines synchronously, which Chromium compiles on
+# its GPU process's main thread, stalling every frame meanwhile: the calls go
+# to an asynchronous version instead (async-pipeline.c, inserted before the
+# runtime's other synchronous wrappers).
 set -eu
+here=$(dirname "$(readlink -f "$0")")
 for a in "$@"; do
   case "$a" in
-    *.c) sed -i 's/void \*scalars = malloc(kernel_info->scalars_size);/void *scalars = calloc(1, kernel_info->scalars_size);/' "$a" ;;
+    *.c)
+      sed -i 's/void \*scalars = malloc(kernel_info->scalars_size);/void *scalars = calloc(1, kernel_info->scalars_size);/' "$a"
+      grep -q "wgpu_create_compute_pipeline_waiting" "$a" || sed -i \
+        -e "/^typedef struct wgpu_request_adapter_result {\$/e cat $here/async-pipeline.c" \
+        -e 's/= wgpuDeviceCreateComputePipeline(ctx->device, &desc);/= wgpu_create_compute_pipeline_waiting(ctx->device, \&desc);/' "$a"
+      ;;
   esac
 done
 exec "$REAL_EMCC" "$@"

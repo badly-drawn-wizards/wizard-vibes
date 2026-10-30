@@ -31,6 +31,8 @@ export interface Group {
 }
 export interface Schema {
   groups: Group[];
+  // quality presets: compile-time parameter values by level (low, med, high)
+  quality?: Record<string, Record<string, Value>>;
 }
 
 export const SCHEMA = "params.json";
@@ -41,9 +43,10 @@ const groupParams = (g: Group): Param[] => [...(g.params ?? []), ...(g.groups ??
 export const allParams = (s: Schema): Param[] => s.groups.flatMap(groupParams);
 
 // The compile-time values in force: defaults overlaid with saved changes
-// (unless `local` is false: the defaults alone, as for the static build).
-export function compileValues(s: Schema, local = true): Record<string, Value> {
-  const saved = local && existsSync(LOCAL) ? JSON.parse(readFileSync(LOCAL, "utf8")) : {};
+// (unless `local` is false: the defaults alone, as for the static build),
+// then with `overrides` (e.g. a quality preset).
+export function compileValues(s: Schema, local = true, overrides: Record<string, Value> = {}): Record<string, Value> {
+  const saved = { ...(local && existsSync(LOCAL) ? JSON.parse(readFileSync(LOCAL, "utf8")) : {}), ...overrides };
   const out: Record<string, Value> = {};
   for (const p of allParams(s).filter((p) => p.compile)) out[p.id] = p.id in saved ? saved[p.id] : p.default;
   return out;
@@ -141,8 +144,8 @@ entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
 `;
 }
 
-function configFut(s: Schema, local: boolean): string {
-  const vals = compileValues(s, local);
+function configFut(s: Schema, local: boolean, overrides: Record<string, Value>): string {
+  const vals = compileValues(s, local, overrides);
   const ps = allParams(s).filter((p) => p.compile);
   return `${HEADER}-- Compile-time constants (changing one rebuilds the shader).
 ${ps.map((p) => `\n-- ${p.label}\ndef ${p.id} : ${futType(p)} = ${lit(p, vals[p.id])}`).join("\n")}
@@ -157,11 +160,11 @@ function writeIfChanged(path: string, text: string): boolean {
 
 // Regenerates the files in `dir`; returns whether any changed. With `local`
 // false the compile-time parameters take their defaults, ignoring
-// config.local.json.
-export function generate(dir = "fut", local = true): boolean {
+// config.local.json; `overrides` sets some of them (e.g. a quality preset).
+export function generate(dir = "fut", local = true, overrides: Record<string, Value> = {}): boolean {
   const s = loadSchema();
   const a = writeIfChanged(`${dir}/params.fut`, paramsFut(s));
-  const b = writeIfChanged(`${dir}/config.fut`, configFut(s, local));
+  const b = writeIfChanged(`${dir}/config.fut`, configFut(s, local, overrides));
   const c = writeIfChanged(`${dir}/render.fut`, renderFut());
   writeIfChanged(`${dir}/reference.fut`, referenceFut());
   return a || b || c;

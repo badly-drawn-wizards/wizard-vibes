@@ -13,6 +13,7 @@ import { type Device, Help } from "./help.ts";
 import { Spells } from "./spells.ts";
 import { IS_STATIC } from "./static.ts";
 import { GlRenderer } from "./webgl.ts";
+import { LEVELS, type Level, Quality } from "./quality.ts";
 
 // The drawer's uniforms, and the entry points that take them.
 const params: Params = await createDrawer(document.getElementById("params")!);
@@ -282,6 +283,7 @@ function tick(now: number): void {
     last = now;
     fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
     frameGl(glr, dt);
+    quality.frame(!paused && !document.hidden);
     setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : failure ? "WebGL fallback (WebGPU failed)" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
     return;
   }
@@ -291,6 +293,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
+    .then(() => quality.frame(!paused && !document.hidden))
     .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
@@ -315,6 +318,14 @@ async function swapTo(version: string): Promise<void> {
     });
     if (next.shaders.warnings) console.info(`${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
     if (next.fut.entry.spell_limit) spellLimits.set(next, Number(await next.fut.entry.spell_limit(0)));
+    // Compile the pipelines Futhark only makes on first use (the shading's
+    // among them) with a small frame, while the current build keeps
+    // running, so the swap does not stall.
+    try {
+      await warmUp(next);
+    } catch (e) {
+      console.warn(`warm-up of ${version} failed: ${e}`);
+    }
   }
   // Stop the loop on the old instance and let its last frame finish.
   const old = inst;
@@ -335,14 +346,27 @@ async function swapTo(version: string): Promise<void> {
   clearError();
 }
 
+// A frame of a newly loaded build, small and not shown.
+async function warmUp(i: FutInstance): Promise<void> {
+  (await entries.render(i, 64, 64, 36, time, cam.yaw, cam.pitch, cam.dist, ON_PATH, spells.pack())).free();
+  if (i.fut.entry.probe) (await entries.probe(i, time, ON_PATH, new Float32Array(spells.limit * 3))).free();
+  await i.fut.context_sync();
+}
+
+// Builds load one after another; each resolves the waiters for "the next
+// build is running" (see the quality panel under the dev server).
 let loading = Promise.resolve();
+const swapWaiters: (() => void)[] = [];
 function reload(version: string): Promise<void> {
   const load = async () => {
     if (unsupported) return;
-    if (!glr) return swapTo(version);
-    setStatus("compiling the WebGL shader…");
-    await glr.load(version);
-    clearError();
+    if (!glr) await swapTo(version);
+    else {
+      // (the current shader keeps drawing while the new one compiles)
+      await glr.load(version);
+      clearError();
+    }
+    for (const done of swapWaiters.splice(0)) done();
   };
   loading = loading.then(() =>
     load().catch((e) => {
@@ -440,11 +464,30 @@ function reload(version: string): Promise<void> {
   },
 };
 
-// The static build ships one build, named in params.json; otherwise follow
-// the dev server's builds (hot reload).
+// The quality panel (see quality.ts). The static site ships a build per
+// level; under the dev server a level is a preset of the compile-time
+// parameters, which the server rebuilds for (and announces as usual).
+const pinned = new URLSearchParams(location.search).get("build");
+const levelOf = (compile: Record<string, unknown>): Level | null =>
+  LEVELS.find((l) => params.presets[l] && Object.entries(params.presets[l]).every(([k, v]) => compile[k] === v)) ?? null;
+const quality = new Quality(document.getElementById("quality")!, IS_STATIC ? null : levelOf(params.compile), async (level) => {
+  if (IS_STATIC) return reload(params.builds![level]);
+  const running = new Promise<void>((done) => {
+    swapWaiters.push(done);
+    setTimeout(done, 120000); // (in case the server announces nothing)
+  });
+  await fetch("/config", { method: "POST", body: JSON.stringify(params.presets[level]) });
+  await running;
+});
+if (pinned || Object.keys(params.presets).length === 0 || (IS_STATIC && !params.builds)) document.getElementById("quality")!.hidden = true;
+
+// The static site loads its build for the starting quality; otherwise
+// follow the dev server's builds (hot reload).
 if (IS_STATIC) {
   const { build } = (await (await fetch("params.json")).json()) as { build: string };
-  reload(build);
+  const level = params.builds ? quality.initial : null;
+  quality.level = level;
+  reload(level ? params.builds![level] : build);
 } else {
   const events = new EventSource("/events");
   events.addEventListener("building", () => setStatus("compiling…"));
@@ -452,7 +495,6 @@ if (IS_STATIC) {
     if (e instanceof MessageEvent) showError(JSON.parse(e.data).message);
   });
   // ?build=N pins a specific build (for benchmarking variants); otherwise follow the server.
-  const pinned = new URLSearchParams(location.search).get("build");
   if (pinned) reload(pinned);
   else events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
   events.addEventListener("web-reload", () => location.reload());

@@ -139,7 +139,7 @@ createServer(async (req, res) => {
   if (req.url === "/params") {
     const schema = loadSchema();
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    return void res.end(JSON.stringify({ schema, compile: compileValues(schema) }));
+    return void res.end(JSON.stringify({ schema, compile: compileValues(schema), presets: schema.quality ?? {} }));
   }
   if (req.url === "/config" && req.method === "POST") {
     let body = "";

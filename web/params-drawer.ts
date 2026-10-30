@@ -114,16 +114,26 @@ export interface Params {
   // the uniforms by id (colours as [r, g, b]); `version` changes with them
   readonly values: Record<string, Value>;
   readonly version: number;
+  // the compile-time parameters in force, the quality presets (compile-time
+  // values by level), and in the static site the build of each level
+  readonly compile: Record<string, Value>;
+  readonly presets: Record<string, Record<string, Value>>;
+  readonly builds?: Record<string, string>;
 }
 
 export async function createDrawer(host: HTMLElement): Promise<Params> {
-  const { schema, compile } = (await (await fetch(IS_STATIC ? "params.json" : "/params")).json()) as { schema: Schema; compile: Record<string, Value> };
+  const { schema, compile, presets, builds } = (await (await fetch(IS_STATIC ? "params.json" : "/params")).json()) as {
+    schema: Schema;
+    compile: Record<string, Value>;
+    presets?: Record<string, Record<string, Value>>;
+    builds?: Record<string, string>;
+  };
   const all = schema.groups.flatMap(groupParams);
   const uniforms = all.filter((p) => !p.compile);
   const stored = load();
   const current: Record<string, Value> = {};
   for (const p of uniforms) current[p.id] = p.id in stored ? stored[p.id] : p.default;
-  const state = { values: current, version: 0 };
+  const state = { values: current, version: 0, compile, presets: presets ?? {}, builds };
 
   const pending: Record<string, Value> = {};
   let send: number | undefined;
