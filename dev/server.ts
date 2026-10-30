@@ -124,6 +124,6 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end("not found");
   }
-}).listen(PORT, () => console.log(`serving http://localhost:${PORT}`));
+}).listen(PORT, process.env.HOST ?? "0.0.0.0", () => console.log(`serving http://${process.env.HOST ?? "0.0.0.0"}:${PORT}`));
 
 void rebuild();
