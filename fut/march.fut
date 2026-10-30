@@ -46,11 +46,13 @@ def normal (dist: dist_fn) (p: vec3) : vec3 =
             in n +^ scale (dist 0.1 (p +^ scale e k)) k
   in normalise n
 
+def shadow_k : f32 = 10
+
 -- Penumbra-estimating shadow ray towards a light at distance tmax. The
 -- penumbra term k*h/t saturates once h >= t/k, so that is all the accuracy
 -- the distance needs.
 def soft_shadow (dist: dist_fn) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
-  let k = 10
+  let k = shadow_k
   -- Improved penumbra (after Quilez): from the previous and current distance
   -- estimate where the ray passes closest to the occluder, rather than using
   -- the samples themselves, which bands at grazing angles.
@@ -65,6 +67,14 @@ def soft_shadow (dist: dist_fn) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
       let res = if h < t / k then f32.min res (k * d / f32.max 1e-4 (t - y)) else res
       in (res, t + clamp 0.01 0.25 h, h, i + 1)
   in smoothstep 0 1 (saturate res)
+
+-- True if a shadow ray cannot be darkened by occluders lying inside the
+-- sphere (c, r): it never comes within tmax/k of it, so every penumbra
+-- sample k*h/t is at least 1. Skipping such rays changes nothing.
+def shadow_misses (c: vec3) (r: f32) (ro: vec3) (rd: vec3) (tmax: f32) : bool =
+  let oc = c -^ ro
+  let tc = clamp 0 tmax (dot oc rd)
+  in length (oc -^ scale tc rd) - r > tmax / shadow_k
 
 -- Probes along the normal; each probe counts only how far its distance falls
 -- short of its offset, so distances beyond the longest offset never matter.

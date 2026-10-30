@@ -83,25 +83,38 @@ function tick(now: number): void {
     .finally(() => (inFlight = null));
 }
 
+// Recently used builds stay loaded (each with its own device), so switching
+// back to one is instant: builds are content-addressed, so an id always
+// means the same program. Mostly for benchmarking variants back to back.
+const KEEP_LOADED = 12;
+const loaded = new Map<string, FutInstance>(); // in least-recently-used order
+
 async function swapTo(version: string): Promise<void> {
-  const started = performance.now();
-  const next = await loadFuthark(version);
-  console.info(`loaded ${version} in ${Math.round(performance.now() - started)} ms`);
+  let next = loaded.get(version);
+  if (next) loaded.delete(version);
+  else {
+    const started = performance.now();
+    next = await loadFuthark(version);
+    console.info(`loaded ${version} in ${Math.round(performance.now() - started)} ms`);
+    next.device.lost.then((info) => {
+      if (info.reason !== "destroyed") showError(`GPU device lost: ${info.message}`);
+    });
+    if (next.shaders.warnings) console.info(`${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
+  }
   // Stop the loop on the old instance and let its last frame finish.
   const old = inst;
   inst = null;
   await inFlight;
-  if (old) {
-    prev?.free();
-    prev = null;
-    unloadFuthark(old);
+  prev?.free();
+  prev = null;
+  if (old && old !== next) loaded.set(old.version, old);
+  while (loaded.size > KEEP_LOADED) {
+    const [id, evicted] = loaded.entries().next().value!;
+    loaded.delete(id);
+    unloadFuthark(evicted);
   }
-  next.device.lost.then((info) => {
-    if (info.reason !== "destroyed") showError(`GPU device lost: ${info.message}`);
-  });
   configure(next.device);
   next.shaders.onError = (report) => showError(`WGSL compilation error:\n\n${report}`);
-  if (next.shaders.warnings) console.info(`${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
   inst = next;
   clearError();
 }

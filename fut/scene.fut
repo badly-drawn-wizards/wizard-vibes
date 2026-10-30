@@ -615,5 +615,9 @@ def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 -- What casts shadows: the wizard and his rock. The terrain is left out (it
 -- would only shadow itself, at grazing angles, with penumbra artefacts), and
 -- so is the orb, a light source itself.
+-- Everything occluder_dist sees (the figure and its rock) lies in this sphere.
+def occluder_centre : vec3 = vec 0 (-0.3) 0
+def occluder_radius : f32 = 3.3
+
 #[noinline] -- (see scene)
 def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_figure pose tol p |> umin (rock p)).0

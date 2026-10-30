@@ -142,7 +142,11 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
   let mat = material pose g fp m p n
   let occ = if m == m_terrain then 1 else ambient_occlusion (dist pose) p ng
   let po = p +^ scale 0.002 ng
-  let moon_shadow = soft_shadow (occluder_dist pose) po pose.moon 12
+  -- (shadow rays that pass well clear of the figure and rock are fully lit)
+  let shadow (l: vec3) (tmax: f32) =
+    if shadow_misses occluder_centre occluder_radius po l tmax then 1
+    else soft_shadow (occluder_dist pose) po l tmax
+  let moon_shadow = shadow pose.moon 12
   let moon = light mat n rd pose.moon moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
   let to_orb = orb_pos -^ p
   let od = length to_orb
@@ -157,7 +161,7 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
   -- cannot really shadow a light at its own tip, so it is left unshadowed.
   let orb_shadow = if od < orb_radius || m == m_staff then 1
                    else if atten < 0.01 then 0
-                   else soft_shadow (occluder_dist pose) po ol (od - orb_radius - 0.15)
+                   else shadow ol (od - orb_radius - 0.15)
   let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
   let orb = light mat n rd ol orb_shadow orb_colour orb_colour
   let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
