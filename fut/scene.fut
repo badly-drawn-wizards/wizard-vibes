@@ -457,8 +457,10 @@ def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
       -- round flask, two-thirds full
       let r = 0.04
       in (smin 0.015 (sd_sphere (p -^ c) r) (sd_capsule p body_top neck_top 0.013), c.y + 0.25 * r)
-  -- a rolled lip round the mouth
+  -- an open mouth (the neck's capsule would otherwise dome over the cork)
+  -- with a rolled lip round it
   let nr = potion_neck_radius i
+  let glass = f32.max glass (p.y - (neck_top.y - 0.002))
   let glass = smin 0.002 glass (sd_torus (p -^ (neck_top -^ vec 0 0.002 0)) nr 0.0035)
   -- the cork: pushed into the neck (filling it inside the glass wall) and
   -- standing a little proud of the lip
