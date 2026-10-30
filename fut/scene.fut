@@ -5,6 +5,7 @@ import "vec3"
 import "sdf"
 import "hash"
 import "anim"
+import "world"
 import "march"
 
 -- Material ids.
@@ -20,6 +21,8 @@ def m_leather : i32 = 10
 def m_tome : i32 = 11
 def m_pages : i32 = 12
 def m_potion : i32 = 20 -- 20, 21, 22: one per flask
+def m_rock : i32 = 13
+def m_terrain : i32 = 14
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -59,13 +62,17 @@ def two_bone (s: vec3) (t: vec3) (l1: f32) (l2: f32) (pole: vec3) : (vec3, vec3)
 -- Breathing: three breaths per loop (4 s each); 0 exhaled, 1 inhaled.
 def breath (tm: f32) : f32 = 0.5 - 0.5 * f32.cos (3 * tm)
 
--- Everything about the wizard that moves, worked out once per pixel.
-type pose = { tm: f32, breath: f32
+-- Everything about the wizard that moves, worked out once per pixel. tm is
+-- the loop angle (for periodic motion), secs the time in seconds.
+type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, local
+            , breath: f32
             , head: vec3 -- offset of the head, beard and hat
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3 }
 
-def pose_at (tm: f32) : pose =
+def pose_at (secs: f32) : pose =
+  let tm = loop_angle secs
+  let fl = flight_at secs
   let b = breath tm
   -- inhaling lifts the shoulders; the head rises and nods forward a little
   let lift = vec 0 (0.012 * b) (0.004 * b)
@@ -77,7 +84,8 @@ def pose_at (tm: f32) : pose =
   -- the left hand drifts idly in front of the belly
   let idle = vec (0.025 * f32.sin tm) (0.018 * f32.sin (2 * tm) + 0.01 * b) (0.02 * f32.cos tm)
   let (l_elbow, l_wrist) = two_bone l_shoulder (vec (-0.25) 1.02 0.27 +^ idle) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
-  in {tm, breath = b, head, r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist}
+  in { tm, secs, fl, moon = to_local_dir fl moon_world
+     , breath = b, head, r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist }
 
 def orb_radius : f32 = 0.11
 def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
@@ -395,12 +403,35 @@ def bounded_wizard (pose: pose) (tol: f32) (p: vec3) : hit =
 -- The orb is glass, refracted analytically by the shading (see shading.fut),
 -- so it is not part of the marched scene; what is inside it is drawn by the
 -- media (see media.fut and lightning.fut).
-def scene (pose: pose) (tol: f32) (p: vec3) : hit = bounded_wizard pose tol p |> umin (p.y, m_ground)
+---------------------------------------------------------------------
+-- The floating rock the wizard stands on: an inverted cone with a flat top
+-- (the magic circle's outer ring, at radius 1.3, fits inside), roughened
+-- below by noise that fades out towards the rim.
+
+def rock_radius : f32 = 1.6
+def rock_depth : f32 = 2.8
+
+def rock (p: vec3) : hit =
+  let b = length (p -^ vec 0 (-1.2) 0) - 2.3
+  in if b > 0.3 then (b, m_rock) else
+  let cone = sd_capped_cone (p -^ vec 0 (-rock_depth) 0) rock_depth 0.3 rock_radius
+  let rough = saturate (-p.y * 2.5) * (0.22 * vnoise3 (scale 2.2 p) + 0.1 * vnoise3 (scale 5.3 p) - 0.16)
+  -- the noise steepens the field; scale it back to keep tracing safe
+  in (0.6 * (cone + rough), if p.y > -0.03 then m_ground else m_rock)
+
+-- The terrain far below, sampled through the flight frame. No peak is above
+-- terrain_max, so well above it the height over terrain_max is a cheap lower
+-- bound (it stays >= 1.5 here, so it can never register as a hit).
+def terrain (pose: pose) (p: vec3) : hit =
+  let w = to_world pose.fl p
+  in (if w.y > terrain_max + 1.5 then w.y - terrain_max else terrain_dist w, m_terrain)
+
+def scene (pose: pose) (tol: f32) (p: vec3) : hit =
+  bounded_wizard pose tol p |> umin (rock p) |> umin (terrain pose p)
 
 def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 
--- What casts shadows: only the wizard. Both lights are above the ground,
--- which therefore cannot block them (as an occluder it would only add
--- penumbra artefacts at grazing angles), and the orb is a light source
--- itself, which would otherwise darken everything it lights.
-def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_wizard pose tol p).0
+-- What casts shadows: the wizard and his rock. The terrain is left out (it
+-- would only shadow itself, at grazing angles, with penumbra artefacts), and
+-- so is the orb, a light source itself.
+def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_wizard pose tol p |> umin (rock p)).0

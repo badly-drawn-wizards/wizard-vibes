@@ -25,7 +25,7 @@ def camera_ray (target: vec3) (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f
 
 def pixel (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : vec3 =
   let (ro, rd) = camera_ray target vw h yaw pitch dst x y
-  let c = shade (loop_angle tm) ro rd
+  let c = shade tm ro rd -- tm in seconds
   let c = vmap aces (scale 1.1 c)
   let c = vmap (\v -> (v ** (1 / 2.2))) c
   let ux = (f32.i32 x / f32.i32 vw - 0.5)
