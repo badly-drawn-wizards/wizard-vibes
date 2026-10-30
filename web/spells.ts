@@ -15,7 +15,7 @@ const FIRE = 0;
 const STRIKE = 1;
 const WIND = 2;
 const BURST = 3;
-const STRIDE = 8;
+const STRIDE = 10;
 
 const LIFE = [3, 0.9, 1.5, 1.4]; // seconds, by kind
 const SPEED = [30, 0, 24]; // units/s
@@ -30,7 +30,8 @@ interface Spell {
   pos: V3;
   vel: V3;
   age: number;
-  seed: number;
+  life: number; // seconds: it has faded out by then
+  seed: number; // varies each one's look
   top: number; // a strike's top height
 }
 
@@ -56,7 +57,7 @@ export class Spells {
   cast(origin: V3, dir: V3): boolean {
     if (this.cooldown > 0 || this.items.length >= this.limit) return false;
     const kind = this.selected;
-    const s: Spell = { id: this.nextId++, kind, pos: [...origin], vel: [0, 0, 0], age: 0, seed: (Math.random() * 1e6) | 0, top: 0 };
+    const s: Spell = { id: this.nextId++, kind, pos: [...origin], vel: [0, 0, 0], age: 0, life: LIFE[kind], seed: (Math.random() * 1e5) | 0, top: 0 };
     if (kind === STRIKE) {
       // where the view meets sea level, within range; the probe then finds
       // the actual ground beneath
@@ -83,7 +84,7 @@ export class Spells {
       s.age += dt;
       for (let i = 0; i < 3; i++) s.pos[i] += s.vel[i] * dt;
     }
-    this.items = this.items.filter((s) => s.age < LIFE[s.kind]);
+    this.items = this.items.filter((s) => s.age < s.life);
   }
 
   // The points to probe the land at, `limit` of them (unused ones far above
@@ -109,9 +110,12 @@ export class Spells {
         // burst where it hit
         s.kind = BURST;
         s.age = 0;
+        s.life = LIFE[BURST];
         s.vel = [0, 0, 0];
-      } else if (s.kind === WIND && d < 0.1) {
-        s.age = LIFE[WIND];
+      } else if (s.kind === WIND && d < 0.1 && s.life > s.age + 0.3) {
+        // it breaks up against the land: slows and fades out
+        s.life = s.age + 0.3;
+        s.vel = s.vel.map((v) => v * 0.3) as V3;
       } else if (s.kind === STRIKE && s.pos[1] === 0) {
         // the ground below the probe point: its height above the land,
         // divided by the slope
@@ -120,12 +124,13 @@ export class Spells {
     });
   }
 
-  // The renderer's array: `limit` slots of [kind, x, y, z, a, b, c, age].
+  // The renderer's array: `limit` slots of
+  // [kind, x, y, z, a, b, c, age, life, seed] (see fut/spells.fut).
   pack(): Float32Array {
     const out = new Float32Array(this.limit * STRIDE).fill(-1);
     this.items.slice(0, this.limit).forEach((s, i) => {
-      const extra = s.kind === STRIKE ? [s.seed % 100000, s.top, 0] : s.vel;
-      out.set([s.kind, ...s.pos, ...extra, s.age], i * STRIDE);
+      const extra = s.kind === STRIKE ? [0, s.top, 0] : s.vel;
+      out.set([s.kind, ...s.pos, ...extra, s.age, s.life, s.seed], i * STRIDE);
     });
     return out;
   }

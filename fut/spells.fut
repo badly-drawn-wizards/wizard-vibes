@@ -3,13 +3,15 @@
 -- state lives in the harness (web/spells.ts), which passes it each frame as
 -- a flat array, `spell_stride` floats per slot:
 --
---   kind, x, y, z, a, b, c, age (seconds)
+--   kind, x, y, z, a, b, c, age, life (seconds), seed (an integer)
 --
 --   spell_fire    a bolt at (x, y, z) moving at velocity (a, b, c)
---   spell_strike  lightning striking the ground at (x, y, z) from height b;
---                 a seeds its path
+--   spell_strike  lightning striking the ground at (x, y, z) from height b
 --   spell_wind    a blade at (x, y, z) moving at (a, b, c)
 --   spell_burst   a fire bolt's explosion at (x, y, z)
+--
+-- Every spell fades out over the last part of its life, so none vanishes
+-- while still visible; the seed makes each one a little different.
 --
 -- Any other kind is an empty slot. Positions are in the world.
 
@@ -19,7 +21,7 @@ import "params"
 import "shading"
 import "world"
 
-def spell_stride : i64 = 8
+def spell_stride : i64 = 10
 def spell_fire : i32 = 0
 def spell_strike : i32 = 1
 def spell_wind : i32 = 2
@@ -59,6 +61,9 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
        let p = vec (at i 1) (at i 2) (at i 3)
        let q = vec (at i 4) (at i 5) (at i 6)
        let age = at i 7
+       let fade = smoothstep (at i 8) (0.6 * at i 8) age
+       let seed = i32.f32 (at i 9)
+       let rnd (n: i32) = hash2 (seed + n * 7919) 23
        in if kind == spell_fire then
             -- a ball with a short trail behind it, flickering
             let tail = p -^ scale 0.06 q
@@ -66,7 +71,7 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
             let (core, halo) = glow_line 0.12 0.8 dist
             let flick = 0.85 + 0.15 * f32.sin (secs * 43 + f32.i64 i * 1.7)
             let hot = f32.exp (-(dist * dist) / 0.0016)
-            in c +^ scale (flick * seen t behind 0.3) (scale (5 * core) (mix (vec 1 0.42 0.08) (vec 1 0.9 0.6) hot)
+            in c +^ scale (fade * flick * seen t behind 0.3) (scale (5 * core) (mix (vec 1 0.42 0.08) (vec 1 0.9 0.6) hot)
                                            +^ scale (0.5 * halo) (vec 1 0.35 0.05))
           else if kind == spell_burst then
             -- An explosion: a billowing fireball that swells fast and cools
@@ -94,18 +99,23 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
               let (sd, _, _) = ray_segment o d tmax (at_t (f32.max 0 (age - 0.05))) (at_t age)
               in acc + f32.exp (-(sd * sd) / 0.0025)
             let ember = scale (5 * sparks * f32.exp (-2.5 * age)) (vec 1 0.6 0.2)
-            in c +^ scale (seen t behind r) (fire +^ ember)
+            in c +^ scale (fade * seen t behind r) (fire +^ ember)
           else if kind == spell_wind then
-            -- a pale crescent across its path, curving back
+            -- a pale crescent across its path, curving back; each its own
+            -- width, curve and tilt, rolling slowly one way or the other
+            -- and wobbling a little
             let f = normalise q
             let side = normalise (cross f (vec 0 1 0) +^ vec 0 0.001 0)
             let up = cross side f
-            -- (it rolls as it flies)
-            let roll = 2.5 * age
+            let spin = if rnd 1 < 0.5 then -1 else 1
+            let roll = (rnd 2 - 0.5) * 1.2 + spin * (0.25 + 0.35 * rnd 3) * age
+                       + 0.12 * f32.sin (age * (5 + 4 * rnd 4) + 6.283 * rnd 5)
             let s = scale (f32.cos roll) side +^ scale (f32.sin roll) up
-            let fade = saturate (1.5 - age) * saturate (8 * age)
+            let width = 0.7 + 0.45 * rnd 6
+            let bend = 0.35 + 0.35 * rnd 7
+            let fade = fade * saturate (8 * age)
             let point (k: i32) = let th = (f32.i32 k / 4 - 0.5) * 2.2
-                                 in p +^ scale (0.9 * f32.sin th) s -^ scale (0.55 * (1 - f32.cos th)) f
+                                 in p +^ scale (width * f32.sin th) s -^ scale (bend * (1 - f32.cos th)) f
             let (dist, t, behind) = loop (best, bt, bb) = (f32.inf, 0f32, 0f32) for k < 4 do
                                       let (dd, tt, b) = ray_segment o d tmax (point k) (point (k + 1))
                                       in if dd < best then (dd, tt, b) else (best, bt, bb)
@@ -114,10 +124,9 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
           else if kind == spell_strike then
             -- a jagged bolt from the sky, re-forking several times a second,
             -- flashing as it fades, with a flash on the ground
-            let seed = i32.f32 (at i 4)
             let top = vec p.x (at i 5) p.z
             let flash = i32.f32 (age * 14)
-            let env = f32.exp (-5 * age) * (0.55 + 0.45 * hash2 (seed + flash) 17)
+            let env = fade * f32.exp (-4 * age) * (0.55 + 0.45 * hash2 (seed + flash) 17)
             let point (k: i32) =
               let u = f32.i32 k / 8
               let jx = if k == 0 || k == 8 then 0 else hash2 (seed * 13 + k) flash - 0.5
@@ -130,7 +139,7 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
             let (gd, gt, gb) = ray_segment o d tmax p p
             let ground = 3.5 * 3.5 / (gd * gd + 3.5 * 3.5)
             -- and a ring of light racing out over the ground where it hits
-            let ring = let u = (gd - 7 * age) / (0.3 + 0.5 * age) in f32.exp (-(u * u)) * f32.exp (-3 * age)
+            let ring = let u = (gd - 7 * age) / (0.3 + 0.5 * age) in fade * f32.exp (-(u * u)) * f32.exp (-3 * age)
             in c +^ scale env (scale (seen t behind 0.5) (scale (9 * core) (vec 0.85 0.9 1) +^ scale (0.8 * halo) (vec 0.55 0.6 1))
                                +^ scale (1.5 * ground * seen gt gb 2) (vec 0.6 0.65 1))
                  +^ scale (2 * ring * seen gt gb 3) (vec 0.7 0.8 1)

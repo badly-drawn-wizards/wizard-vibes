@@ -102,6 +102,7 @@ type pose = { tm: f32, secs: f32, fl: flight
             , orb_tint: vec3 -- the orb's glow colour, by spell
             , bolt_tint: vec3 -- tints its arcs and its light, by spell
             , orb_boost: f32 -- its glow, flaring as a spell is cast
+            , spell: i32 -- the spell in hand: what goes on in the orb (0 fire, 1 lightning, 2 wind)
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
@@ -197,7 +198,7 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
      , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist
-     , staff_pivot, staff_axis, staff_cos, staff_sin, staff_shift, orb = held orb_pos, orb_tint, bolt_tint, orb_boost }
+     , staff_pivot, staff_axis, staff_cos, staff_sin, staff_shift, orb = held orb_pos, orb_tint, bolt_tint, orb_boost, spell }
 
 
 def sd_orb (p: vec3) : f32 = sd_sphere (p -^ orb_pos) orb_radius

@@ -9,6 +9,7 @@ import "anim"
 import "march"
 import "scene"
 import "lightning"
+import "orbfx"
 import "world"
 
 
@@ -53,7 +54,11 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let q = staff_rest pose p
   let od = sd_orb q
   let gd = if glow then glyph_dist tm p else 1e9
-  let bolts = if orb then lightning_media tm q else {cap = 1e9, radiance = splat 0, extinction = 0}
+  -- in the orb: lightning arcs, flames or a whirlwind, by the spell in hand
+  let bolts = if !orb then no_media
+              else if pose.spell == 0 then fire_media pose.secs q
+              else if pose.spell == 2 then wind_media pose.secs q
+              else let l = lightning_media tm q in l with radiance = scale pose.prm.lightning l.radiance
   let haze = if orb && od < 0 then globe_haze else 0
   let od = if glow || orb then od else 1e9 -- (no step cap near a hidden orb)
   let (ld, lm) = if glow then nearest_liquid pose p else (1e9, m_potion)
@@ -62,7 +67,7 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
      , radiance = scale (if glow then pose.orb_boost * orb_glow_density pose.prm g od else 0) pose.orb_tint
                   +^ scale (pose.runes * rune_glow_density pose.prm tm gd) pose.prm.rune_colour
                   +^ scale haze pose.orb_tint
-                  +^ scale pose.prm.lightning (bolts.radiance *^ pose.bolt_tint)
+                  +^ bolts.radiance
                   +^ scale (potion_glow_density pose.prm ld) (glow_colour pose.prm lm)
      , extinction = 0 }
 
