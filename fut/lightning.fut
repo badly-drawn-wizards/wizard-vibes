@@ -8,22 +8,20 @@
 -- is in whole slots of the loop, so the animation still loops seamlessly.
 
 import "vec3"
+import "config"
 import "sdf"
 import "hash"
 import "march"
 import "scene"
 
--- Compile-time switches: arcs leaping out from the orb, and tendrils inside
--- its glass.
-def orb_arcs : bool = false
-def orb_tendrils : bool = true
+-- Compile-time switches (orb_arcs, orb_tendrils, bolts_per_kind) are in
+-- the generated config.fut, set from params.json and the drawer.
 
 def kind_arc : i32 = 0
 def kind_tendril : i32 = 1
 def kind_enabled (kind: i32) : bool =
   (kind == kind_arc && orb_arcs) || (kind == kind_tendril && orb_tendrils)
 
-def bolts_per_kind : i32 = 4
 def segments : i32 = 7
 def lives : f32 = 30 -- per loop: 2.5 per second
 def flickers : f32 = 5 -- per life

@@ -7,6 +7,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import * as esbuild from "esbuild";
 import { buildFuthark, FUT_ROOT } from "./build-fut.ts";
+import { compileValues, generate, loadSchema, saveCompileValues, SCHEMA, type Value } from "./params.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -22,18 +23,24 @@ function broadcast(type: string, data: unknown = {}): void {
 }
 
 // ---- Futhark builds: serialised, with at most one queued rebuild.
-let building = false;
+// One build at a time. A change while one runs cancels it (its result
+// would be stale) and starts again; content-addressed builds make any
+// already-built state instant.
+let building: AbortController | null = null;
 let queued = false;
 async function rebuild(): Promise<void> {
   if (building) {
     queued = true;
+    building.abort();
     return;
   }
-  building = true;
+  const ctl = new AbortController();
+  building = ctl;
   broadcast("building");
   console.log("[fut] building…");
-  const r = await buildFuthark();
-  if (r.ok) {
+  const r = await buildFuthark("fut", ctl.signal);
+  if (!r.ok && r.cancelled) console.log("[fut] cancelled (superseded)");
+  else if (r.ok) {
     current = r.version;
     lastError = null;
     console.log(`[fut] ${r.version} ${r.cached ? "cached" : `built in ${r.ms} ms`}`);
@@ -43,12 +50,34 @@ async function rebuild(): Promise<void> {
     console.error(`[fut] build failed:\n${r.message}`);
     broadcast("error", { message: r.message });
   }
-  building = false;
+  building = null;
   if (queued) {
     queued = false;
     void rebuild();
   }
 }
+
+// Compile-time parameters from the drawer: saved, then applied once they
+// have stopped changing for a moment, so dragging a slider does not start a
+// build per step. (Regenerating config.fut makes the watcher below rebuild.)
+const SETTLE_MS = 700;
+let settle: NodeJS.Timeout | undefined;
+function setCompileParams(changes: Record<string, Value>): void {
+  saveCompileValues(loadSchema(), changes);
+  clearTimeout(settle);
+  settle = setTimeout(() => generate(), SETTLE_MS);
+}
+
+// The schema itself changed: regenerate, and reload the page's drawer.
+watch(".", (_e, file) => {
+  if (file !== SCHEMA) return;
+  try {
+    generate();
+    broadcast("web-reload");
+  } catch (e) {
+    broadcast("error", { message: `params.json: ${e}` });
+  }
+});
 
 let debounce: NodeJS.Timeout | undefined;
 // Watch the directory, not the files: editors that save by rename (vim,
@@ -106,6 +135,24 @@ function resolvePath(url: string): string | null {
 }
 
 createServer(async (req, res) => {
+  if (req.url === "/params") {
+    const schema = loadSchema();
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return void res.end(JSON.stringify({ schema, compile: compileValues(schema) }));
+  }
+  if (req.url === "/config" && req.method === "POST") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      try {
+        setCompileParams(JSON.parse(body));
+        res.writeHead(204).end();
+      } catch (e) {
+        res.writeHead(400).end(String(e));
+      }
+    });
+    return;
+  }
   if (req.url === "/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
     clients.add(res);

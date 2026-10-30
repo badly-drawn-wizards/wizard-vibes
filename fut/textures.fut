@@ -90,7 +90,7 @@ def cloth_albedo (pose: pose) (p: vec3) : vec3 =
   let (a, _, y) = cloth_coords pose p
   let mottle = 0.9 + 0.2 * vnoise3 (scale 25 p)
   -- the creases of the folds catch less light and look deeper in colour
-  in scale (mottle * (0.82 + 0.18 * (0.5 + 0.5 * fold a y))) (vec 0.07 0.05 0.33)
+  in scale (mottle * (0.82 + 0.18 * (0.5 + 0.5 * fold a y))) pose.prm.robe_colour
 
 ---------------------------------------------------------------------
 -- Leather: a pebbled grain and, on the belt, a row of stitches along each
@@ -160,7 +160,7 @@ def eye_albedo (pose: pose) (p: vec3) : vec3 =
   let pupil = smoothstep 0.955 0.965 cosa
   let rim = 1 - 0.5 * smoothstep 0.92 0.88 cosa -- darker towards the iris's edge
   let sclera = vec 0.9 0.88 0.85
-  let blue = scale rim (vec 0.25 0.48 0.78)
+  let blue = scale rim pose.prm.iris_colour
   in mix (mix sclera blue iris) (splat 0.02) pupil
 
 ---------------------------------------------------------------------

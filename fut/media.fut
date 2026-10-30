@@ -2,6 +2,8 @@
 -- letters, the lightning, and a faint haze inside the orb's glass.
 
 import "vec3"
+import "params"
+import "config"
 import "sdf"
 import "anim"
 import "march"
@@ -16,12 +18,12 @@ def rune_glow_colour : vec3 = vec 0.25 0.5 1
 -- distance from the orb's surface, flickering with the lightning. It is
 -- outside the glass only: inside there is just the haze, so the orb's
 -- refraction stays visible.
-def orb_glow_density (g: glow) (od: f32) : f32 =
-  if od < 0 then 0 else 0.95 * g.level * f32.exp (-od / 0.1)
+def orb_glow_density (prm: params) (g: glow) (od: f32) : f32 =
+  if od < 0 then 0 else prm.orb_glow * g.level * f32.exp (-od / prm.orb_glow_extent)
 
 -- The rune letters glow in a thin layer hugging the strokes, pulsing gently.
-def rune_glow_density (tm: f32) (gd: f32) : f32 =
-  4 * rune_pulse tm * f32.exp (-gd / 0.05)
+def rune_glow_density (prm: params) (tm: f32) (gd: f32) : f32 =
+  prm.rune_glow * rune_pulse prm.rune_pulse tm * f32.exp (-gd / 0.05)
 
 -- Inside a glass orb, a faint glowing haze.
 def globe_haze : f32 = 0.3
@@ -42,7 +44,7 @@ def glow_colour (m: i32) : vec3 =
 
 -- The potions' liquids glow in a thin halo, coloured by whichever liquid is
 -- nearest.
-def potion_glow_density (ld: f32) : f32 = 1.6 * f32.exp (-(f32.max ld 0) / 0.012)
+def potion_glow_density (prm: params) (ld: f32) : f32 = prm.potion_glow * f32.exp (-(f32.max ld 0) / 0.012)
 
 def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let tm = pose.tm
@@ -53,11 +55,11 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let (ld, lm) = nearest_liquid pose p
   in { cap = f32.min bolts.cap (f32.min (0.3 * f32.abs od + 0.015) (0.3 * gd + 0.01))
              |> f32.min (0.3 * f32.abs ld + 0.004)
-     , radiance = scale (orb_glow_density g od) orb_glow_colour
-                  +^ scale (rune_glow_density tm gd) rune_glow_colour
+     , radiance = scale (orb_glow_density pose.prm g od) orb_glow_colour
+                  +^ scale (rune_glow_density pose.prm tm gd) rune_glow_colour
                   +^ scale haze orb_glow_colour
                   +^ bolts.radiance
-                  +^ scale (potion_glow_density ld) (glow_colour lm)
+                  +^ scale (potion_glow_density pose.prm ld) (glow_colour lm)
      , extinction = 0 }
 
 -- The clouds are integrated separately from the march (see `clouds`): their
@@ -78,12 +80,12 @@ def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
          let tb = (cloud_top - wo.y) / wd.y
          in (f32.max 0 (f32.min ta tb), f32.min tend (f32.max ta tb))
   in if t1 <= t0 then (splat 0, 1) else
-  let dt = f32.max 0.3 ((t1 - t0) / 24)
+  let dt = f32.max 0.3 ((t1 - t0) / f32.i32 cloud_samples)
   let (_, _, rad, tr) =
     loop (t, i, rad, tr) = (t0 + 0.5 * dt, 0i32, splat 0, 1f32)
     while t < t1 && i < 64 && tr > 0.02 do
       let w = wo +^ scale t wd
-      let (dens, clear) = cloud_sample pose.secs w
+      let (dens, clear) = cloud_sample pose.prm.cloud_cover pose.prm.cloud_density pose.secs w
       in if dens <= 0 then (t + f32.max dt clear, i + 1, rad, tr)
          else let ch = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
               in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour ch), tr * f32.exp (-dens * dt))

@@ -8,6 +8,7 @@
 -- point (see wizard_bound), while each consumer asks for the accuracy it needs.
 
 import "vec3"
+import "config"
 import "sdf"
 
 -- At a point, media report a step cap (steps are kept below it, so the
@@ -58,7 +59,7 @@ def soft_shadow (dist: dist_fn) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
   -- the samples themselves, which bands at grazing angles.
   let (res, _, _, _) =
     loop (res, t, ph, i) = (1f32, 0.02f32, 1e10f32, 0i32)
-    while i < 96 && t < tmax && res > 0.002 do
+    while i < shadow_steps && t < tmax && res > 0.002 do
       let h = dist (t / k) (ro +^ scale t rd)
       let y = h * h / (2 * ph)
       let d = f32.sqrt (f32.max 0 (h * h - y * y))

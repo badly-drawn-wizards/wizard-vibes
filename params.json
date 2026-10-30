@@ -1,0 +1,70 @@
+{
+  "$comment": "Tweakable parameters, shown in the drawer and generated into fut/params.fut (uniforms) and fut/config.fut (compile-time, \"compile\": true). Kinds: slider, int, color (linear RGB), checkbox, select. See dev/params.ts.",
+  "groups": [
+    {
+      "name": "Output",
+      "params": [
+        { "id": "exposure", "label": "Exposure", "kind": "slider", "min": 0.2, "max": 3, "step": 0.01, "default": 1.1 },
+        { "id": "vignette", "label": "Vignette", "kind": "slider", "min": 0, "max": 1.5, "step": 0.01, "default": 0.6 },
+        { "id": "view", "label": "View", "kind": "select", "options": ["Shaded", "Normals", "Albedo", "Ambient occlusion"], "default": 0 }
+      ]
+    },
+    {
+      "name": "Moon",
+      "params": [
+        { "id": "moon_colour", "label": "Colour", "kind": "color", "default": [0.375, 0.45, 0.75] },
+        { "id": "moon_strength", "label": "Strength", "kind": "slider", "min": 0, "max": 3, "step": 0.01, "default": 1 }
+      ]
+    },
+    {
+      "name": "Orb",
+      "params": [
+        { "id": "orb_light", "label": "Light", "kind": "slider", "min": 0, "max": 8, "step": 0.05, "default": 2.4 },
+        { "id": "orb_glow", "label": "Glow", "kind": "slider", "min": 0, "max": 3, "step": 0.01, "default": 0.95 },
+        { "id": "orb_glow_extent", "label": "Glow extent", "kind": "slider", "min": 0.02, "max": 0.3, "step": 0.005, "default": 0.1 },
+        { "id": "orb_ior", "label": "Index of refraction", "kind": "slider", "min": 1, "max": 2.4, "step": 0.01, "default": 1.45 },
+        { "id": "orb_reflections", "label": "Reflections", "kind": "checkbox", "default": true }
+      ]
+    },
+    {
+      "name": "Runes",
+      "params": [
+        { "id": "rune_glow", "label": "Glow", "kind": "slider", "min": 0, "max": 12, "step": 0.1, "default": 4 },
+        { "id": "rune_pulse", "label": "Pulse", "kind": "slider", "min": 0, "max": 0.5, "step": 0.01, "default": 0.08 }
+      ]
+    },
+    {
+      "name": "Potions",
+      "params": [
+        { "id": "potion_light", "label": "Light", "kind": "slider", "min": 0, "max": 4, "step": 0.05, "default": 1.2 },
+        { "id": "potion_glow", "label": "Glow", "kind": "slider", "min": 0, "max": 5, "step": 0.05, "default": 1.6 }
+      ]
+    },
+    {
+      "name": "Wizard",
+      "params": [
+        { "id": "robe_colour", "label": "Robe", "kind": "color", "default": [0.07, 0.05, 0.33] },
+        { "id": "iris_colour", "label": "Eyes", "kind": "color", "default": [0.25, 0.48, 0.78] },
+        { "id": "lean", "label": "Lean into turns", "kind": "slider", "min": 0, "max": 2, "step": 0.05, "default": 0.9 }
+      ]
+    },
+    {
+      "name": "Atmosphere",
+      "params": [
+        { "id": "fog", "label": "Fog", "kind": "slider", "min": 0, "max": 0.005, "step": 0.00005, "default": 0.0007 },
+        { "id": "cloud_cover", "label": "Cloud cover", "kind": "slider", "min": 0, "max": 0.7, "step": 0.01, "default": 0.34 },
+        { "id": "cloud_density", "label": "Cloud density", "kind": "slider", "min": 0, "max": 4, "step": 0.05, "default": 1.2 }
+      ]
+    },
+    {
+      "name": "Shader (recompiles)",
+      "params": [
+        { "id": "orb_tendrils", "label": "Lightning inside the orb", "kind": "checkbox", "default": true, "compile": true },
+        { "id": "orb_arcs", "label": "Lightning arcs", "kind": "checkbox", "default": false, "compile": true },
+        { "id": "bolts_per_kind", "label": "Bolts", "kind": "int", "min": 1, "max": 8, "default": 4, "compile": true },
+        { "id": "cloud_samples", "label": "Cloud samples", "kind": "int", "min": 6, "max": 64, "default": 24, "compile": true },
+        { "id": "shadow_steps", "label": "Shadow steps", "kind": "int", "min": 16, "max": 192, "default": 96, "compile": true }
+      ]
+    }
+  ]
+}

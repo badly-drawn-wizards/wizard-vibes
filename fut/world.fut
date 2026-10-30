@@ -142,15 +142,15 @@ def wind : vec3 = vec 0.6 0 (-0.9)
 -- bound is below the coverage threshold the sky is clear, and the other
 -- octaves are skipped. Octave 1 changes by at most about 1.5 per lattice
 -- unit, i.e. 0.165 per world unit, so the margin tells how far is clear.
-def cloud_sample (secs: f32) (w: vec3) : (f32, f32) =
+def cloud_sample (cover: f32) (density: f32) (secs: f32) (w: vec3) : (f32, f32) =
   let h = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
   let q = scale 0.11 (w -^ scale secs wind)
-  let threshold = 0.66 - 0.14 * (4 * h * (1 - h)) -- thinner at top and bottom
+  let threshold = 1 - cover - 0.14 * (4 * h * (1 - h)) -- thinner at top and bottom
   let o1 = vnoise3 q
   let upper = (0.5 * o1 + 0.4375) / 0.9375
   in if upper < threshold then (0, (threshold - upper) / (0.165 * 0.5 / 0.9375))
      else let n = fbm3 4 q
-          in (1.2 * f32.max 0 (n - threshold), 0)
+          in (density * f32.max 0 (n - threshold), 0)
 
 -- Vertical distance from a world height to the slab (0 inside).
 def cloud_gap (y: f32) : f32 = f32.max (cloud_bottom - y) (y - cloud_top) |> f32.max 0

@@ -2,6 +2,7 @@
 -- and rune letters) that the march integrates.
 
 import "vec3"
+import "params"
 import "sdf"
 import "hash"
 import "anim"
@@ -70,6 +71,7 @@ def breath (tm: f32) : f32 = 0.5 - 0.5 * f32.cos (3 * tm)
 -- Everything about the wizard that moves, worked out once per pixel. tm is
 -- the loop angle (for periodic motion), secs the time in seconds.
 type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, local
+            , prm: params -- the drawer's uniforms
             , breath: f32
             , lean: f32 -- sideways shear of the body above the hips, per unit height
             , head: vec3 -- offset of the head, beard and hat
@@ -80,7 +82,7 @@ type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, loca
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
-def pose_at (secs: f32) : pose =
+def pose_at (secs: f32) (prm: params) : pose =
   let tm = loop_angle secs
   let fl = flight_at secs
   let b = breath tm
@@ -88,7 +90,7 @@ def pose_at (secs: f32) : pose =
   -- and in sharper turns points the way with his right hand and looks there.
   let side = f32.sgn fl.turn
   let point = smoothstep 0.03 0.12 (f32.abs fl.turn)
-  let lean = clamp (-0.15) 0.15 (0.9 * fl.turn)
+  let lean = clamp (-0.15) 0.15 (prm.lean * fl.turn)
   let shift (y: f32) = vec (lean * f32.max 0 (y - 0.45)) 0 0
   -- inhaling lifts the shoulders; the head rises and nods forward a little
   let lift = vec 0 (0.012 * b) (0.004 * b) +^ shift 1.33
@@ -105,7 +107,7 @@ def pose_at (secs: f32) : pose =
   let aim_dir = if side < 0 then vec (-0.85) 0.3 0.75 else vec 0.5 0.55 0.9
   let aim = r_shoulder +^ scale 0.62 (normalise aim_dir)
   let (r_elbow, r_wrist) = two_bone r_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
-  in { tm, secs, fl, moon = to_local_dir fl moon_world
+  in { tm, secs, fl, prm, moon = to_local_dir fl moon_world
      , breath = b, lean, head, look = 0.45 * point * side, point, pix = 0.0008
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
@@ -282,8 +284,8 @@ def sd_head (pose: pose) (p: vec3) : f32 =
 
 -- The eyes: eyeballs set into the face (their iris and pupil are shading,
 -- see eye_albedo), with upper lids that close to blink.
--- (the head's surface is at z ~ 0.173 here, so the eye stands ~0.015 proud)
-def eye_centre : vec3 = vec 0.062 1.632 0.163 -- the left eye's (+x); mirrored
+-- (the head's surface is at z ~ 0.173 here, so the eye stands ~0.011 proud)
+def eye_centre : vec3 = vec 0.062 1.632 0.159 -- the left eye's (+x); mirrored
 def eye_radius : f32 = 0.025
 
 -- head space, mirrored onto the left side

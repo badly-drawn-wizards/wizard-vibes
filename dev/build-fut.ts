@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { generate } from "./params.ts";
 
 export const FUT_ROOT = "build/fut";
 const ENTRY = "wizard.fut";
@@ -22,11 +23,16 @@ const SCHEMA = 1;
 
 export type BuildResult =
   | { ok: true; version: string; ms: number; cached: boolean }
-  | { ok: false; message: string };
+  | { ok: false; message: string; cancelled?: boolean };
 
-function run(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; output: string }> {
+function run(
+  cmd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
+): Promise<{ code: number; output: string }> {
   return new Promise((done) => {
-    const p = spawn(cmd, args, { env });
+    const p = spawn(cmd, args, { env, signal });
     let output = "";
     p.stdout.on("data", (d) => (output += d));
     p.stderr.on("data", (d) => (output += d));
@@ -90,8 +96,11 @@ export async function buildId(src: string): Promise<string> {
   return sha(JSON.stringify(inputs)).slice(0, 16);
 }
 
-export async function buildFuthark(src = "fut"): Promise<BuildResult> {
+// Builds the program in `src`. Aborting `signal` kills a running compile
+// (the result is then { ok: false, cancelled: true }).
+export async function buildFuthark(src = "fut", signal?: AbortSignal): Promise<BuildResult> {
   const start = Date.now();
+  if (src === "fut") generate(); // params.fut and config.fut, from params.json
   const id = await buildId(src);
   const dir = join(FUT_ROOT, id);
   if (existsSync(join(dir, "wizard.js"))) {
@@ -101,19 +110,22 @@ export async function buildFuthark(src = "fut"): Promise<BuildResult> {
   }
 
   // Fast typecheck first so errors show up in about a second.
-  const check = await run("futhark", ["check", join(src, ENTRY)]);
+  const check = await run("futhark", ["check", join(src, ENTRY)], process.env, signal);
+  if (signal?.aborted) return { ok: false, message: "cancelled", cancelled: true };
   if (check.code !== 0) return { ok: false, message: check.output };
 
   const tmp = `${dir}.tmp${process.pid}`;
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
-  const build = await run("futhark", ["webgpu", "--library", "-o", join(tmp, "wizard"), join(src, ENTRY)], {
-    ...process.env,
-    ...buildEnv(),
-  });
-  if (build.code !== 0) {
+  const build = await run(
+    "futhark",
+    ["webgpu", "--library", "-o", join(tmp, "wizard"), join(src, ENTRY)],
+    { ...process.env, ...buildEnv() },
+    signal,
+  );
+  if (signal?.aborted || build.code !== 0) {
     rmSync(tmp, { recursive: true, force: true });
-    return { ok: false, message: build.output };
+    return signal?.aborted ? { ok: false, message: "cancelled", cancelled: true } : { ok: false, message: build.output };
   }
   rmSync(dir, { recursive: true, force: true });
   renameSync(tmp, dir);

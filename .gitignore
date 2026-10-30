@@ -3,3 +3,6 @@ build/
 node_modules/
 dist/
 result
+fut/params.fut
+fut/config.fut
+config.local.json

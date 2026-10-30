@@ -3,6 +3,7 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { generate } from "./params.ts";
 
 export interface View {
   width: number;
@@ -16,6 +17,7 @@ export interface View {
 const EXE = "build/ref/wizard";
 
 export function compileCpu(): void {
+  generate();
   mkdirSync("build/ref", { recursive: true });
   execFileSync("futhark", ["multicore", "-o", EXE, "fut/wizard.fut"], { stdio: "inherit" });
 }

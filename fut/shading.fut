@@ -1,6 +1,7 @@
 -- Materials, sky and lighting for the wizard scene.
 
 import "vec3"
+import "params"
 import "sdf"
 import "hash"
 import "anim"
@@ -110,7 +111,7 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m == m_ground then
     let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
     in plain (scale (0.8 + 0.4 * tile) (vec 0.3 0.14 0.08))
-       with emission = scale (0.9 * rune_pulse tm * rune_paint tm p) rune_glow_colour
+       with emission = scale (0.9 * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) rune_glow_colour
        with ks = 0.3 with shininess = 40 with rim = false
   else plain (splat 0.5)
 
@@ -144,7 +145,8 @@ def n_lights : i32 = 5
 def light_at (pose: pose) (g: glow) (k: i32) : light =
   if k == 0 then
     { pos = pose.moon, directional = true
-    , diffuse = vec 0.375 0.45 0.75, specular = vec 0.7 0.75 1
+    , diffuse = scale pose.prm.moon_strength pose.prm.moon_colour
+    , specular = scale pose.prm.moon_strength (vec 0.7 0.75 1)
     , falloff = 0, range = f32.inf, radius = 0, shadowed = true, unshadowed = -1 }
   else if k == 1 then
     -- The orb's light flickers with the lightning, whitening in flashes.
@@ -153,7 +155,7 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     -- The staff holds the orb on its tip, so its shadow rays towards the
     -- orb run along its own surface and graze every swelling and knot; a
     -- branch cannot really shadow a light at its own tip, so it is exempt.
-    let c = scale (2.4 * g.level) (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
+    let c = scale (pose.prm.orb_light * g.level) (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
     in { pos = orb_pos, directional = false, diffuse = c, specular = c
        , falloff = 1.5, range = f32.inf, radius = orb_radius, shadowed = true, unshadowed = m_staff }
   else
@@ -161,7 +163,7 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     -- a slight flicker of its own (whole multiples of the loop).
     let i = k - 2
     let flicker = 1 + 0.12 * f32.sin (f32.i32 (7 + 3 * i) * pose.tm + f32.i32 i * 2.1)
-    let c = scale (1.2 * flicker) (glow_colour (m_potion + i))
+    let c = scale (pose.prm.potion_light * flicker) (glow_colour (m_potion + i))
     in { pos = from_body_space pose (potion_centre i), directional = false, diffuse = c, specular = scale 0.3 c
        , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04, shadowed = false, unshadowed = -1 }
 
@@ -237,15 +239,18 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
          let k = pow (f32.sqrt (f32.max 0 (1 - th * th))) 60
          in scale (0.35 * k * moon_shadow * saturate (dot n pose.moon + 0.2)) (vec 0.75 0.8 1)
   let c = lit +^ fill +^ rim +^ mirror +^ sheen +^ hair_spec +^ mat.emission
-  let fog = 1 - f32.exp (-0.0007 * t * t)
-  in mix c (sky (to_world_dir pose.fl rd)) fog
+  let fog = 1 - f32.exp (-pose.prm.fog * t * t)
+  in match pose.prm.view
+     case 1 -> scale 0.5 (n +^ splat 1)
+     case 2 -> mat.albedo
+     case 3 -> splat occ
+     case _ -> mix c (sky (to_world_dir pose.fl rd)) fog
 
 ---------------------------------------------------------------------
 -- The glass orb
 
--- Compile-time switch: reflect the scene in the orb's glass too.
-def orb_reflections : bool = true
-def orb_ior : f32 = 1.45
+-- (whether the orb reflects, and its index of refraction, are uniforms:
+-- orb_reflections and orb_ior in params.json)
 def glass_tint : vec3 = vec 0.93 0.97 1
 
 -- Distances (entry, exit) where the ray meets the orb; entry > exit on a miss.
@@ -260,8 +265,8 @@ def refract (i: vec3) (n: vec3) (eta: f32) : vec3 =
      else scale eta i +^ scale (eta * cosi - f32.sqrt k) n
 
 -- Schlick's approximation of the reflected fraction.
-def fresnel (cosi: f32) : f32 =
-  let r0 = ((1 - orb_ior) / (1 + orb_ior)) ** 2
+def fresnel (ior: f32) (cosi: f32) : f32 =
+  let r0 = ((1 - ior) / (1 + ior)) ** 2
   in r0 + (1 - r0) * pow (1 - saturate cosi) 5
 
 -- The potions' glass, a thin wall rays pass through. Finds where the ray
@@ -335,24 +340,24 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
            -- into the glass
            let p = ro +^ scale t_in rd
            let n = normalise (p -^ orb_pos)
-           let f = fresnel (-(dot n rd))
+           let f = fresnel pose.prm.orb_ior (-(dot n rd))
            let refl = if refl.0 then refl else (true, p, reflect rd n, w.x * f)
-           in (p, refract rd n (1 / orb_ior), scale (1 - f) (w *^ glass_tint), acc, true, false, refl)
+           in (p, refract rd n (1 / pose.prm.orb_ior), scale (1 - f) (w *^ glass_tint), acc, true, false, refl)
          else if inside && t >= t_out then
            -- out of the glass
            let p = ro +^ scale t_out rd
            let n = normalise (p -^ orb_pos)
-           in (p, refract rd (scale (-1) n) orb_ior, w *^ glass_tint, acc, false, false, refl)
+           in (p, refract rd (scale (-1) n) pose.prm.orb_ior, w *^ glass_tint, acc, false, false, refl)
          else (ro, rd, w, acc +^ (w *^ sky (to_world_dir pose.fl rd)), inside, true, refl)
   in (acc, refl)
 
-def shade (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
+def shade (prm: params) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
   -- worked out once per pixel, not per march step
-  let pose = pose_at secs with pix = pix
+  let pose = pose_at secs prm with pix = pix
   let g = glow_now pose.tm
   -- Path 0 is the camera ray; path 1 its reflection off the orb, if any.
   -- A loop, so that follow (and all the shading) is compiled only once.
-  let paths = if orb_reflections then 2 else 1
+  let paths = if prm.orb_reflections then 2 else 1
   let (c, _) =
     loop (c, refl) = (splat 0, (false, ro, rd, 0f32)) for k < paths do
       if k == 1 && !refl.0 then (c, refl) else
