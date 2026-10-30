@@ -43,6 +43,46 @@ def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
 
 def sd_orb (p: vec3) : f32 = sd_sphere (p -^ orb_pos) orb_radius
 
+-- The gold cradle holding the orb: a collar on the staff tip and prongs that
+-- curve up around the glass with a helical twist. Angles are polar angles
+-- from the orb's bottom, along the staff's axis.
+def prongs : f32 = 5
+def prong_start : f32 = 0.45
+def prong_end : f32 = 1.37 -- 78 degrees: 40% of the way up the orb
+def prong_twist : f32 = 1.2 -- radians around the orb per radian climbed
+def prong_radius : f32 = 0.013
+
+def sd_cradle (p: vec3) : f32 =
+  -- a frame around the staff's axis
+  let ax = staff_dir
+  let e1 = normalise (cross ax (vec 0 0 1))
+  let e2 = cross ax e1
+  let v = p -^ orb_pos
+  let rho = length v
+  let theta = f32.acos (clamp (-1) 1 (-(dot v ax) / f32.max rho 1e-6))
+  let phi = f32.atan2 (dot v e2) (dot v e1)
+  -- prongs: tubes on a sphere just outside the glass, folded into one sector
+  let r = orb_radius + 0.6 * prong_radius
+  let th = clamp prong_start prong_end theta
+  let f = (th - prong_start) / (prong_end - prong_start)
+  let sector = 2 * f32.pi / prongs
+  let dphi = (fract ((phi - prong_twist * th) / sector + 0.5) - 0.5) * sector
+  let radial = rho - r
+  let across = r * f32.sin th * dphi
+  let along = r * (theta - th)
+  -- the twist stretches space by at most this much, so divide it out
+  let stretch = f32.sqrt (1 + (prong_twist * f32.sin th) ** 2)
+  let prong = (f32.sqrt (radial * radial + across * across + along * along) - prong_radius * (1 - 0.4 * f)) / stretch
+  let tip = (f32.sqrt (radial * radial + across * across + (r * (theta - prong_end)) ** 2) - 0.014) / stretch
+  -- collar: a ring where the prongs start, on a cup flaring from the staff
+  let ring_centre = orb_pos -^ scale (r * f32.cos prong_start) ax
+  let ring_r = r * f32.sin prong_start
+  let w = p -^ ring_centre
+  let h = dot w ax
+  let ring = length2 (vec2 (length (w -^ scale h ax) - ring_r) h) - 0.014
+  let cup = sd_round_cone_ab p (staff_top -^ scale 0.05 ax) ring_centre staff_radius (0.85 * ring_r)
+  in f32.min (smin 0.02 ring cup) (smin 0.01 prong tip)
+
 def sd_robe (tm: f32) (p: vec3) : f32 =
   let a = f32.atan2 p.z p.x
   let hem = 0.02 * f32.sin (9 * a + 2 * tm) * saturate (1 - p.y / 0.8)
@@ -129,6 +169,7 @@ def wizard (tm: f32) (p: vec3) : hit =
   |> umin (sd_hat tm p, m_hat)
   |> umin (sd_band p, m_gold)
   |> umin (sd_staff p, m_wood)
+  |> umin (sd_cradle p, m_gold)
 
 ---------------------------------------------------------------------
 -- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.

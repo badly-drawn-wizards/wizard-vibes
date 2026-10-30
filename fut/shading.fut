@@ -59,10 +59,11 @@ def sky (rd: vec3) : vec3 =
 ---------------------------------------------------------------------
 -- Materials
 
-type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: bool}
+-- Metals tint their highlights with their albedo and have little diffuse.
+type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: bool, metal: bool}
 
 def plain (albedo: vec3) : material =
-  {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true}
+  {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false}
 
 def material (tm: f32) (g: glow) (m: i32) (p: vec3) : material =
   if m == m_robe then plain (vec 0.07 0.05 0.33)
@@ -71,7 +72,7 @@ def material (tm: f32) (g: glow) (m: i32) (p: vec3) : material =
   else if m == m_hat then
     let s = hat_stars tm p
     in plain (mix (vec 0.09 0.08 0.36) (vec 1 0.8 0.3) s) with emission = scale (0.6 * s) (vec 1 0.75 0.3)
-  else if m == m_gold then plain (vec 0.95 0.72 0.25) with ks = 1 with shininess = 60
+  else if m == m_gold then plain (vec 1 0.6 0.14) with ks = 1.6 with shininess = 48 with metal = true
   else if m == m_eye then plain (splat 0.02) with ks = 0.8 with shininess = 120
   else if m == m_wood then
     plain (scale (0.75 + 0.25 * f32.sin (p.y * 45 + 3 * f32.sin (p.x * 40))) (vec 0.36 0.21 0.1))
@@ -90,7 +91,8 @@ def material (tm: f32) (g: glow) (m: i32) (p: vec3) : material =
 def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse: vec3) (specular: vec3) : vec3 =
   let lit = saturate (dot n l) * shadow
   let spec = mat.ks * pow (saturate (dot n (normalise (l -^ rd)))) mat.shininess * lit
-  in scale lit (mat.albedo *^ diffuse) +^ scale spec specular
+  in if mat.metal then scale (0.25 * lit) (mat.albedo *^ diffuse) +^ scale spec (mat.albedo *^ specular)
+     else scale lit (mat.albedo *^ diffuse) +^ scale spec specular
 
 -- The lit colour of a surface hit at distance t along rd (fog included).
 def surface (tm: f32) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
@@ -113,7 +115,16 @@ def surface (tm: f32) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
   let rim = if mat.rim then scale (occ * pow (1 - saturate (-(dot n rd))) 3 * 0.25) (vec 0.35 0.3 0.8)
             else splat 0
-  let c = moon +^ orb +^ fill +^ rim +^ mat.emission
+  -- Metals mirror their surroundings: the sky, and the glowing orb where
+  -- the reflected ray points at it (it is right next to the gold cradle).
+  let mirror =
+    if !mat.metal then splat 0
+    else let r = reflect rd n
+         let cos_orb = dot r ol
+         let disc = f32.cos (f32.asin (f32.min 1 (orb_radius / od)))
+         let orb_seen = smoothstep (disc - 0.05) disc cos_orb + 0.25 * pow (saturate cos_orb) 6
+         in mat.albedo *^ (scale 0.6 (sky r) +^ scale (1.6 * g.level * orb_seen) (vec 0.75 0.9 1))
+  let c = moon +^ orb +^ fill +^ rim +^ mirror +^ mat.emission
   let fog = 1 - f32.exp (-0.0025 * t * t)
   in mix c (sky rd) fog
 
