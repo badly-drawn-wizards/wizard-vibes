@@ -452,10 +452,16 @@ def rock (p: vec3) : hit =
 
 -- The terrain far below, sampled through the flight frame. No peak is above
 -- terrain_max, so well above it the height over terrain_max is a cheap lower
--- bound (it stays >= 1.5 here, so it can never register as a hit). Detail
--- fades with distance from the wizard (the camera is near him): full within
--- 10 units, two fewer octaves by 30.
-def terrain_detail (p: vec3) : f32 = 5 - 2 * saturate ((length p - 10) / 20)
+-- bound (it stays >= 1.5 here, so it can never register as a hit).
+--
+-- Terrain detail (octaves) is deliberately not reduced with distance. A
+-- distance-based fade is centred on the wizard, who moves through the world,
+-- so the ground changed shape as he flew past it: the terrain visibly swam.
+-- Measured against a high-quality reference over consecutive flight frames,
+-- the fade caused about three times the flicker of the cloud sampling, and
+-- pushing it out to 30-60 units only halved that while costing the same as
+-- no fade at all (17.2 ms at 1080p either way).
+def terrain_detail (_p: vec3) : f32 = 5
 
 def terrain (pose: pose) (p: vec3) : hit =
   let w = to_world pose.fl p
