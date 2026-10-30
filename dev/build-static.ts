@@ -50,6 +50,8 @@ await esbuild.build({
 });
 cpSync("web/index.html", join(out, "index.html"));
 writeFileSync(join(out, ".nojekyll"), ""); // serve files as they are
+// the licence, and those of the code compiled into the shader module
+for (const f of ["LICENSE", "THIRD_PARTY_LICENSES.txt"]) cpSync(f, join(out, f));
 
 const size = (p: string) => Math.round(readFileSync(p).length / 1024);
 console.error(`${out}/: page ${size(join(out, "web/main.js"))} KiB, shader ${size(join(out, "fut", r.version, "wizard.wasm"))} KiB wasm + ${size(join(out, "fut", r.version, "wizard.js"))} KiB js`);

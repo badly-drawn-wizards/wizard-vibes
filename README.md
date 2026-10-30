@@ -186,3 +186,11 @@ Compile-time switches (save the file and hot reload picks them up):
 | `orb_tendrils`: lightning inside the glass | `fut/lightning.fut` | on |
 | `orb_arcs`: lightning leaping out of the orb | `fut/lightning.fut` | off |
 | `orb_reflections`: reflect the scene in the glass | `fut/shading.fut` | on (about 0.1 ms at 1080p) |
+
+## License
+
+GPL-3.0-or-later; see [LICENSE](LICENSE). The built shader module also
+contains the Futhark runtime (ISC), the Emscripten runtime (MIT/NCSA) and
+Dawn's emdawnwebgpu bindings (BSD-3-Clause), whose licenses are in
+[THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) and ship with the
+static site.
