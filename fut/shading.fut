@@ -123,6 +123,46 @@ def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse:
   in if mat.metal then scale (0.25 * lit) (mat.albedo *^ diffuse) +^ scale spec (mat.albedo *^ specular)
      else scale lit (mat.albedo *^ diffuse) +^ scale spec specular
 
+---------------------------------------------------------------------
+-- Lights
+
+-- A light: directional (pos is then its direction) or a point light whose
+-- intensity falls off as 1 / (1 + falloff d^2), and smoothly to nothing at
+-- `range` (cheap lights only reach nearby surfaces). Point lights of some
+-- size stop their shadow rays short of it. One material can be exempt from
+-- a light's shadows.
+type light = { pos: vec3, directional: bool
+             , diffuse: vec3, specular: vec3
+             , falloff: f32, range: f32, radius: f32
+             , shadowed: bool, unshadowed: i32 }
+
+-- The moon, the orb, and a weak light in each potion.
+def n_lights : i32 = 5
+
+def light_at (pose: pose) (g: glow) (k: i32) : light =
+  if k == 0 then
+    { pos = pose.moon, directional = true
+    , diffuse = vec 0.375 0.45 0.75, specular = vec 0.7 0.75 1
+    , falloff = 0, range = f32.inf, radius = 0, shadowed = true, unshadowed = -1 }
+  else if k == 1 then
+    -- The orb's light flickers with the lightning, whitening in flashes.
+    -- Its shadow rays stop short of it: the staff pokes into its underside,
+    -- and a penumbra estimate taken right next to the light bands badly.
+    -- The staff holds the orb on its tip, so its shadow rays towards the
+    -- orb run along its own surface and graze every swelling and knot; a
+    -- branch cannot really shadow a light at its own tip, so it is exempt.
+    let c = scale (2.4 * g.level) (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
+    in { pos = orb_pos, directional = false, diffuse = c, specular = c
+       , falloff = 1.5, range = f32.inf, radius = orb_radius, shadowed = true, unshadowed = m_staff }
+  else
+    -- The potions: weak, unshadowed, reaching about half a unit, each with
+    -- a slight flicker of its own (whole multiples of the loop).
+    let i = k - 2
+    let flicker = 1 + 0.12 * f32.sin (f32.i32 (7 + 3 * i) * pose.tm + f32.i32 i * 2.1)
+    let c = scale (1.2 * flicker) (glow_colour (m_potion + i))
+    in { pos = from_body_space pose (potion_centre i), directional = false, diffuse = c, specular = scale 0.3 c
+       , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04, shadowed = false, unshadowed = -1 }
+
 -- The lit colour of a surface hit at distance t along rd (fog included).
 def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   -- The terrain's normal comes from its height gradient, worked out
@@ -148,24 +188,26 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
     -- tmax only crawled through empty space)
     else soft_shadow (occluder_dist pose) po l
                      (f32.min tmax (sphere_exit occluder_centre occluder_radius po l + 1))
-  let moon_shadow = shadow pose.moon 12
-  let moon = light mat n rd pose.moon moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
+  -- All the lights, in one loop so the lighting and shadow code is
+  -- compiled once. The moon's shadow is kept for the cloth sheen.
+  let (lit, moon_shadow) =
+    loop (lit, moon_shadow) = (splat 0, 0f32) for k < n_lights do
+      let L = light_at pose g k
+      let (l, d) = if L.directional then (L.pos, f32.inf)
+                   else let v = L.pos -^ p
+                        let d = length v
+                        in (scale (1 / d) v, d)
+      let atten = if L.directional then 1
+                  else smoothstep L.range (0.6 * L.range) d / (1 + L.falloff * d * d)
+      -- (skipped where the light is negligible, e.g. the orb on the far terrain)
+      in if atten < 0.01 then (lit, moon_shadow) else
+      let sh = if !L.shadowed || d < L.radius || m == L.unshadowed then 1
+               else shadow l (if L.directional then 12 else d - L.radius - 0.15)
+      let c = light mat n rd l sh (scale atten L.diffuse) (scale atten L.specular)
+      in (lit +^ c, if k == 0 then sh else moon_shadow)
   let to_orb = orb_pos -^ p
   let od = length to_orb
   let ol = scale (1 / od) to_orb
-  -- the orb's light flickers with the lightning, whitening in flashes
-  let atten = 2.4 * g.level / (1 + 1.5 * od * od)
-  -- Stop short of the orb: the staff pokes into its underside, and a
-  -- penumbra estimate taken right next to the light bands badly.
-  -- (skipped where the orb's light is negligible, e.g. on the far terrain)
-  -- The staff holds the orb on its tip, so its shadow rays towards the orb
-  -- run along its own surface and graze every swelling and knot; a branch
-  -- cannot really shadow a light at its own tip, so it is left unshadowed.
-  let orb_shadow = if od < orb_radius || m == m_staff then 1
-                   else if atten < 0.01 then 0
-                   else shadow ol (od - orb_radius - 0.15)
-  let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
-  let orb = light mat n rd ol orb_shadow orb_colour orb_colour
   let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
   let rim = if mat.rim then scale (occ * pow (1 - saturate (-(dot n rd))) 3 * 0.25) (vec 0.35 0.3 0.8)
             else splat 0
@@ -192,7 +234,7 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
          let th = dot hair_tangent hh
          let k = pow (f32.sqrt (f32.max 0 (1 - th * th))) 60
          in scale (0.35 * k * moon_shadow * saturate (dot n pose.moon + 0.2)) (vec 0.75 0.8 1)
-  let c = moon +^ orb +^ fill +^ rim +^ mirror +^ sheen +^ hair_spec +^ mat.emission
+  let c = lit +^ fill +^ rim +^ mirror +^ sheen +^ hair_spec +^ mat.emission
   let fog = 1 - f32.exp (-0.0007 * t * t)
   in mix c (sky (to_world_dir pose.fl rd)) fog
 

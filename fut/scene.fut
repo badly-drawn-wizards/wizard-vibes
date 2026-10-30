@@ -419,24 +419,29 @@ def sd_buckle (p: vec3) : f32 =
 -- and glass in shading.fut); the liquid inside is, and glows.
 def potion_angle (i: i32) : f32 = deg (70 + 24 * f32.i32 i)
 
+def potion_neck_top (i: i32) : vec3 =
+  let y = belt_y - 0.026
+  in scale (robe_radius y + 0.02) (around (potion_angle i)) +^ vec 0 y 0
+
+-- The centre of potion i's body, in body space.
+def potion_centre (i: i32) : vec3 =
+  let body_top = potion_neck_top i -^ vec 0 0.03 0
+  in if i == 1 then body_top -^ vec 0 0.055 0 else body_top -^ vec 0 0.032 0
+
 -- (outer glass surface, cork, liquid surface height) of potion i
 def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
-  let a = potion_angle i
-  let neck_top_y = belt_y - 0.026
-  let neck_len = 0.03
-  let neck_top = scale (robe_radius neck_top_y + 0.02) (around a) +^ vec 0 neck_top_y 0
-  let body_top = neck_top -^ vec 0 neck_len 0
+  let neck_top = potion_neck_top i
+  let body_top = neck_top -^ vec 0 0.03 0
+  let c = potion_centre i
   let (glass, level) =
     if i == 1 then
       -- tall bottle: a rounded cylinder under the neck, four-fifths full
-      let c = body_top -^ vec 0 0.055 0
-      in ( smin 0.01 (sd_capsule p (c -^ vec 0 0.03 0) (c +^ vec 0 0.025 0) 0.03)
+      ( smin 0.01 (sd_capsule p (c -^ vec 0 0.03 0) (c +^ vec 0 0.025 0) 0.03)
                      (sd_capsule p body_top neck_top 0.012)
          , c.y + 0.03 )
     else
       -- round flask, two-thirds full
       let r = 0.04
-      let c = body_top -^ vec 0 (r * 0.8) 0
       in (smin 0.015 (sd_sphere (p -^ c) r) (sd_capsule p body_top neck_top 0.013), c.y + 0.25 * r)
   let cork = sd_capsule p (neck_top -^ vec 0 0.008 0) (neck_top +^ vec 0 0.01 0) 0.015
   in (glass, cork, level)
@@ -453,6 +458,10 @@ def potion (i: i32) (p: vec3) : hit =
 -- Where the potions hang, in body space, and a sphere holding all three.
 def potions_at : vec3 = scale (robe_radius 0.84 + 0.05) (around (potion_angle 1)) +^ vec 0 0.84 0
 def potions_radius : f32 = 0.26
+
+-- From body space (which leans into turns) back to the figure's local space.
+def from_body_space (pose: pose) (q: vec3) : vec3 =
+  q +^ vec (pose.lean * f32.max 0 (q.y - 0.45)) 0 0
 
 -- The potions' glass: distance to the nearest outer glass surface, in the
 -- figure's local space.
