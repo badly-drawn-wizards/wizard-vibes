@@ -64,6 +64,11 @@ type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: boo
 def plain (albedo: vec3) : material =
   {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false, sheen = 0}
 
+-- How far the sky shows through at distance t: the fog, and towards the view
+-- distance (where rays stop) a fade into the sky, so there is no edge.
+def fog_at (prm: params) (t: f32) : f32 =
+  f32.max (1 - f32.exp (-prm.fog * t * t)) (1 - view_fade prm t)
+
 -- The frame of the structure at local point p: (kind, origin, yaw). (It
 -- looks up the ground there, so work it out once per pixel.)
 def structure_frame (pose: pose) (p: vec3) : (i32, vec3, f32) =
@@ -156,7 +161,7 @@ def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   let r = reflect rd n
   let glint = scale (1.5 * pow (saturate (dot r pose.moon)) 400) (vec 0.85 0.9 1)
   let c = mix pose.prm.water_colour (sky pose (to_world_dir pose.fl r)) f +^ glint
-  let fog = 1 - f32.exp (-pose.prm.fog * t * t)
+  let fog = fog_at pose.prm t
   in mix c (sky pose (to_world_dir pose.fl rd)) fog
 
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
@@ -349,7 +354,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
          let k = pow (f32.sqrt (f32.max 0 (1 - th * th))) 60
          in scale (0.35 * k * moon_shadow * saturate (dot n pose.moon + 0.2)) (vec 0.75 0.8 1)
   let c = lit +^ fill +^ rim +^ mirror +^ sheen +^ hair_spec +^ mat.emission
-  let fog = 1 - f32.exp (-pose.prm.fog * t * t)
+  let fog = fog_at pose.prm t
   in match pose.prm.view
      case 1 -> scale 0.5 (n +^ splat 1)
      case 2 -> mat.albedo
@@ -426,7 +431,7 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       -- (a hidden orb is no glass at all)
       let (t_in, t_out) = if has vis layers_orb then orb_hit ro rd else (f32.inf, -f32.inf)
       let enters = !inside && t_in > 1e-3 && t_in < t_out
-      let tmax = if inside then t_out else if enters then t_in else 60
+      let tmax = if inside then t_out else if enters then t_in else pose.prm.view_distance
       -- Two passes: the terrain alone over the whole segment, then the scene
       -- near the wizard up to the terrain hit or the edge of the sphere that
       -- holds it (the peaks reach into that sphere, so the terrain goes

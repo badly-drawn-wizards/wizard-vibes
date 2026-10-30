@@ -69,6 +69,10 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
 -- in advance, and the march need not take small steps (each evaluating the
 -- whole scene) to cross it.
 
+-- Towards the view distance, where rays stop, everything fades into the sky
+-- (1 near .. 0 at the view distance), so there is no edge.
+def view_fade (prm: params) (t: f32) : f32 = smoothstep prm.view_distance (0.7 * prm.view_distance) t
+
 -- Radiance and transmittance of the clouds along ro + t rd for t in
 -- [0, tend]. About 24 samples, spread over the part of the ray inside the
 -- slab; clear sky is skipped using the bound from cloud_sample.
@@ -88,6 +92,7 @@ def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
     while t < t1 && i < 64 && tr > 0.02 do
       let w = wo +^ scale t wd
       let (dens, clear) = cloud_sample pose.prm.cloud_cover pose.prm.cloud_density pose.secs w
+      let dens = dens * view_fade pose.prm t
       in if dens <= 0 then (t + f32.max dt clear, i + 1, rad, tr)
          else let ch = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
               in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour pose.prm ch), tr * f32.exp (-dens * dt))
