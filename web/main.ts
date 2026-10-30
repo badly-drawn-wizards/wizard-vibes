@@ -76,7 +76,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`v${current.version} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
+    .then(() => setStatus(`v${current.version}${current.f32 ? " · f32" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }
@@ -110,6 +110,25 @@ function reload(version: number): void {
 }
 
 if (!navigator.gpu) showError("WebGPU is not available in this browser.");
+
+// Debug/test hook: render one frame and read it back to the CPU. The render
+// loop is held off meanwhile, since entry points must not run concurrently.
+(window as unknown as { wizard: object }).wizard = {
+  async readFrame(w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number) {
+    const i = inst;
+    if (!i) throw new Error("no Futhark instance loaded");
+    inst = null;
+    await inFlight;
+    try {
+      const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist);
+      const pixels: Uint32Array = await out.values();
+      out.free();
+      return { f32: i.f32, pixels: Array.from(pixels) };
+    } finally {
+      inst = i;
+    }
+  },
+};
 
 const events = new EventSource("/events");
 events.addEventListener("building", () => setStatus("compiling…"));

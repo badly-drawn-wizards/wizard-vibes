@@ -41,5 +41,22 @@ render scale.
 | `npm run gif -- [w h fps yaw pitch dist]` | one loop as `build/wizard.gif` |
 | `CHROME=$(which chromium) node dev/screenshot.ts [url] [out] [ms]` | headless screenshot of the live page |
 
-Requires a browser whose WebGPU adapter supports `shader-f16`. Chrome on Linux
-needs Vulkan; see `dev/chrome-args.ts` for the headless flags.
+## f16
+
+Futhark's WebGPU runtime always requires the `shader-f16` device feature
+(`rts/c/backends/webgpu.h`) and puts `enable f16;` plus f16 helper functions
+in front of every shader (`src/Futhark/CodeGen/RTS/WGSL.hs`), even for
+f32-only programs like this one. When the adapter lacks `shader-f16`, or the
+URL has `?f32`, `web/wgsl-f32.ts` handles it at load time:
+
+- it drops the feature from Futhark's device request;
+- it strips the f16 declarations from each shader before compiling it;
+- if a kernel actually uses f16, it fails with an error saying so.
+
+On a GPU that supports f16, the stripped shaders give bit-identical frames.
+The HUD shows `f32` when this mode is active.
+
+Chrome on Linux needs Vulkan for hardware WebGPU; see `dev/chrome-args.ts` for
+the headless flags. The SwiftShader fallback adapter can compile the shaders
+but Futhark's kernels don't run correctly on it (read-backs are aborted), so a
+real GPU is needed.
