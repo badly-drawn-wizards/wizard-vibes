@@ -29,7 +29,7 @@ def star_mask (x: f32) (y: f32) (size: f32) : f32 =
 -- the star is measured in arc length, so stars keep their shape as the cone
 -- narrows.
 def hat_stars (pose: pose) (p: vec3) : f32 =
-  let bp = bend (hat_bend pose.tm) (head_space pose p -^ hat_base)
+  let bp = bend pose.prm.hat_droop (head_space pose p -^ hat_base)
   let cell = 0.085
   let y0 = 0.08 -- start above the band, keeping the brim clear
   let v = (bp.y - y0) / cell
@@ -164,7 +164,7 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     let i = k - 2
     let flicker = 1 + 0.12 * f32.sin (f32.i32 (7 + 3 * i) * pose.tm + f32.i32 i * 2.1)
     let c = scale (pose.prm.potion_light * flicker) (glow_colour (m_potion + i))
-    in { pos = from_body_space pose (potion_centre i), directional = false, diffuse = c, specular = scale 0.3 c
+    in { pos = from_body_space pose (potion_centre pose.prm i), directional = false, diffuse = c, specular = scale 0.3 c
        , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04, shadowed = false, unshadowed = -1 }
 
 -- The lit colour of a surface hit at distance t along rd (fog included).
@@ -276,7 +276,7 @@ def fresnel (ior: f32) (cosi: f32) : f32 =
 -- tinted). Only rays passing near the potions are traced.
 def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec3) =
   -- the potions' bounding sphere, in local space (body space leans)
-  let c = from_body_space pose potions_at
+  let c = from_body_space pose (potions_at pose.prm)
   let r = potions_radius + 0.02
   let (enter, exit) = ray_sphere c r ro rd
   in if enter > exit then (splat 0, splat 1) else

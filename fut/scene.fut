@@ -165,7 +165,7 @@ def sd_cradle (p: vec3) : f32 =
 def sd_robe (pose: pose) (p: vec3) : f32 =
   let a = f32.atan2 p.z p.x
   let hem = 0.02 * f32.sin (9 * a + 2 * pose.tm) * saturate (1 - p.y / 0.8)
-  let cone = sd_capped_cone p 1.35 0.55 0.17 - 0.03 + hem
+  let cone = sd_capped_cone p 1.35 pose.prm.robe_hem 0.17 - 0.03 + hem
   -- the chest fills out with each breath
   let b = pose.breath
   let shoulders = sd_ellipsoid (p -^ vec 0 (1.3 + 0.01 * b) (0.004 * b)) (vec (0.29 + 0.008 * b) 0.14 (0.2 + 0.01 * b))
@@ -365,13 +365,12 @@ def sd_beard (pose: pose) (p: vec3) : f32 =
   in 0.85 * smin 0.03 (smin 0.06 body jaw) moustache
 
 def hat_base : vec3 = vec 0 1.74 0
-def hat_bend (tm: f32) : f32 = 0.9 + 0.15 * f32.sin tm
 def hat_height : f32 = 0.72
 def hat_radius (y: f32) : f32 = 0.2 - (0.2 - 0.012) * saturate (y / hat_height)
 
 def sd_hat (pose: pose) (p: vec3) : f32 =
   let hp = head_space pose p -^ hat_base
-  let bp = bend (hat_bend pose.tm) hp
+  let bp = bend pose.prm.hat_droop hp
   let cone = sd_capped_cone bp hat_height (hat_radius 0) (hat_radius hat_height)
   -- a flat disc with a slim rolled (welt) edge
   let brim = f32.min (sd_torus hp 0.25 0.012) (sd_cylinder hp 0.255 0.01)
@@ -413,26 +412,28 @@ def sd_staff (p: vec3) : f32 =
 -- Belt, buckle, potions and tome
 
 -- Radius of the robe's cone at height y (before the hem ripple).
-def robe_radius (y: f32) : f32 = 0.55 - (0.55 - 0.17) * y / 1.35 + 0.03 -- the -0.03 in sd_robe rounds outward
-def belt_y : f32 = 0.92
+-- The robe's surface radius at height y (the -0.03 in sd_robe rounds it
+-- outward), and the belt's height: everything at the waist is placed from
+-- these, so it follows the drawer's robe_hem and belt_height.
+def robe_radius (prm: params) (y: f32) : f32 = prm.robe_hem - (prm.robe_hem - 0.17) * y / 1.35 + 0.03
 
 -- Outward horizontal direction at an angle round the body (0 = front, +x at 90 degrees).
 def around (a: f32) : vec3 = vec (f32.sin a) 0 (f32.cos a)
 def deg (d: f32) : f32 = d * f32.pi / 180
 
-def sd_belt (p: vec3) : f32 =
+def sd_belt (prm: params) (p: vec3) : f32 =
   let r = length2 (vec2 p.x p.z)
-  let q = vec2 (r - (robe_radius p.y + 0.008)) (p.y - belt_y)
+  let q = vec2 (r - (robe_radius prm p.y + 0.008)) (p.y - prm.belt_height)
   -- a rounded rectangle in the (radius, height) plane, swept round the body
   let d = vec2 (f32.abs q.x - 0.008) (f32.abs q.y - 0.024)
   in length2 (vec2 (f32.max d.x 0) (f32.max d.y 0)) + f32.min (f32.max d.x d.y) 0 - 0.006
 
 -- A gold pentagram in a ring, on the front of the belt. Every stroke is a
 -- round tube, so it reads as cast metal.
-def buckle_centre : vec3 = vec 0 belt_y (robe_radius belt_y + 0.03)
+def buckle_centre (prm: params) : vec3 = vec 0 prm.belt_height (robe_radius prm prm.belt_height + 0.03)
 
-def sd_buckle (p: vec3) : f32 =
-  let q = p -^ buckle_centre
+def sd_buckle (prm: params) (p: vec3) : f32 =
+  let q = p -^ buckle_centre prm
   let rad = 0.05
   let corner (k: i32) =
     let a = f32.pi / 2 + 2 * f32.pi * f32.i32 k / 5
@@ -459,22 +460,22 @@ def sd_strap (p: vec3) (a: vec3) (b: vec3) (n: vec3) : f32 =
 def potion_angle (i: i32) : f32 = deg (70 + 24 * f32.i32 i)
 
 -- Each potion hangs below the belt from a strap round its neck.
-def potion_neck_top (i: i32) : vec3 =
-  let y = belt_y - 0.06
-  in scale (robe_radius y + 0.022) (around (potion_angle i)) +^ vec 0 y 0
+def potion_neck_top (prm: params) (i: i32) : vec3 =
+  let y = prm.belt_height - 0.06
+  in scale (robe_radius prm y + 0.022) (around (potion_angle i)) +^ vec 0 y 0
 
 def potion_neck_radius (i: i32) : f32 = if i == 1 then 0.012 else 0.013
 
 -- The centre of potion i's body, in body space.
-def potion_centre (i: i32) : vec3 =
-  let body_top = potion_neck_top i -^ vec 0 0.03 0
+def potion_centre (prm: params) (i: i32) : vec3 =
+  let body_top = potion_neck_top prm i -^ vec 0 0.03 0
   in if i == 1 then body_top -^ vec 0 0.055 0 else body_top -^ vec 0 0.032 0
 
 -- (outer glass surface, cork, liquid surface height) of potion i
-def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
-  let neck_top = potion_neck_top i
+def potion_parts (prm: params) (i: i32) (p: vec3) : (f32, f32, f32) =
+  let neck_top = potion_neck_top prm i
   let body_top = neck_top -^ vec 0 0.03 0
-  let c = potion_centre i
+  let c = potion_centre prm i
   let (glass, level) =
     if i == 1 then
       -- tall bottle: a rounded cylinder under the neck, four-fifths full
@@ -497,8 +498,8 @@ def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
 
 -- The leather that holds potion i: a band round its neck, and a strap from
 -- the band up under the belt.
-def potion_strap (i: i32) (p: vec3) : f32 =
-  let neck_top = potion_neck_top i
+def potion_strap (prm: params) (i: i32) (p: vec3) : f32 =
+  let neck_top = potion_neck_top prm i
   let nr = potion_neck_radius i
   let band_y = neck_top.y - 0.011
   let q = p -^ vec neck_top.x band_y neck_top.z
@@ -510,22 +511,24 @@ def potion_strap (i: i32) (p: vec3) : f32 =
   -- underneath the belt (the belt's band spans robe_radius - 0.006 to
   -- + 0.022, so a strap at + 0.006 is hidden inside it)
   let start = vec neck_top.x band_y neck_top.z -^ scale (nr + 0.004) out
-  let below = scale (robe_radius (belt_y - 0.04) + 0.006) out +^ vec 0 (belt_y - 0.04) 0
-  let tucked = scale (robe_radius belt_y + 0.006) out +^ vec 0 belt_y 0
+  let below = scale (robe_radius prm (prm.belt_height - 0.04) + 0.006) out +^ vec 0 (prm.belt_height - 0.04) 0
+  let tucked = scale (robe_radius prm prm.belt_height + 0.006) out +^ vec 0 prm.belt_height 0
   let strap = sd_strap p start below out |> f32.min (sd_strap p below tucked out)
   in f32.min band strap
 
 -- The liquid fills the inside of the glass (0.004 thick) up to its level.
-def potion_liquid (i: i32) (p: vec3) : f32 =
-  let (glass, _, level) = potion_parts i p
+def potion_liquid (prm: params) (i: i32) (p: vec3) : f32 =
+  let (glass, _, level) = potion_parts prm i p
   in smax 0.004 (glass + 0.004) (p.y - level)
 
-def potion (i: i32) (p: vec3) : hit =
-  let (_, cork, _) = potion_parts i p
-  in (potion_liquid i p, m_potion + i) |> umin (cork, m_cork) |> umin (potion_strap i p, m_leather)
+def potion (prm: params) (i: i32) (p: vec3) : hit =
+  let (_, cork, _) = potion_parts prm i p
+  in (potion_liquid prm i p, m_potion + i) |> umin (cork, m_cork) |> umin (potion_strap prm i p, m_leather)
 
 -- Where the potions hang, in body space, and a sphere holding all three.
-def potions_at : vec3 = scale (robe_radius 0.84 + 0.05) (around (potion_angle 1)) +^ vec 0 0.84 0
+def potions_at (prm: params) : vec3 =
+  let y = prm.belt_height - 0.08
+  in scale (robe_radius prm y + 0.05) (around (potion_angle 1)) +^ vec 0 y 0
 def potions_radius : f32 = 0.26
 
 -- From body space (which leans into turns) back to the figure's local space.
@@ -535,24 +538,26 @@ def from_body_space (pose: pose) (q: vec3) : vec3 =
 -- The potions' glass: distance to the nearest outer glass surface, in the
 -- figure's local space.
 def potion_glass (pose: pose) (p: vec3) : f32 =
-  sphere_bounded potions_at potions_radius 0.05
-                 (\q -> f32.min (potion_parts 0 q).0 (f32.min (potion_parts 1 q).0 (potion_parts 2 q).0))
+  let prm = pose.prm
+  in sphere_bounded (potions_at prm) potions_radius 0.05
+                 (\q -> f32.min (potion_parts prm 0 q).0 (f32.min (potion_parts prm 1 q).0 (potion_parts prm 2 q).0))
                  (body_space pose p)
 
 -- The nearest potion's liquid: (distance, material id), for the glow.
 def nearest_liquid (pose: pose) (p: vec3) : hit =
-  sphere_bounded_hit potions_at potions_radius 0.1 m_potion
-    (\q -> (potion_liquid 0 q, m_potion) |> umin (potion_liquid 1 q, m_potion + 1) |> umin (potion_liquid 2 q, m_potion + 2))
+  let prm = pose.prm
+  in sphere_bounded_hit (potions_at prm) potions_radius 0.1 m_potion
+    (\q -> (potion_liquid prm 0 q, m_potion) |> umin (potion_liquid prm 1 q, m_potion + 1) |> umin (potion_liquid prm 2 q, m_potion + 2))
     (body_space pose p)
 
 -- A tome hanging on the right hip, lying against the robe's slope.
-def tome (p: vec3) : hit =
+def tome (prm: params) (p: vec3) : hit =
   let a = deg (-100)
-  let y = belt_y - 0.12
+  let y = prm.belt_height - 0.12
   let out = normalise (around a +^ vec 0 0.28 0) -- the robe's cone slopes inwards
   let up = normalise (cross (cross out (vec 0 1 0)) out)
   let side = cross up out
-  let c = scale (robe_radius y + 0.035) (around a) +^ vec 0 y 0
+  let c = scale (robe_radius prm y + 0.035) (around a) +^ vec 0 y 0
   let v = p -^ c
   let q = vec (dot v side) (dot v up) (dot v out) -- width, height, thickness
   let box (cx: f32) (cz: f32) (b: vec3) (r: f32) = sd_box (q -^ vec cx 0 cz) (b -^ splat r) - r
@@ -562,19 +567,20 @@ def tome (p: vec3) : hit =
   let clasp = box 0.08 0 (vec 0.006 0.016 0.031) 0.003
   -- a strap from low on the front cover, up and over the top of the belt
   let on_cover (u: f32) = c +^ scale u up +^ scale 0.035 out
-  let belt_front = scale (robe_radius belt_y + 0.019) (around a) +^ vec 0 (belt_y + 0.016) 0
-  let belt_top = scale (robe_radius belt_y + 0.002) (around a) +^ vec 0 (belt_y + 0.027) 0
+  let belt_front = scale (robe_radius prm prm.belt_height + 0.019) (around a) +^ vec 0 (prm.belt_height + 0.016) 0
+  let belt_top = scale (robe_radius prm prm.belt_height + 0.002) (around a) +^ vec 0 (prm.belt_height + 0.027) 0
   let strap = sd_strap p (on_cover (-0.04)) (on_cover 0.1) out
               |> f32.min (sd_strap p (on_cover 0.1) belt_front out)
               |> f32.min (sd_strap p belt_front belt_top out)
   in (f32.min covers spine, m_tome) |> umin (pages, m_pages) |> umin (clasp, m_gold) |> umin (strap, m_leather)
 
-def waist_gear (p: vec3) : hit =
-  let tome_at = scale (robe_radius 0.8 + 0.035) (around (deg (-100))) +^ vec 0 0.82 0
-  in (sd_belt p, m_leather)
-     |> umin (sphere_bounded_hit buckle_centre 0.07 0.15 m_gold (\q -> (sd_buckle q, m_gold)) p)
-     |> umin (sphere_bounded_hit potions_at potions_radius 0.15 m_leather (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
-     |> umin (sphere_bounded_hit tome_at 0.19 0.15 m_tome tome p)
+def waist_gear (prm: params) (p: vec3) : hit =
+  let ty = prm.belt_height - 0.1
+  let tome_at = scale (robe_radius prm ty + 0.035) (around (deg (-100))) +^ vec 0 ty 0
+  in (sd_belt prm p, m_leather)
+     |> umin (sphere_bounded_hit (buckle_centre prm) 0.07 0.15 m_gold (\q -> (sd_buckle prm q, m_gold)) p)
+     |> umin (sphere_bounded_hit (potions_at prm) potions_radius 0.15 m_leather (\q -> potion prm 0 q |> umin (potion prm 1 q) |> umin (potion prm 2 q)) p)
+     |> umin (sphere_bounded_hit tome_at 0.19 0.15 m_tome (tome prm) p)
 
 def wizard (pose: pose) (p: vec3) : hit =
   (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
@@ -588,7 +594,7 @@ def wizard (pose: pose) (p: vec3) : hit =
   |> umin (sd_band pose p, m_gold)
   |> umin (sd_staff p, m_staff)
   |> umin (sd_cradle p, m_gold)
-  |> umin (waist_gear (body_space pose p))
+  |> umin (waist_gear pose.prm (body_space pose p))
 
 ---------------------------------------------------------------------
 -- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.

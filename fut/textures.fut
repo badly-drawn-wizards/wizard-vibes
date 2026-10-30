@@ -99,9 +99,10 @@ def cloth_albedo (pose: pose) (p: vec3) : vec3 =
 -- (arc length round the body, height above the belt's centre, on the belt?)
 def belt_coords (pose: pose) (p: vec3) : (f32, f32, bool) =
   let b = body_space pose p
-  let dy = b.y - belt_y
+  let prm = pose.prm
+  let dy = b.y - prm.belt_height
   let r = length2 (vec2 b.x b.z)
-  in (f32.atan2 b.x b.z * robe_radius belt_y, dy, f32.abs dy < 0.035 && f32.abs (r - robe_radius b.y) < 0.03)
+  in (f32.atan2 b.x b.z * robe_radius prm prm.belt_height, dy, f32.abs dy < 0.035 && f32.abs (r - robe_radius prm b.y) < 0.03)
 
 -- How much of a stitch is at this point, in [0, 1].
 def stitch (u: f32) (dy: f32) : f32 =
