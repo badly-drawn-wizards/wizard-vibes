@@ -27,6 +27,7 @@ def m_rock : i32 = 13
 def m_terrain : i32 = 14
 def m_staff : i32 = 15
 def m_cork : i32 = 16
+def m_brow : i32 = 17
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -75,6 +76,7 @@ type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, loca
             , look: f32 -- head turn (radians, towards +x)
             , point: f32 -- 0 idle .. 1 pointing with the right hand
             , pix: f32 -- angle one pixel spans (for texture filtering)
+            , blink: f32 -- 0 eyes open .. 1 closed
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
@@ -105,6 +107,8 @@ def pose_at (secs: f32) : pose =
   let (r_elbow, r_wrist) = two_bone r_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
   in { tm, secs, fl, moon = to_local_dir fl moon_world
      , breath = b, lean, head, look = 0.45 * point * side, point, pix = 0.0008
+     -- three quick blinks per loop (every 4 s), each about 0.2 s long
+     , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
      , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist }
 
 def orb_radius : f32 = 0.11
@@ -276,10 +280,35 @@ def sd_head (pose: pose) (p: vec3) : f32 =
   let nose = sd_ellipsoid (p -^ vec 0 1.58 0.19) (vec 0.035 0.05 0.05)
   in smin 0.03 head nose
 
+-- The eyes: eyeballs set into the face (their iris and pupil are shading,
+-- see eye_albedo), with upper lids that close to blink.
+-- (the head's surface is at z ~ 0.173 here, so the eye stands ~0.015 proud)
+def eye_centre : vec3 = vec 0.062 1.632 0.163 -- the left eye's (+x); mirrored
+def eye_radius : f32 = 0.025
+
+-- head space, mirrored onto the left side
+def mirror_x (p: vec3) : vec3 = {x = f32.abs p.x, y = p.y, z = p.z}
+
 def sd_eyes (pose: pose) (p: vec3) : f32 =
-  let p = head_space pose p
-  let q = {x = f32.abs p.x, y = p.y, z = p.z}
-  in sd_sphere (q -^ vec 0.065 1.64 0.155) 0.022
+  sd_sphere (mirror_x (head_space pose p) -^ eye_centre) eye_radius
+
+-- The upper lids: skin over the top of each eyeball, down to a lid line
+-- that drops to below the eye's equator to blink.
+def sd_eyelids (pose: pose) (p: vec3) : f32 =
+  let q = mirror_x (head_space pose p) -^ eye_centre
+  let line = mix1 (0.6 * eye_radius) (-1.05 * eye_radius) pose.blink
+  in f32.max (sd_sphere q (eye_radius + 0.003)) (line - q.y)
+
+-- The eyebrows: bushy arcs above the eyes, from inner to outer end. When he
+-- points they knit into a determined look: the inner ends drop and draw
+-- together, the outer ends lift.
+def sd_brows (pose: pose) (p: vec3) : f32 =
+  let q = mirror_x (head_space pose p)
+  let k = pose.point
+  let inner = vec (0.03 - 0.008 * k) (1.664 - 0.012 * k) 0.174
+  let mid = vec 0.064 (1.676 + 0.002 * k) 0.172
+  let outer = vec 0.1 (1.668 + 0.008 * k) 0.145
+  in smin 0.006 (sd_round_cone_ab q inner mid 0.012 0.01) (sd_round_cone_ab q mid outer 0.01 0.006)
 
 -- The beard hangs from the cheeks to a forked tip resting on the chest.
 def beard_top : vec3 = vec 0 1.52 0.11
@@ -550,6 +579,8 @@ def wizard (pose: pose) (p: vec3) : hit =
   |> umin (sd_hands pose p, m_skin)
   |> umin (sd_head pose p, m_skin)
   |> umin (sd_eyes pose p, m_eye)
+  |> umin (sd_eyelids pose p, m_skin)
+  |> umin (sd_brows pose p, m_brow)
   |> umin (sd_beard pose p, m_beard)
   |> umin (sd_hat pose p, m_hat)
   |> umin (sd_band pose p, m_gold)

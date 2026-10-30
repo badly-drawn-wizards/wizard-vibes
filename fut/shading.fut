@@ -78,7 +78,8 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let s = hat_stars pose p
     in plain (mix (vec 0.09 0.08 0.36) (vec 1 0.8 0.3) s) with emission = scale (0.6 * s) (vec 1 0.75 0.3)
   else if m == m_gold then plain (vec 1 0.6 0.14) with ks = 1.6 with shininess = 48 with metal = true
-  else if m == m_eye then plain (splat 0.02) with ks = 0.8 with shininess = 120
+  else if m == m_eye then plain (eye_albedo pose p) with ks = 1 with shininess = 150 with rim = false
+  else if m == m_brow then plain (vec 0.82 0.82 0.86)
   else if m == m_wood then
     plain (scale (0.75 + 0.25 * f32.sin (p.y * 45 + 3 * f32.sin (p.x * 40))) (vec 0.36 0.21 0.1))
   else if m == m_rock then

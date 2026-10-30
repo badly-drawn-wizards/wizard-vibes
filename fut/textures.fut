@@ -145,6 +145,25 @@ def hair_albedo (pose: pose) (p: vec3) : vec3 =
 def hair_tangent : vec3 = normalise (beard_tip -^ beard_top)
 
 ---------------------------------------------------------------------
+-- Eyes: sclera, an icy blue iris with a darker rim, and a pupil, laid out
+-- by the angle from each eye's gaze. The eyes glance further than the head
+-- turns when he points.
+
+def eye_albedo (pose: pose) (p: vec3) : vec3 =
+  let q = head_space pose p
+  let side = if q.x < 0 then -1 else 1f32
+  let c = {x = side * eye_centre.x, y = eye_centre.y, z = eye_centre.z}
+  let dir = normalise (q -^ c)
+  let gaze = normalise (yaw (0.8 * pose.look) (vec 0 (-0.08) 1))
+  let cosa = dot dir gaze
+  let iris = smoothstep 0.86 0.875 cosa
+  let pupil = smoothstep 0.955 0.965 cosa
+  let rim = 1 - 0.5 * smoothstep 0.92 0.88 cosa -- darker towards the iris's edge
+  let sclera = vec 0.9 0.88 0.85
+  let blue = scale rim (vec 0.25 0.48 0.78)
+  in mix (mix sclera blue iris) (splat 0.02) pupil
+
+---------------------------------------------------------------------
 -- Cork: tan, with dark speckled pores (small pits in the bump).
 
 def cork_pores (fp: f32) (p: vec3) : f32 =
