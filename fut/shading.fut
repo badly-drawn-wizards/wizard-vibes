@@ -99,6 +99,7 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let c = mix c snow (smoothstep 7 8.5 w.y * smoothstep 0.6 0.8 up)
     in plain (scale grain c) with rim = false
   else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28
+  else if m == m_cork then plain (cork_albedo fp p) with ks = 0.05
   else if m == m_tome then plain (vec 0.32 0.05 0.06) with ks = 0.15 with shininess = 16
   else if m == m_pages then plain (vec 0.85 0.8 0.66)
   else if m >= m_potion && m < m_potion + 3 then

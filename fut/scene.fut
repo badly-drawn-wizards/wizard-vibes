@@ -26,6 +26,7 @@ def m_potion : i32 = 20 -- 20, 21, 22: one per flask
 def m_rock : i32 = 13
 def m_terrain : i32 = 14
 def m_staff : i32 = 15
+def m_cork : i32 = 16
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -413,15 +414,28 @@ def sd_buckle (p: vec3) : f32 =
   let ring = length2 (vec2 (length2 (vec2 q.x q.y) - (rad + 0.008)) q.z) - 0.007
   in f32.min star ring
 
+-- A flat strap (0.022 wide, 0.005 thick) from a to b, its face along n.
+def sd_strap (p: vec3) (a: vec3) (b: vec3) (n: vec3) : f32 =
+  let ab = b -^ a
+  let len = length ab
+  let d = scale (1 / len) ab
+  let w = normalise (cross d n)
+  let nn = cross w d
+  let v = p -^ mix a b 0.5
+  in sd_box (vec (dot v d) (dot v w) (dot v nn)) (vec (0.5 * len + 0.002) 0.01 0.0015) - 0.001
+
 -- Three potions hanging from the belt on the left hip: two round flasks
 -- either side of a tall bottle, each with a short neck and a cork. The glass
 -- is not part of the marched scene (rays pass through it; see potion_glass
 -- and glass in shading.fut); the liquid inside is, and glows.
 def potion_angle (i: i32) : f32 = deg (70 + 24 * f32.i32 i)
 
+-- Each potion hangs below the belt from a strap round its neck.
 def potion_neck_top (i: i32) : vec3 =
-  let y = belt_y - 0.026
-  in scale (robe_radius y + 0.02) (around (potion_angle i)) +^ vec 0 y 0
+  let y = belt_y - 0.06
+  in scale (robe_radius y + 0.022) (around (potion_angle i)) +^ vec 0 y 0
+
+def potion_neck_radius (i: i32) : f32 = if i == 1 then 0.012 else 0.013
 
 -- The centre of potion i's body, in body space.
 def potion_centre (i: i32) : vec3 =
@@ -443,8 +457,32 @@ def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
       -- round flask, two-thirds full
       let r = 0.04
       in (smin 0.015 (sd_sphere (p -^ c) r) (sd_capsule p body_top neck_top 0.013), c.y + 0.25 * r)
-  let cork = sd_capsule p (neck_top -^ vec 0 0.008 0) (neck_top +^ vec 0 0.01 0) 0.015
+  -- a rolled lip round the mouth
+  let nr = potion_neck_radius i
+  let glass = smin 0.002 glass (sd_torus (p -^ (neck_top -^ vec 0 0.002 0)) nr 0.0035)
+  -- the cork: pushed into the neck (filling it inside the glass wall) and
+  -- standing a little proud of the lip
+  let cork = sd_cylinder (p -^ (neck_top -^ vec 0 0.004 0)) (nr - 0.0045) 0.011 - 0.0015
   in (glass, cork, level)
+
+-- The leather that holds potion i: a band round its neck, and a strap from
+-- the band up and over the belt.
+def potion_strap (i: i32) (p: vec3) : f32 =
+  let neck_top = potion_neck_top i
+  let nr = potion_neck_radius i
+  let band_y = neck_top.y - 0.011
+  let q = p -^ vec neck_top.x band_y neck_top.z
+  let rq = vec2 (length2 (vec2 q.x q.z) - (nr + 0.0035)) q.y
+  let band = length2 (vec2 (f32.max (f32.abs rq.x - 0.0015) 0) (f32.max (f32.abs rq.y - 0.0045) 0)) - 0.001
+  let a = potion_angle i
+  let out = around a
+  -- from the band's side facing the body, up the robe and over the belt
+  let start = vec neck_top.x band_y neck_top.z -^ scale (nr + 0.004) out
+  let under = scale (robe_radius (belt_y - 0.035) + 0.012) out +^ vec 0 (belt_y - 0.035) 0
+  let front = scale (robe_radius belt_y + 0.019) out +^ vec 0 (belt_y + 0.016) 0
+  let top = scale (robe_radius belt_y + 0.002) out +^ vec 0 (belt_y + 0.027) 0
+  let strap = sd_strap p start under out |> f32.min (sd_strap p under front out) |> f32.min (sd_strap p front top out)
+  in f32.min band strap
 
 -- The liquid fills the inside of the glass (0.004 thick) up to its level.
 def potion_liquid (i: i32) (p: vec3) : f32 =
@@ -453,7 +491,7 @@ def potion_liquid (i: i32) (p: vec3) : f32 =
 
 def potion (i: i32) (p: vec3) : hit =
   let (_, cork, _) = potion_parts i p
-  in umin (potion_liquid i p, m_potion + i) (cork, m_wood)
+  in (potion_liquid i p, m_potion + i) |> umin (cork, m_cork) |> umin (potion_strap i p, m_leather)
 
 -- Where the potions hang, in body space, and a sphere holding all three.
 def potions_at : vec3 = scale (robe_radius 0.84 + 0.05) (around (potion_angle 1)) +^ vec 0 0.84 0
@@ -477,16 +515,6 @@ def nearest_liquid (pose: pose) (p: vec3) : hit =
   let b = length (q -^ potions_at) - potions_radius
   in if b > 0.1 then (b, m_potion)
      else (potion_liquid 0 q, m_potion) |> umin (potion_liquid 1 q, m_potion + 1) |> umin (potion_liquid 2 q, m_potion + 2)
-
--- A flat strap (0.022 wide, 0.005 thick) from a to b, its face along n.
-def sd_strap (p: vec3) (a: vec3) (b: vec3) (n: vec3) : f32 =
-  let ab = b -^ a
-  let len = length ab
-  let d = scale (1 / len) ab
-  let w = normalise (cross d n)
-  let nn = cross w d
-  let v = p -^ mix a b 0.5
-  in sd_box (vec (dot v d) (dot v w) (dot v nn)) (vec (0.5 * len + 0.002) 0.01 0.0015) - 0.001
 
 -- A tome hanging on the right hip, lying against the robe's slope.
 def tome (p: vec3) : hit =

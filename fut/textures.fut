@@ -145,16 +145,29 @@ def hair_albedo (pose: pose) (p: vec3) : vec3 =
 def hair_tangent : vec3 = normalise (beard_tip -^ beard_top)
 
 ---------------------------------------------------------------------
+-- Cork: tan, with dark speckled pores (small pits in the bump).
+
+def cork_pores (fp: f32) (p: vec3) : f32 =
+  smoothstep 0.7 0.82 (vnoise3 (scale 420 p)) * keep fp 0.004
+
+def cork (fp: f32) (p: vec3) : f32 = -0.0002 * cork_pores fp p
+
+def cork_albedo (fp: f32) (p: vec3) : vec3 =
+  let mottle = 0.85 + 0.3 * vnoise3 (scale 120 p)
+  in scale (mottle * (1 - 0.45 * cork_pores fp p)) (vec 0.62 0.4 0.2)
+
+---------------------------------------------------------------------
 
 -- Height field of material m, or 0 where it has none.
 def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
   if m == m_staff then (bark fp p).0
   else if m == m_robe then cloth pose fp p
   else if m == m_leather then leather pose fp p
+  else if m == m_cork then cork fp p
   else if m == m_beard then hair pose fp p
   else 0
 
-def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather || m == m_beard
+def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork
 
 -- Tilts normal n by the gradient of the height field h across the surface.
 -- The gradient comes from four taps on a tetrahedron, small enough for the
