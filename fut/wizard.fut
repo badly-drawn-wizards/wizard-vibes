@@ -25,15 +25,19 @@ def loop_angle (seconds: f32) : f32 = 2 * f32.pi * fract (seconds / loop_seconds
 def orb_pos : vec3 = vec 0.43 2.12 0.1
 def orb_radius (_tm: f32) : f32 = 0.11
 -- Three glow pulses per loop; the orb's light and emission follow along.
-def pulse (tm: f32) : f32 = 0.85 + 0.15 * f32.sin (3 * tm)
+def pulse (tm: f32) : f32 = 0.92 + 0.08 * f32.sin (3 * tm)
 
 -- The glow is a cloud around the orb whose density falls off exponentially
 -- with distance from the orb's surface. Its strength and extent breathe
 -- with the pulse.
 def glow_density (tm: f32) (od: f32) : f32 =
   let s = f32.sin (3 * tm)
-  let extent = 0.12 + 0.035 * s
-  in (1.6 + 0.8 * s) * f32.exp (-(f32.max od 0) / extent)
+  let extent = 0.1 + 0.012 * s
+  in (0.9 + 0.2 * s) * f32.exp (-(f32.max od 0) / extent)
+
+-- The rune letters glow the same way, in a thin layer hugging the strokes.
+def rune_glow_density (tm: f32) (gd: f32) : f32 =
+  4 * pulse tm * f32.exp (-gd / 0.05)
 def moon_dir : vec3 = normalise (vec (-0.45) 0.65 0.6)
 
 -- Integer hash -> [0,1).
@@ -96,6 +100,39 @@ def sd_band (p: vec3) : f32 = sd_torus (p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0
 
 def sd_staff (p: vec3) : f32 = sd_capsule p (vec 0.48 0 0.15) (vec 0.43 2.02 0.1) 0.028
 
+-- The rune band: 14 glyphs on a circle of radius 1.125, turning once per loop.
+def rune_radius : f32 = 1.125
+
+-- 2D distance in the ground plane to the nearest rune stroke.
+def glyph_sdf (tm: f32) (x: f32) (z: f32) : f32 =
+  let c = rune_radius
+  let r = length2 (vec2 x z)
+  -- Far from the band, a cheap lower bound. It is only used where the glow
+  -- density is negligible, so the bound's looseness never shows.
+  in if f32.abs (r - c) > 0.45 then f32.abs (r - c) - 0.12
+  else
+    let n = 14f32
+    let sector = 2 * f32.pi / n
+    let q = rot2 tm (vec2 x z)
+    let a = f32.atan2 q.y q.x + f32.pi
+    let idx = i32.f32 (f32.floor (a / sector))
+    let lp = rep_angle n {x = q.x, y = 0, z = q.y}
+    let h1 = hash2 idx 3
+    let h2 = hash2 idx 7
+    let seg (ax: f32) (az: f32) (bx: f32) (bz: f32) =
+      sd_capsule lp (vec (c + ax) 0 az) (vec (c + bx) 0 bz) 0.008
+    let g1 = seg (-0.08) (-0.05 + 0.1 * h1) 0.08 (0.05 - 0.1 * h1)
+    let g2 = seg (-0.08 + 0.16 * h2) (-0.06) (0.08 - 0.16 * h1) 0.06
+    let g3 = if h2 > 0.5 then seg 0 (-0.07) 0 0.07 else sd_torus (lp -^ vec c 0 0) 0.05 0.004
+    in f32.min g1 (f32.min g2 g3)
+
+-- Approximate 3D distance to the nearest letter: the in-plane distance and
+-- the height above the ground, combined by Pythagoras.
+def glyph_dist (tm: f32) (p: vec3) : f32 =
+  if p.y > 0.35 then p.y -- high above the ground: skip the strokes
+  else let d = f32.max 0 (glyph_sdf tm p.x p.z)
+       in f32.sqrt (d * d + p.y * p.y)
+
 def scene (tm: f32) (p: vec3) : hit =
   let body = smin 0.06 (sd_robe tm p) (sd_arms p)
   in (body, m_robe)
@@ -114,21 +151,23 @@ def dist (tm: f32) (p: vec3) : f32 = (scene tm p).0
 ---------------------------------------------------------------------
 -- Marching
 
--- Returns (distance, material or -1, orb glow integrated along the ray up to
--- the hit). Near the orb, steps are capped to a fraction of the distance to
--- it, so the glow integral is sampled finely where its density changes fast.
-def march (tm: f32) (ro: vec3) (rd: vec3) : (f32, i32, f32) =
-  let (t, _, m, g) =
-    loop (t, i, m, g) = (0.02f32, 0i32, -1i32, 0f32)
+-- Returns (distance, material or -1, orb glow, rune glow), the glows
+-- integrated along the ray up to the hit. Near the orb and the letters,
+-- steps are capped to a fraction of the distance to them, so the glow
+-- integrals are sampled finely where their densities change fast.
+def march (tm: f32) (ro: vec3) (rd: vec3) : (f32, i32, f32, f32) =
+  let (t, _, m, g, gr) =
+    loop (t, i, m, g, gr) = (0.02f32, 0i32, -1i32, 0f32, 0f32)
     while i < 220 && m < 0 && t < 40 do
       let p = ro +^ scale t rd
       let (d, mat) = scene tm p
-      in if d < 0.0004 * t then (t, i + 1, mat, g)
+      in if d < 0.0004 * t then (t, i + 1, mat, g, gr)
          else
            let od = sd_orb tm p
-           let dt = f32.min (d * 0.85) (0.3 * od + 0.015)
-           in (t + dt, i + 1, -1, g + glow_density tm od * dt)
-  in (t, m, g)
+           let gd = glyph_dist tm p
+           let dt = f32.min (d * 0.85) (f32.min (0.3 * od + 0.015) (0.3 * gd + 0.01))
+           in (t + dt, i + 1, -1, g + glow_density tm od * dt, gr + rune_glow_density tm gd * dt)
+  in (t, m, g, gr)
 
 -- Tetrahedral gradient, written as a loop so the scene is only inlined once.
 def normal (tm: f32) (p: vec3) : vec3 =
@@ -183,27 +222,8 @@ def runes (tm: f32) (p: vec3) : f32 =
   let r = length2 (vec2 p.x p.z)
   let ring w c = 1 - smoothstep (w * 0.5) w (f32.abs (r - c))
   let rings = f32.max (ring 0.018 0.95) (ring 0.012 1.3)
-  let n = 14f32
-  let sector = 2 * f32.pi / n
-  -- The glyph band turns once per loop.
-  let q = rot2 tm (vec2 p.x p.z)
-  let a = f32.atan2 q.y q.x + f32.pi
-  let idx = i32.f32 (f32.floor (a / sector))
-  let lp = rep_angle n {x = q.x, y = 0, z = q.y}
-  let c = 1.125
-  let h1 = hash2 idx 3
-  let h2 = hash2 idx 7
-  let seg (ax: f32) (az: f32) (bx: f32) (bz: f32) =
-    sd_capsule lp (vec (c + ax) 0 az) (vec (c + bx) 0 bz) 0.008
-  let g1 = seg (-0.08) (-0.05 + 0.1 * h1) 0.08 (0.05 - 0.1 * h1)
-  let g2 = seg (-0.08 + 0.16 * h2) (-0.06) (0.08 - 0.16 * h1) 0.06
-  let g3 = if h2 > 0.5 then seg 0 (-0.07) 0 0.07 else sd_torus (lp -^ vec c 0 0) 0.05 0.004
-  let glyph = 1 - smoothstep 0.0 0.008 (f32.min g1 (f32.min g2 g3))
-  -- Inner tick ring counter-rotates.
-  let tq = rot2 (-2 * tm) (vec2 p.x p.z)
-  let tp = rep_angle 48 {x = tq.x, y = 0, z = tq.y}
-  let ticks = 1 - smoothstep 0.0 0.006 (sd_capsule tp (vec 0.83 0 0) (vec 0.89 0 0) 0.005)
-  in f32.max (f32.max rings glyph) ticks * pulse tm
+  let glyph = 1 - smoothstep 0.0 0.008 (glyph_sdf tm p.x p.z)
+  in f32.max rings glyph * pulse tm
 
 def sky (rd: vec3) : vec3 =
   let up = saturate (rd.y * 0.5 + 0.5)
@@ -253,8 +273,8 @@ def specular (m: i32) : (f32, f32) = -- (strength, shininess)
 -- Shading
 
 def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
-  let (t, m, glow) = march tm ro rd
-  let glow_col = scale glow (vec 0.35 0.55 1)
+  let (t, m, glow, rune_glow) = march tm ro rd
+  let glow_col = scale glow (vec 0.35 0.55 1) +^ scale rune_glow (vec 0.25 0.5 1)
   in if m < 0 then sky rd +^ glow_col
      else
        let p = ro +^ scale t rd
