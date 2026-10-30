@@ -23,9 +23,17 @@ def loop_angle (seconds: f32) : f32 = 2 * f32.pi * fract (seconds / loop_seconds
 
 -- Scene constants.
 def orb_pos : vec3 = vec 0.43 2.12 0.1
--- Three slight pulses per loop.
-def orb_radius (tm: f32) : f32 = 0.11 + 0.006 * f32.sin (3 * tm)
+def orb_radius (_tm: f32) : f32 = 0.11
+-- Three glow pulses per loop; the orb's light and emission follow along.
 def pulse (tm: f32) : f32 = 0.85 + 0.15 * f32.sin (3 * tm)
+
+-- The glow is a cloud around the orb whose density falls off exponentially
+-- with distance from the orb's surface. Its strength and extent breathe
+-- with the pulse.
+def glow_density (tm: f32) (od: f32) : f32 =
+  let s = f32.sin (3 * tm)
+  let extent = 0.12 + 0.035 * s
+  in (1.6 + 0.8 * s) * f32.exp (-(f32.max od 0) / extent)
 def moon_dir : vec3 = normalise (vec (-0.45) 0.65 0.6)
 
 -- Integer hash -> [0,1).
@@ -106,17 +114,20 @@ def dist (tm: f32) (p: vec3) : f32 = (scene tm p).0
 ---------------------------------------------------------------------
 -- Marching
 
--- Returns (distance, material or -1, accumulated orb glow).
+-- Returns (distance, material or -1, orb glow integrated along the ray up to
+-- the hit). Near the orb, steps are capped to a fraction of the distance to
+-- it, so the glow integral is sampled finely where its density changes fast.
 def march (tm: f32) (ro: vec3) (rd: vec3) : (f32, i32, f32) =
   let (t, _, m, g) =
     loop (t, i, m, g) = (0.02f32, 0i32, -1i32, 0f32)
-    while i < 160 && m < 0 && t < 40 do
+    while i < 220 && m < 0 && t < 40 do
       let p = ro +^ scale t rd
       let (d, mat) = scene tm p
-      let od = sd_orb tm p
-      let g = g + 0.06 / (1 + 300 * od * od) * f32.min d 0.1
       in if d < 0.0004 * t then (t, i + 1, mat, g)
-         else (t + d * 0.85, i + 1, -1, g)
+         else
+           let od = sd_orb tm p
+           let dt = f32.min (d * 0.85) (0.3 * od + 0.015)
+           in (t + dt, i + 1, -1, g + glow_density tm od * dt)
   in (t, m, g)
 
 -- Tetrahedral gradient, written as a loop so the scene is only inlined once.
@@ -243,7 +254,7 @@ def specular (m: i32) : (f32, f32) = -- (strength, shininess)
 
 def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
   let (t, m, glow) = march tm ro rd
-  let glow_col = scale glow (vec 0.5 0.45 1)
+  let glow_col = scale glow (vec 0.35 0.55 1)
   in if m < 0 then sky rd +^ glow_col
      else
        let p = ro +^ scale t rd
