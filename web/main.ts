@@ -75,12 +75,35 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("#backend button"))
     location.replace(url.toString().replace(/webgl=(&|$)/, "webgl$1"));
   };
 }
+// Whether this browser gives out WebGL2 contexts (on a spare canvas).
+const hasWebGl2 = (): boolean => !!document.createElement("canvas").getContext("webgl2");
+
+// Neither renderer works: say why, once, and stop (no reloading).
+let unsupported = false;
+let webGpuError: string | null = null;
+function noRendererAfter(message: string): void {
+  webGpuError = message.split("\n")[0];
+  noRenderer();
+}
+function noRenderer(): void {
+  unsupported = true;
+  setStatus("no WebGPU or WebGL2");
+  showError(
+    `This browser offers neither WebGPU nor WebGL2, so there is nothing to draw with.\n\n` +
+      `WebGPU: ${webGpuError ?? failure ?? (navigator.gpu ? "no adapter" : "not available")}\n` +
+      `WebGL2: no context\n\n` +
+      `Both need hardware acceleration: see chrome://gpu (Chromium) or about:support (Firefox). ` +
+      `Chromium only offers WebGL without a usable GPU with --enable-unsafe-swiftshader, ` +
+      `and WebGPU may need --enable-unsafe-webgpu and --enable-features=Vulkan on Linux.`,
+  );
+}
+
 let glr: GlRenderer | null = null;
 if (useGl) {
   try {
     glr = new GlRenderer(canvas);
-  } catch (e) {
-    showError(String((e as Error).message ?? e));
+  } catch {
+    noRenderer();
   }
 }
 const ctx = (useGl ? null : canvas.getContext("webgpu"))!;
@@ -315,6 +338,7 @@ async function swapTo(version: string): Promise<void> {
 let loading = Promise.resolve();
 function reload(version: string): Promise<void> {
   const load = async () => {
+    if (unsupported) return;
     if (!glr) return swapTo(version);
     setStatus("compiling the WebGL shader…");
     await glr.load(version);
@@ -324,8 +348,14 @@ function reload(version: string): Promise<void> {
     load().catch((e) => {
       const message = String(e?.message ?? e);
       // WebGPU failing before any build has run here (not a shader error,
-      // which a later build fixes): fall back to WebGL, saying why
-      if (!glr && !inst && loaded.size === 0 && !message.startsWith("WGSL compilation failed")) {
+      // which a later build fixes): fall back to WebGL, saying why, if
+      // there is WebGL to fall back to, and only once
+      if (!glr && !inst && loaded.size === 0 && !failure && !message.startsWith("WGSL compilation failed")) {
+        if (!hasWebGl2()) {
+          console.warn(`WebGPU failed, and there is no WebGL2: ${message}`);
+          noRendererAfter(message);
+          return;
+        }
         console.warn(`WebGPU failed; reloading with WebGL: ${message}`);
         try {
           sessionStorage.setItem(FAILED, message.split("\n")[0].slice(0, 200));
