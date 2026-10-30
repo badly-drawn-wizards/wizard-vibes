@@ -5,6 +5,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { instrumentShaders, type ShaderLog } from "./shader-check.ts";
+import { type GpuProfile, gpuProfile, prepareGpuProfile } from "./gpu-profile.ts";
 
 export interface FutharkArray {
   arr: number;
@@ -20,14 +21,17 @@ export interface FutInstance {
   f32: boolean; // running with f16 stripped from the shaders
   portable: boolean; // WGSL rewritten for implementations like naga
   shaders: ShaderLog; // WGSL compiler diagnostics
+  profile: GpuProfile | null; // GPU time per kernel (with ?profile in the URL)
 }
 
 // Futhark asks emdawnwebgpu for its own adapter/device, with no way to pass
 // one in or read it back. Wrap requestDevice while it initialises to capture
-// it, and with `f32` set, drop the shader-f16 requirement (see wgsl-f32.ts).
+// it, and with `f32` set, drop the shader-f16 requirement (see wgsl-f32.ts);
+// with `timestamps`, ask for timestamp queries too, if the adapter has them.
 // `setup` runs on the device before Futhark creates any shaders.
 async function captureDevice<T>(
   f32: boolean,
+  timestamps: boolean,
   setup: (d: GPUDevice) => void,
   init: () => Promise<T>,
 ): Promise<[T, GPUDevice]> {
@@ -37,6 +41,9 @@ async function captureDevice<T>(
   proto.requestDevice = async function (this: GPUAdapter, desc?: GPUDeviceDescriptor) {
     if (f32 && desc?.requiredFeatures) {
       desc = { ...desc, requiredFeatures: [...desc.requiredFeatures].filter((f) => f !== "shader-f16") };
+    }
+    if (timestamps && this.features.has("timestamp-query")) {
+      desc = { ...desc, requiredFeatures: [...(desc?.requiredFeatures ?? []), "timestamp-query"] };
     }
     const d = await original.call(this, desc);
     if (!device) {
@@ -85,7 +92,8 @@ export async function loadFuthark(version: string): Promise<FutInstance> {
     shaders = instrumentShaders(d, { f32, portable });
     shaders.onError = () => compileFailed();
   };
-  const loading = captureDevice(f32, setup, async () => {
+  if (params.has("profile")) prepareGpuProfile();
+  const loading = captureDevice(f32, params.has("profile"), setup, async () => {
     const m = await exports.Module({
       locateFile: (f: string) => `${base}/${f}`,
       printErr: (line: string) => {
@@ -113,7 +121,7 @@ export async function loadFuthark(version: string): Promise<FutInstance> {
   }
   if (result instanceof Error) throw result;
   const [{ m, fut }, device] = result;
-  return { version, m, fut, device, f32, portable, shaders: shaders! };
+  return { version, m, fut, device, f32, portable, shaders: shaders!, profile: gpuProfile(device) };
 }
 
 export function unloadFuthark(inst: FutInstance): void {

@@ -272,8 +272,9 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     if (inst?.version !== version) throw new Error(document.getElementById("error")?.textContent ?? "load failed");
     return version;
   },
-  // Average GPU time per frame in ms, without presenting or vsync.
-  async bench(frames: number, vw: number, h: number) {
+  // Average time per frame in ms, without presenting or vsync, and (with
+  // ?profile) the GPU time per frame of each kernel.
+  async bench(frames: number, vw: number, h: number): Promise<{ ms: number; kernels?: Record<string, number> }> {
     const i = inst;
     if (!i) throw new Error("no Futhark instance loaded");
     inst = null;
@@ -283,10 +284,13 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
       const run = async (t: number) => (await entries.render(i, w, vw, h, t, cam.yaw, cam.pitch, cam.dist, ON_PATH)).free();
       await run(0); // warm-up: pipeline creation
       await i.fut.context_sync();
+      i.profile?.start();
       const start = performance.now();
       for (let f = 0; f < frames; f++) await run(f / 30);
       await i.fut.context_sync();
-      return (performance.now() - start) / frames;
+      const ms = (performance.now() - start) / frames;
+      const kernels = await i.profile?.stop();
+      return { ms, kernels: kernels && Object.fromEntries([...kernels].map(([k, v]) => [k, v / frames])) };
     } finally {
       inst = i;
     }
