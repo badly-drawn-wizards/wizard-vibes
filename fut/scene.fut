@@ -115,7 +115,7 @@ def ground_at (mask: i32) (fl: flight) (l: land) (p: vec3) : hit =
       -- the clouds; only close to the ground is the full terrain needed
       -- (rivers only lower the ground, so it stays an upper bound)
       let gap = w.y - terrain_upper w.x w.z
-      in (if gap > 0.4 then 0.6 * gap else terrain_dist l detail w, m_terrain) |> tag layers_terrain
+      in (if gap > 1.5 then 0.6 * gap else terrain_dist l detail w, m_terrain) |> tag layers_terrain
   let water = if has mask layers_water then (w.y - l.sea, m_water) |> tag layers_water else nothing
   in ground |> umin water
 
