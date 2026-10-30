@@ -1,7 +1,9 @@
 // Parameters: params.json describes every tweakable parameter and how the
 // drawer lays it out. From it this generates
-//   fut/params.fut  the uniforms: a `params` record, decoded each frame from
-//                   the []f32 the harness passes to `render`, and defaults;
+//   fut/params.fut  the uniforms' `params` record and their defaults;
+//   fut/render.fut  the entry points, render taking one scalar argument per
+//                   uniform value (Futhark puts scalar arguments in a
+//                   uniform struct);
 //   fut/config.fut  the compile-time constants, from their defaults overlaid
 //                   with the values the drawer saved in config.local.json.
 // Both are generated (and gitignored); files are only rewritten when their
@@ -63,44 +65,58 @@ const lit = (p: Param, v: Value): string => {
 
 const HEADER = "-- Generated from params.json by dev/params.ts; do not edit.\n";
 
+// The scalar entry-point arguments for a uniform (a colour takes three), and
+// the expression rebuilding its value from them. Every argument is an f32,
+// so the harness passes the values array as is.
+function args(p: Param): { names: string[]; value: string } {
+  if (p.kind === "color") {
+    const names = ["r", "g", "b"].map((c) => `${p.id}_${c}`);
+    return { names, value: `vec ${names.join(" ")}` };
+  }
+  const v = p.kind === "checkbox" ? `${p.id} > 0.5` : p.kind === "slider" ? p.id : `i32.f32 (f32.round ${p.id})`;
+  return { names: [p.id], value: v };
+}
+
 function paramsFut(s: Schema): string {
   const ps = allParams(s).filter((p) => !p.compile);
-  let off = 0;
-  const decode = ps.map((p) => {
-    const i = off;
-    off += width(p);
-    const e =
-      p.kind === "color" ? `vec (x ${i}) (x ${i + 1}) (x ${i + 2})`
-      : p.kind === "checkbox" ? `x ${i} > 0.5`
-      : p.kind === "slider" ? `x ${i}`
-      : `i32.f32 (f32.round (x ${i}))`;
-    return `  , ${p.id} = ${e}`;
-  });
   return `${HEADER}
 import "vec3"
 
--- The uniforms, decoded from the array the harness passes to render.
+-- The uniforms. The harness passes them to render as scalar arguments (see
+-- render.fut), which Futhark packs into each kernel's uniform struct.
 type params =
   { ${ps.map((p) => `${p.id}: ${futType(p)}`).join("\n  , ")} }
 
-def n_params : i64 = ${off}
-
--- Decodes the uniforms for one pixel. The pixel index only salts the
--- reads: pixel >> 40 is always 0, but Futhark cannot know that, so it reads
--- the array inside the kernel. Reads that do not depend on the pixel are
--- hoisted into a separate kernel that copies each value to a buffer of its
--- own, and WebGPU allows only 16 buffers per shader stage. (The harness
--- always passes n_params values; the reads are unchecked, so no f16
--- certificates are generated, see web/wgsl-f32.ts.)
-def params_of [n] (a: [n]f32) (pixel: i64) : params =
-  let x (i: i64) = #[unsafe] a[i + (pixel >> 40)]
-  in {
-${decode.join("\n").replace("  , ", "    ")}
-  }
-
 def default_params : params =
   { ${ps.map((p) => `${p.id} = ${lit(p, p.default)}`).join("\n  , ")} }
-`.replace("in {\n    ", "in { ");
+`;
+}
+
+// The program's entry points (Futhark only takes entry points from the file
+// it compiles): render takes one scalar per uniform value, in schema order.
+function renderFut(s: Schema): string {
+  const ps = allParams(s).filter((p) => !p.compile);
+  const a = ps.map(args);
+  const decls = a.flatMap((x) => x.names).map((n) => `(${n}: f32)`);
+  const lines: string[] = [];
+  for (let i = 0; i < decls.length; i += 4) lines.push("             " + decls.slice(i, i + 4).join(" "));
+  return `${HEADER}
+import "vec3"
+import "params"
+import "wizard"
+
+entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
+${lines.join("\n")}
+             : []u32 =
+  let prm : params =
+    { ${ps.map((p, i) => `${p.id} = ${a[i].value}`).join("\n    , ")} }
+  in render_frame prm w vw h tm yaw pitch dst
+
+-- CPU reference image, with the default uniforms (see dev/ref-render.ts).
+entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
+                 (tx: f32) (ty: f32) (tz: f32) : [][][3]u8 =
+  render_rgb_frame default_params w h tm yaw pitch dst tx ty tz
+`;
 }
 
 function configFut(s: Schema): string {
@@ -122,5 +138,6 @@ export function generate(dir = "fut"): boolean {
   const s = loadSchema();
   const a = writeIfChanged(`${dir}/params.fut`, paramsFut(s));
   const b = writeIfChanged(`${dir}/config.fut`, configFut(s));
-  return a || b;
+  const c = writeIfChanged(`${dir}/render.fut`, renderFut(s));
+  return a || b || c;
 }

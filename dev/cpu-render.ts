@@ -19,7 +19,7 @@ const EXE = "build/ref/wizard";
 export function compileCpu(): void {
   generate();
   mkdirSync("build/ref", { recursive: true });
-  execFileSync("futhark", ["multicore", "-o", EXE, "fut/wizard.fut"], { stdio: "inherit" });
+  execFileSync("futhark", ["multicore", "-o", EXE, "fut/render.fut"], { stdio: "inherit" });
 }
 
 // Returns packed RGB rows, top row first.

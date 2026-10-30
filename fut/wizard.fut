@@ -41,10 +41,10 @@ def to_u8 (v: f32) : u32 = u32.f32 (saturate v * 255 + 0.5)
 -- columns x >= vw are padding. Pixels are packed BGRA8, little-endian, to
 -- match a bgra8unorm canvas (the format every WebGPU implementation supports
 -- for canvases; Firefox crashes copying buffers into rgba8unorm ones).
-entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
-             (params: []f32) : []u32 =
+-- (The entry points are generated into render.fut, which passes the
+-- uniforms in as a params record.)
+def render_frame (prm: params) (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) : []u32 =
   tabulate (i64.i32 w * i64.i32 h) (\i ->
-    let prm = params_of params i -- (per pixel; see params_of)
     let x = i32.i64 (i % i64.i32 w)
     let y = i32.i64 (i / i64.i32 w)
     in if x >= vw then 0xff000000
@@ -52,8 +52,8 @@ entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst:
             in to_u8 c.z | (to_u8 c.y << 8) | (to_u8 c.x << 16) | 0xff000000)
 
 -- CPU reference image, orbiting an arbitrary target (for close-ups).
-entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
-                 (tx: f32) (ty: f32) (tz: f32) : [][][3]u8 =
+def render_rgb_frame (prm: params) (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
+                     (tx: f32) (ty: f32) (tz: f32) : [][][3]u8 =
   tabulate_2d (i64.i32 h) (i64.i32 w) (\y x ->
-    let c = pixel default_params (vec tx ty tz) w h tm yaw pitch dst (i32.i64 x) (i32.i64 y)
+    let c = pixel prm (vec tx ty tz) w h tm yaw pitch dst (i32.i64 x) (i32.i64 y)
     in [u8.u32 (to_u8 c.x), u8.u32 (to_u8 c.y), u8.u32 (to_u8 c.z)])
