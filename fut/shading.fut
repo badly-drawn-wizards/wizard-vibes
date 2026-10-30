@@ -145,7 +145,11 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
   -- (shadow rays that pass well clear of the figure and rock are fully lit)
   let shadow (l: vec3) (tmax: f32) =
     if shadow_misses occluder_centre occluder_radius po l tmax then 1
-    else soft_shadow (occluder_dist pose) po l tmax
+    -- (and they end shortly after leaving that sphere: nothing lies beyond,
+    -- and the shadow loop's steps are capped at 0.25, so marching on to
+    -- tmax only crawled through empty space)
+    else soft_shadow (occluder_dist pose) po l
+                     (f32.min tmax (sphere_exit occluder_centre occluder_radius po l + 1))
   let moon_shadow = shadow pose.moon 12
   let moon = light mat n rd pose.moon moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
   let to_orb = orb_pos -^ p

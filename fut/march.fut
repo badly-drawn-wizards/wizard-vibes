@@ -76,6 +76,13 @@ def shadow_misses (c: vec3) (r: f32) (ro: vec3) (rd: vec3) (tmax: f32) : bool =
   let tc = clamp 0 tmax (dot oc rd)
   in length (oc -^ scale tc rd) - r > tmax / shadow_k
 
+-- Where a ray leaves the sphere (c, r): beyond it, occluders inside the
+-- sphere can only shade the ray through its penumbra, within the margin.
+def sphere_exit (c: vec3) (r: f32) (ro: vec3) (rd: vec3) : f32 =
+  let oc = c -^ ro
+  let b = dot oc rd
+  in b + f32.sqrt (f32.max 0 (b * b - (dot oc oc - r * r)))
+
 -- Probes along the normal; each probe counts only how far its distance falls
 -- short of its offset, so distances beyond the longest offset never matter.
 def ambient_occlusion (dist: dist_fn) (p: vec3) (n: vec3) : f32 =
