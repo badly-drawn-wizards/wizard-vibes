@@ -201,7 +201,9 @@ def terrain_height_lod (l: land) (detail: f32) (x: f32) (z: f32) : f32 =
   let n = fbm2_lod 5 detail (x * 0.035) (z * 0.035)
   let ridge = 1 - f32.abs (2 * fbm2_lod 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
   let h = 9 * n * n + 6 * ridge * ridge * ridge - 4
-  in if l.river <= 0 then h else
+  -- (rivers only carve ground above their bed, so lower ground needs no
+  -- river noise)
+  in if l.river <= 0 || h <= river_bed l then h else
   let f = fbm2_lod 2 2 (x * river_noise_scale + 31.7) (z * river_noise_scale - 12.3)
   in (carve l h 0 0 (river_weight l f).0 0 0).0
 
@@ -219,7 +221,7 @@ def terrain_height_grad (l: land) (detail: f32) (x: f32) (z: f32) : (f32, f32, f
   let h = 9 * n * n + 6 * r * r * r - 4
   let hx = 0.035 * hn * nx + 0.02 * hr * dr * fx
   let hz = 0.035 * hn * nz + 0.02 * hr * dr * fz
-  in if l.river <= 0 then (h, hx, hz) else
+  in if l.river <= 0 || h <= river_bed l then (h, hx, hz) else
   let (rf, rfx, rfz) = fbm2_lod_grad 2 2 (x * river_noise_scale + 31.7) (z * river_noise_scale - 12.3)
   let (m, dm) = river_weight l rf
   in carve l h hx hz m (dm * rfx * river_noise_scale) (dm * rfz * river_noise_scale)
