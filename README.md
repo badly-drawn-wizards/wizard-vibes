@@ -55,6 +55,18 @@ exposes it): left stick flies, right stick turns the camera, RT / LT climb
 and descend, LB or L3 boosts, X / A / B choose a spell and RB casts, Y or
 Start toggles free flight.
 
+## WebGL fallback
+
+Without WebGPU (or with `?webgl` in the URL) the page draws with WebGL2
+instead. Futhark's WebGPU backend only writes compute kernels, but the
+per-pixel work is in two GPU functions (`shade_pixel` and `finish_pixel` in
+fut/wizard.fut) that take only scalars, so each build also gets a second
+entry point in the same WGSL module: a fragment shader calling them with
+values from a uniform block of its own. naga turns that into GLSL ES 3.00
+(dev/webgl.ts writes it into the build as wizard.gl.json), and web/webgl.ts
+draws it over a full-screen triangle. The fallback has no spells, collisions
+or anti-aliasing (those need the compute kernels); the top bar says so.
+
 ## Static build and GitHub Pages
 
 ```sh

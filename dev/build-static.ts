@@ -33,7 +33,7 @@ console.error(`shader ${r.version} ${r.cached ? "(cached)" : `built in ${(r.ms /
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "fut", r.version), { recursive: true });
-for (const f of ["wizard.js", "wizard.wasm"]) cpSync(join(FUT_ROOT, r.version, f), join(out, "fut", r.version, f));
+for (const f of ["wizard.js", "wizard.wasm", "wizard.gl.json"]) cpSync(join(FUT_ROOT, r.version, f), join(out, "fut", r.version, f));
 
 const schema = loadSchema();
 writeFileSync(join(out, "params.json"), JSON.stringify({ schema, compile: compileValues(schema, false), build: r.version }));

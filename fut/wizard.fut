@@ -28,21 +28,36 @@ def camera_ray (target: vec3) (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f
   let rd = normalise (scale 2.414 fw +^ scale u rt +^ scale v up)
   in (ro, rd)
 
--- The final (tone-mapped) colour seen through image point (x, y), and how
--- far the ray sees (infinity: the sky).
-def sample (prm: params) (dr: drive) (spells: []f32) (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: f32) (y: f32) : (vec3, f32) =
+-- The colour (before tone mapping) seen through image point (x, y), in
+-- pixels from the image's top left, and how far the ray sees (infinity: the
+-- sky). A real GPU function, like finish_pixel: the WebGL fallback calls
+-- the two from a fragment shader (see dev/webgl.ts), so they take only
+-- scalars and records, and their names must stay free of 'z' (see scene).
+#[noinline]
+def shade_pixel (prm: params) (dr: drive) (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: f32) (y: f32) : (vec3, f32) =
   let (ro, rd) = camera_ray target vw h yaw pitch dst x y
   -- tm in seconds; the last argument is the angle one pixel spans
-  let (c, seen) = shade prm dr tm (2 / (f32.i32 h * 2.414)) ro rd
-  -- the spells shine in front of whatever the ray sees
-  let fl = flight_of prm dr tm
-  let c = c +^ spell_glow prm spells tm (to_world fl ro) (to_world_dir fl rd) seen
+  in shade prm dr tm (2 / (f32.i32 h * 2.414)) ro rd
+
+-- Tone mapping, gamma and vignette, for image point (x, y).
+#[noinline]
+def finish_pixel (prm: params) (vw: i32) (h: i32) (x: f32) (y: f32) (c: vec3) : vec3 =
   let c = if prm.view != 0 then c else vmap aces (scale prm.exposure c)
   let c = vmap (\v -> (v ** (1 / 2.2))) c
   let ux = (x / f32.i32 vw - 0.5)
   let uy = (y / f32.i32 h - 0.5)
   let vig = if prm.view != 0 then 1 else 1 - prm.vignette * (ux * ux + uy * uy)
-  in (scale vig c, seen)
+  in scale vig c
+
+-- The final colour seen through image point (x, y), with the spells, and
+-- how far the ray sees.
+def sample (prm: params) (dr: drive) (spells: []f32) (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: f32) (y: f32) : (vec3, f32) =
+  let (c, seen) = shade_pixel prm dr target vw h tm yaw pitch dst x y
+  -- the spells shine in front of whatever the ray sees
+  let (ro, rd) = camera_ray target vw h yaw pitch dst x y
+  let fl = flight_of prm dr tm
+  let c = c +^ spell_glow prm spells tm (to_world fl ro) (to_world_dir fl rd) seen
+  in (finish_pixel prm vw h x y c, seen)
 
 def pixel (prm: params) (dr: drive) (spells: []f32) (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : vec3 =
   (sample prm dr spells target vw h tm yaw pitch dst (f32.i32 x + 0.5) (f32.i32 y + 0.5)).0

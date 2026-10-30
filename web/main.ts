@@ -12,6 +12,7 @@ import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
 import { type Device, Help } from "./help.ts";
 import { Spells } from "./spells.ts";
 import { IS_STATIC } from "./static.ts";
+import { GlRenderer } from "./webgl.ts";
 
 // The drawer's uniforms, and the entry points that take them.
 const params: Params = await createDrawer(document.getElementById("params")!);
@@ -20,7 +21,18 @@ const entries = new Entries(params);
 document.getElementById("drawer-toggle")!.onclick = () => document.body.classList.toggle("drawer-open");
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
-const ctx = canvas.getContext("webgpu")!;
+// Without WebGPU (or with ?webgl), the WebGL2 fallback draws the scene from
+// a fragment shader instead (see webgl.ts); the canvas takes one or the other.
+const useGl = !navigator.gpu || new URLSearchParams(location.search).has("webgl");
+let glr: GlRenderer | null = null;
+if (useGl) {
+  try {
+    glr = new GlRenderer(canvas);
+  } catch (e) {
+    showError(String((e as Error).message ?? e));
+  }
+}
+const ctx = (useGl ? null : canvas.getContext("webgpu"))!;
 const cam = loadCamera();
 attachCamera(cam, canvas);
 
@@ -105,15 +117,22 @@ function configure(device: GPUDevice): void {
   });
 }
 
-async function frame(i: FutInstance, dt: number): Promise<void> {
+// The canvas's size for this frame (in pixels, at the render scale).
+function frameSize(): { vw: number; h: number } {
   const dpr = window.devicePixelRatio || 1;
   const vw = Math.max(1, Math.floor(canvas.clientWidth * dpr * renderScale));
   const h = Math.max(1, Math.floor(canvas.clientHeight * dpr * renderScale));
-  const w = Math.ceil(vw / 64) * 64; // bytesPerRow must be a multiple of 256
   if (canvas.width !== vw || canvas.height !== h) {
     canvas.width = vw;
     canvas.height = h;
   }
+  return { vw, h };
+}
+
+// Advances everything by dt (input, camera, flight, spells) and returns this
+// frame's drive record. `canCast`: whether spells can be cast (not in the
+// WebGL fallback, which cannot draw them).
+function step(dt: number, canCast: boolean): Drive {
   if (!paused) time += dt;
   idle(cam, dt);
   const pad = readPad();
@@ -121,8 +140,7 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   if (pad?.toggle) flight.toggle();
   if (pad?.active) device = "pad";
   if (pad?.spell != null) spells.select(pad.spell);
-  spells.limit = spellLimits.get(i) ?? spells.limit;
-  if (!paused && (casting || pad?.cast)) {
+  if (canCast && !paused && (casting || pad?.cast)) {
     const { origin, dir } = castFrom();
     spells.cast(origin, dir);
   }
@@ -142,7 +160,14 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
 
   // casting, in his frame: along the camera's view
   const [sx, sy, sz] = viewDir(cam);
-  const d: Drive = { ...flight.drive(), staff: spells.staff, sx, sy, sz, flash: spells.sinceCast, spell: spells.selected };
+  return { ...flight.drive(), staff: spells.staff, sx, sy, sz, flash: spells.sinceCast, spell: spells.selected };
+}
+
+async function frame(i: FutInstance, dt: number): Promise<void> {
+  const { vw, h } = frameSize();
+  const w = Math.ceil(vw / 64) * 64; // bytesPerRow must be a multiple of 256
+  spells.limit = spellLimits.get(i) ?? spells.limit;
+  const d = step(dt, true);
   const points = takes(i, "probe", "pts") ? spells.probePoints() : { ids: [], pts: new Float32Array(0) };
   const probeBytes = (SPHERES + points.pts.length / 3) * 16;
   const wanted = (flight.active || spells.count > 0) && !!i.fut.entry.probe;
@@ -168,8 +193,24 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   }
 }
 
+// The WebGL fallback's frame: the same state, drawn by its fragment shader.
+function frameGl(r: GlRenderer, dt: number): void {
+  const { vw, h } = frameSize();
+  const d = step(dt, false);
+  r.draw(params.values, d, { vw, h, tm: time, yaw: cam.yaw, pitch: cam.pitch, dst: cam.dist });
+}
+
 function tick(now: number): void {
   requestAnimationFrame(tick);
+  if (glr) {
+    if (!glr.ready) return;
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
+    frameGl(glr, dt);
+    setStatus(`${glr.version!.slice(0, 8)} · WebGL fallback (no WebGPU: no spells, collisions or anti-aliasing) · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
+    return;
+  }
   if (!inst || inFlight) return;
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
@@ -222,13 +263,15 @@ async function swapTo(version: string): Promise<void> {
 
 let loading = Promise.resolve();
 function reload(version: string): Promise<void> {
-  loading = loading.then(() =>
-    swapTo(version).catch((e) => showError(`failed to load build ${version}:\n${e?.message ?? e}`)),
-  );
+  const load = async () => {
+    if (!glr) return swapTo(version);
+    setStatus("compiling the WebGL shader…");
+    await glr.load(version);
+    clearError();
+  };
+  loading = loading.then(() => load().catch((e) => showError(`failed to load build ${version}:\n${e?.message ?? e}`)));
   return loading;
 }
-
-if (!navigator.gpu) showError("WebGPU is not available in this browser.");
 
 // Debug/test hook: render one frame and read it back to the CPU. The render
 // loop is held off meanwhile, since entry points must not run concurrently.

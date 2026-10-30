@@ -11,7 +11,17 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
+      # naga's CLI (wgpu's shader translator), for the WebGL fallback: it
+      # turns the render kernel's WGSL into GLSL ES 3.00. Not in nixpkgs.
+      naga-cli = pkgs: pkgs.rustPlatform.buildRustPackage rec {
+        pname = "naga-cli";
+        version = "30.0.1";
+        src = pkgs.fetchCrate { inherit pname version; hash = "sha256-k745Wvnt9aprpbOyYORW1rFUIisTIlEAv5AC3EFFavQ="; };
+        cargoHash = "sha256-MwqQnYtfztY/3GFvGRmuRCOrmY7es8l331RoEKFI1A8=";
+        doCheck = false;
+      };
     in {
+      packages = forAll (system: pkgs: { naga-cli = naga-cli pkgs; });
       devShells = forAll (system: pkgs: {
         default = pkgs.mkShell {
           packages = [
@@ -19,6 +29,7 @@
             pkgs.emscripten
             pkgs.nodejs_24
             pkgs.ffmpeg # dev/gif.ts
+            (naga-cli pkgs) # dev/webgl.ts
           ];
           shellHook = ''
             # The emscripten cache in the nix store is read-only; ports (emdawnwebgpu) need a writable one.
