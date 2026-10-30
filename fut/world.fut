@@ -196,9 +196,13 @@ def carve (l: land) (h: f32) (hx: f32) (hz: f32) (m: f32) (mx: f32) (mz: f32) : 
   let (gx, gz) = if above then (hx, hz) else (0, 0)
   in (h - (1 - m) * g, hx - (1 - m) * gx + g * mx, hz - (1 - m) * gz + g * mz)
 
--- `detail` in octaves (5 = full); far-away terrain needs fewer.
+-- The terrain's octaves (its main fbm's; 5 gave a little more fine
+-- relief for 0.66 ms a frame at 1080p).
+def terrain_octaves : i32 = 4
+
+-- `detail` in octaves (terrain_octaves = full); far-away terrain needs fewer.
 def terrain_height_lod (l: land) (detail: f32) (x: f32) (z: f32) : f32 =
-  let n = fbm2_lod 5 detail (x * 0.035) (z * 0.035)
+  let n = fbm2_lod terrain_octaves detail (x * 0.035) (z * 0.035)
   let ridge = 1 - f32.abs (2 * fbm2_lod 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
   let h = 9 * n * n + 6 * ridge * ridge * ridge - 4
   -- (rivers only carve ground above their bed, so lower ground needs no
@@ -212,7 +216,7 @@ def terrain_height (l: land) (x: f32) (z: f32) : f32 = terrain_height_lod l 5 x 
 -- terrain_height_lod with its gradient: (height, dh/dx, dh/dz).
 -- h = 9 n^2 + 6 r^3 - 4 with r = 1 - |2f - 1|, then carved by the rivers.
 def terrain_height_grad (l: land) (detail: f32) (x: f32) (z: f32) : (f32, f32, f32) =
-  let (n, nx, nz) = fbm2_lod_grad 5 detail (x * 0.035) (z * 0.035)
+  let (n, nx, nz) = fbm2_lod_grad terrain_octaves detail (x * 0.035) (z * 0.035)
   let (f, fx, fz) = fbm2_lod_grad 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7)
   let r = 1 - f32.abs (2 * f - 1)
   let dr = -2 * f32.sgn (2 * f - 1) -- dr/df
@@ -237,7 +241,10 @@ def terrain_normal (l: land) (detail: f32) (x: f32) (z: f32) : vec3 =
 -- bounds it. (Refining the bound octave by octave was tried and is slower on
 -- the GPU: neighbouring pixels stop at different octaves and diverge.)
 def terrain_upper (x: f32) (z: f32) : f32 =
-  let n_hi = (0.5 * vnoise2 (x * 0.035) (z * 0.035) + 0.46875) / 0.96875
+  -- (the first octave has amplitude 0.5 of the total 1 - 0.5^octaves; the
+  -- others together 0.5 - 0.5^octaves)
+  let total = 1 - 0.5 ** f32.i32 terrain_octaves
+  let n_hi = (0.5 * vnoise2 (x * 0.035) (z * 0.035) + (total - 0.5)) / total
   let f_lo = 0.5 * vnoise2 (x * 0.02 + 5.2) (z * 0.02 - 1.7) / 0.875
   let f_hi = f_lo + 0.375 / 0.875
   let ridge_hi = if f_lo <= 0.5 && f_hi >= 0.5 then 1

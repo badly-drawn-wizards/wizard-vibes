@@ -907,7 +907,7 @@
           "kind": "int",
           "min": 6,
           "max": 64,
-          "default": 24,
+          "default": 16,
           "compile": true
         },
         {
@@ -950,19 +950,19 @@
       "march_steps": 120,
       "terrain_steps": 96,
       "shadow_steps": 12,
-      "cloud_samples": 10
+      "cloud_samples": 8
     },
     "med": {
       "march_steps": 200,
       "terrain_steps": 160,
       "shadow_steps": 20,
-      "cloud_samples": 16
+      "cloud_samples": 12
     },
     "high": {
       "march_steps": 300,
       "terrain_steps": 256,
       "shadow_steps": 32,
-      "cloud_samples": 24
+      "cloud_samples": 16
     }
   }
 }
