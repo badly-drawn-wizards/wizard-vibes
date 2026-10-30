@@ -518,8 +518,9 @@ def held_staff (mask: i32) (q: vec3) : hit =
 
 def staff_bound (q: vec3) : f32 = sd_capsule q staff_foot orb_pos 0.25
 
--- (with room for the left arm reaching out with the staff)
-def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 1.1
+-- (with room for the left arm reaching out with the staff: its hand reaches
+-- at most 1.02 from the axis, over every way he can aim)
+def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 1.03
 
 def figure_layers : i32 = layers_figure | layers_staff | layers_gear
 

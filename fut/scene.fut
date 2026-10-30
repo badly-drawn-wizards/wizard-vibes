@@ -98,7 +98,8 @@ def land_of (prm: params) : land = {sea = prm.sea_level, river = prm.river_width
 -- rivers, a plane at sea level) and the structures.
 def land_layers : i32 = layers_terrain | layers_water | layers_structures
 
-def terrain (mask: i32) (pose: pose) (p: vec3) : hit =
+-- The ground and the water.
+def land_ground (mask: i32) (pose: pose) (p: vec3) : hit =
   let prm = pose.prm
   let l = land_of prm
   let w = to_world pose.fl p
@@ -113,10 +114,16 @@ def terrain (mask: i32) (pose: pose) (p: vec3) : hit =
       let gap = w.y - terrain_upper w.x w.z
       in (if gap > 0.4 then 0.6 * gap else terrain_dist l detail w, m_terrain) |> tag layers_terrain
   let water = if has mask layers_water then (w.y - prm.sea_level, m_water) |> tag layers_water else nothing
-  let built = if !(has mask layers_structures) then nothing
-              else let (d, part) = structures l prm.structure_density w
-                   in (d, m_wall + part) |> tag layers_structures
-  in ground |> umin water |> umin built
+  in ground |> umin water
+
+-- The structures.
+def land_built (mask: i32) (pose: pose) (p: vec3) : hit =
+  if !(has mask layers_structures) then nothing
+  else let (d, part) = structures (land_of pose.prm) pose.prm.structure_density (to_world pose.fl p)
+       in (d, m_wall + part) |> tag layers_structures
+
+def terrain (mask: i32) (pose: pose) (p: vec3) : hit =
+  land_ground mask pose p |> umin (land_built mask pose p)
 
 -- #[noinline]: Futhark inlines everything by default, and the scene is used
 -- by the march, normals, AO and both shadow loops, which made the shader
@@ -156,16 +163,41 @@ def dist (mask: i32) (pose: pose) (tol: f32) (p: vec3) : f32 = (scene mask pose 
 -- distance and tagged material, or infinity. A ray heading upwards
 -- from above the highest peak cannot hit it at all, and one heading down
 -- jumps straight to that height before stepping.
+--
+-- The structures are rarely the nearest thing, so their distance is not
+-- evaluated at every step: a distance bound taken at t still bounds them at
+-- t' (less the way travelled, t' - t), so it is only evaluated again once
+-- that could be less than the ground's.
+--
+-- The march is over-relaxed (Keinert et al. 2014, "Enhanced Sphere
+-- Tracing"): each step goes terrain_relax times the safe distance, and
+-- whenever the new point's bound shows that went too far (the two bounding
+-- spheres do not overlap), it steps back and carries on unrelaxed.
 #[noinline]
+def terrain_relax : f32 = 1.4
+
 def march_terrain (mask: i32) (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
   let wo = to_world pose.fl ro
   let wd = to_world_dir pose.fl rd
   let top = land_max + 1.5
   in if wd.y >= 0 && wo.y > land_max then (f32.inf, 0) else
   let t0 = if wo.y > top then (wo.y - top) / -wd.y else 0
-  let (t, _, hit, m) =
-    loop (t, i, hit, m) = (f32.max 0.02 t0, 0i32, false, 0i32)
+  -- (prev: the safe step from the last point; step: the step taken from it)
+  let (t, _, hit, m, _, _) =
+    loop (t, i, hit, m, (sd, st, sm), (omega, prev, step)) =
+      (f32.max 0.02 t0, 0i32, false, 0i32, (-1f32, 0f32, 0i32), (terrain_relax, 0f32, 0f32))
     while !hit && i < terrain_steps && t < tmax do
-      let (d, mat) = terrain mask pose (ro +^ scale t rd)
-      in if d < 0.0004 * t then (t, i + 1, true, mat) else (t + d * 0.85, i + 1, false, m)
+      let p = ro +^ scale t rd
+      let ground = land_ground mask pose p
+      -- the structures: still bounded by what was found at st, or again
+      let (sd, st, sm) = if sd - (t - st) < ground.0
+                         then let (d, part) = land_built mask pose p in (d, t, part)
+                         else (sd, st, sm)
+      let (d, mat) = ground |> umin (sd - (t - st), sm)
+      let safe = 0.85 * d
+      in if omega > 1 && safe + prev < step
+         -- overshot: back to where the last safe step would have ended
+         then (t - step + prev, i + 1, false, m, (sd, st, sm), (1, 0, 0))
+         else if d < 0.0004 * t then (t, i + 1, true, mat, (sd, st, sm), (omega, safe, 0))
+         else (t + omega * safe, i + 1, false, m, (sd, st, sm), (omega, safe, omega * safe))
   in if hit then (t, m) else (f32.inf, 0)
