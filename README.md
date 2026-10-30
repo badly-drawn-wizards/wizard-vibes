@@ -9,23 +9,31 @@ nix develop -c npm install   # once
 nix develop -c npm run dev   # http://localhost:8080
 ```
 
-Drag to orbit, scroll to zoom, space to pause. The ¼ / ½ / 1× buttons set the
-render scale.
+Drag to orbit, scroll to zoom, P to pause. The ¼ / ½ / 1× buttons set the
+render scale. The controls panel (bottom right; ✕ hides it, ? brings it
+back) shows the keys, or a controller's buttons once one is used.
 
 F toggles free flight: W / S accelerate the way the camera looks and brake,
 A / D accelerate to the camera's left and right, E / Q climb and descend,
 Shift boosts. The camera then stays put in the world while he turns. He faces
 the way he travels, banks into turns, points the way he accelerates, and his
-runes brighten as he climbs and dim as he descends.
+runes brighten as he climbs and dim as he descends. The `probe` entry point
+(fut/collide.fut) samples the land around a few spheres covering the rock and
+him; the harness copies its floats into a mappable buffer with each frame and
+reads them back without waiting, to push him out of anything he hits
+(web/flight.ts).
+
+Spells (web/spells.ts, fut/spells.fut): 1 / 2 / 3 choose a fire bolt,
+lightning strike or wind blade, Space casts it from the orb along the view.
+Their state lives in the harness and goes to `render` as an array each
+frame; they are drawn as glows along each camera ray, and the probe tells
+the harness where they meet the land (a fire bolt bursts, a strike finds the
+ground). At most "Spells at once" (a shader parameter) are out together.
 
 A game controller works too (Gamepad API; press a button once so the browser
-exposes it): X or Start toggles free flight, the left stick flies along and
-across the camera's view, the right stick turns the camera, RB / RT climb,
-LB / LT descend, A or a left-stick click boosts. The `probe` entry point
-(fut/collide.fut) samples the land around a few spheres covering the rock and
-him; the harness copies its 24 floats into a mappable buffer with each frame
-and reads them back without waiting, to push him out of anything he hits
-(web/flight.ts).
+exposes it): left stick flies, right stick turns the camera, RT / LT climb
+and descend, LB or L3 boosts, X / A / B choose a spell and RB casts, Y or
+Start toggles free flight.
 
 ## How it works
 

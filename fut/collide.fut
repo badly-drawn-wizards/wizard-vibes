@@ -47,10 +47,14 @@ def land_probe (prm: params) (w: vec3) : (f32, vec3) =
   in nearer ground (nearer water built)
 
 -- Per sphere: [distance from its surface to the land (negative: inside),
--- normal x, y, z], in world space.
-def probe_frame (prm: params) (dr: drive) (secs: f32) : []f32 =
+-- normal x, y, z], in world space; then the same for each world point in
+-- pts (x, y, z each; the spells, see web/spells.ts), as from a sphere of
+-- radius 0.
+def probe_frame [k] (prm: params) (dr: drive) (secs: f32) (pts: [k]f32) : []f32 =
   let fl = flight_of prm dr secs
-  in flatten (map (\(c, r) ->
-                    let (d, n) = land_probe prm (to_world fl c)
+  let spheres = map (\(c, r) -> (to_world fl c, r)) collision_spheres
+  let points = tabulate (k / 3) (\i -> (vec pts[3 * i] pts[3 * i + 1] pts[3 * i + 2], 0f32))
+  in flatten (map (\(w, r) ->
+                    let (d, n) = land_probe prm w
                     in [f32.min 1e6 d - r, n.x, n.y, n.z])
-                  collision_spheres)
+                  (spheres ++ points))

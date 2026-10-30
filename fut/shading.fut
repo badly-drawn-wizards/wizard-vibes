@@ -420,13 +420,14 @@ type reflection = (bool, vec3, vec3, f32)
 -- Follows a ray through at most three straight segments - outside, inside
 -- the orb, outside again - refracting at the glass, and returns the colour
 -- it gathers, weighted by w. Also returns the reflection spawned where the
--- ray first enters the orb.
-def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
-  let (_, _, _, acc, _, _, refl) =
-    loop (ro, rd, w, acc, inside, done, refl) =
-      (ro0, rd0, splat w0, splat 0, false, false, (false, ro0, rd0, 0f32))
-    for _seg < 3 do
-      if done then (ro, rd, w, acc, inside, done, refl) else
+-- ray first enters the orb, and how far the ray sees before anything opaque
+-- or the orb's glass (infinity if nothing).
+def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection, f32) =
+  let (_, _, _, acc, _, _, refl, first) =
+    loop (ro, rd, w, acc, inside, done, refl, first) =
+      (ro0, rd0, splat w0, splat 0, false, false, (false, ro0, rd0, 0f32), f32.inf)
+    for seg < 3 do
+      if done then (ro, rd, w, acc, inside, done, refl, first) else
       let vis = pose.prm.layers
       -- (a hidden orb is no glass at all)
       let (t_in, t_out) = if has vis layers_orb then orb_hit ro rd else (f32.inf, -f32.inf)
@@ -449,37 +450,39 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
         if inside || !(has vis layers_gear) then (splat 0, splat 1) else glass pose g ro rd (if m >= 0 then t else local_max)
       let acc = acc +^ (w *^ glass_added)
       let w = w *^ glass_through
+      let first = if seg > 0 then first else if m >= 0 then t else if enters then t_in else f32.inf
       let acc = acc +^ (w *^ emitted) +^ (scale tr w *^ cloud_rad)
       -- whatever lies beyond this segment is seen through its media
       let w = scale (tr * cloud_tr) w
       in if m >= 0 then
-           (ro, rd, w, acc +^ (w *^ surface pose g m (ro +^ scale t rd) rd t), inside, true, refl)
+           (ro, rd, w, acc +^ (w *^ surface pose g m (ro +^ scale t rd) rd t), inside, true, refl, first)
          else if enters && t >= t_in then
            -- into the glass
            let p = ro +^ scale t_in rd
            let n = normalise (p -^ orb_pos)
            let f = fresnel pose.prm.orb_ior (-(dot n rd))
            let refl = if refl.0 then refl else (true, p, reflect rd n, w.x * f)
-           in (p, refract rd n (1 / pose.prm.orb_ior), scale (1 - f) (w *^ glass_tint), acc, true, false, refl)
+           in (p, refract rd n (1 / pose.prm.orb_ior), scale (1 - f) (w *^ glass_tint), acc, true, false, refl, first)
          else if inside && t >= t_out then
            -- out of the glass
            let p = ro +^ scale t_out rd
            let n = normalise (p -^ orb_pos)
-           in (p, refract rd (scale (-1) n) pose.prm.orb_ior, w *^ glass_tint, acc, false, false, refl)
-         else (ro, rd, w, acc +^ (w *^ sky pose (to_world_dir pose.fl rd)), inside, true, refl)
-  in (acc, refl)
+           in (p, refract rd (scale (-1) n) pose.prm.orb_ior, w *^ glass_tint, acc, false, false, refl, first)
+         else (ro, rd, w, acc +^ (w *^ sky pose (to_world_dir pose.fl rd)), inside, true, refl, first)
+  in (acc, refl, first)
 
-def shade (prm: params) (dr: drive) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
+-- The colour seen along a camera ray, and how far it sees (see follow).
+def shade (prm: params) (dr: drive) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : (vec3, f32) =
   -- worked out once per pixel, not per march step
   let pose = pose_at secs prm dr with pix = pix
   let g = glow_now pose.tm
   -- Path 0 is the camera ray; path 1 its reflection off the orb, if any.
   -- A loop, so that follow (and all the shading) is compiled only once.
   let paths = if prm.orb_reflections then 2 else 1
-  let (c, _) =
-    loop (c, refl) = (splat 0, (false, ro, rd, 0f32)) for k < paths do
-      if k == 1 && !refl.0 then (c, refl) else
+  let (c, _, first) =
+    loop (c, refl, first) = (splat 0, (false, ro, rd, 0f32), f32.inf) for k < paths do
+      if k == 1 && !refl.0 then (c, refl, first) else
       let (o, d, w) = if k == 0 then (ro, rd, 1) else (refl.1, refl.2, refl.3)
-      let (col, r) = follow pose g o d w
-      in (c +^ col, if k == 0 then r else refl)
-  in c
+      let (col, r, f) = follow pose g o d w
+      in (c +^ col, if k == 0 then r else refl, if k == 0 then f else first)
+  in (c, first)

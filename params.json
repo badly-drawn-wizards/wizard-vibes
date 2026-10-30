@@ -912,6 +912,15 @@
           "max": 8,
           "default": 4,
           "compile": true
+        },
+        {
+          "id": "max_spells",
+          "label": "Spells at once",
+          "kind": "int",
+          "min": 1,
+          "max": 16,
+          "default": 6,
+          "compile": true
         }
       ]
     }

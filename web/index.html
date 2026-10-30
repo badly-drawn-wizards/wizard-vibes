@@ -52,6 +52,33 @@
   .param.wide .flags { grid-column: 1; display: flex; flex-wrap: wrap; gap: 2px 10px; }
   .param.wide .flags label { display: flex; gap: 4px; align-items: center; }
   .param.wide button { grid-row: 1; grid-column: 2; }
+  /* the controls panel, bottom right (beside the drawer when it is open) */
+  #help, #help-open { position: fixed; right: 12px; bottom: 12px; transition: right 0.2s; }
+  .drawer-open #help, .drawer-open #help-open { right: calc(min(320px, 100vw) + 12px); }
+  #help { width: 270px; max-width: calc(100vw - 24px); box-sizing: border-box; padding: 10px 12px;
+          background: rgb(5 4 13 / 0.75); backdrop-filter: blur(6px); border: 1px solid #2c2950;
+          border-radius: 8px; color: var(--dim); font-size: 12px; }
+  #help[hidden], #help-open[hidden] { display: none; }
+  #help header { display: flex; justify-content: space-between; color: var(--fg); margin-bottom: 6px; }
+  #help button, #help-open { font: inherit; color: var(--dim); background: none; border: none; cursor: pointer; padding: 0; }
+  #help button:hover, #help-open:hover { color: var(--fg); }
+  #help-open { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #2c2950;
+               background: rgb(5 4 13 / 0.6); color: var(--fg); }
+  .help-body { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+  .help-body > div:nth-child(even) { text-align: right; white-space: nowrap; }
+  .help-spells { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #2c2950; }
+  .help-spells .on { color: var(--fg); }
+  .help-spells .on::after { content: " ◂"; }
+  #help kbd { display: inline-block; min-width: 1.4em; padding: 0 4px; margin-left: 2px; text-align: center;
+              border: 1px solid #4a4680; border-bottom-width: 2px; border-radius: 4px; color: var(--fg);
+              font: inherit; font-size: 11px; }
+  .glyph { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; color: #fff;
+           font-size: 10px; font-weight: bold; height: 18px; vertical-align: middle; }
+  .glyph.face { width: 18px; border-radius: 50%; }
+  .glyph.face.A { background: #3f9c35; } .glyph.face.B { background: #c8352e; }
+  .glyph.face.X { background: #2c6fd1; } .glyph.face.Y { background: #c9a227; color: #222; }
+  .glyph.shoulder { padding: 0 5px; border-radius: 9px 9px 4px 4px; background: #3a3760; }
+  .glyph.stick { width: 18px; border-radius: 50%; background: #3a3760; box-shadow: inset 0 0 0 3px #26244a; }
   #error { position: fixed; left: 12px; right: 12px; bottom: 12px; max-height: 50vh; overflow: auto;
            margin: 0; padding: 12px; background: rgb(20 4 10 / 0.9); color: var(--err);
            border: 1px solid var(--err); border-radius: 6px; white-space: pre-wrap; }
@@ -67,6 +94,12 @@
 </div>
 <button id="drawer-toggle" type="button" title="Parameters">⚙</button>
 <aside id="drawer"><div id="params"></div></aside>
+<section id="help" aria-label="Controls">
+  <header><span>Controls</span><button class="help-close" type="button" title="Hide">✕</button></header>
+  <div class="help-body"></div>
+  <div class="help-spells"></div>
+</section>
+<button id="help-open" type="button" title="Controls" hidden>?</button>
 <pre id="error" hidden></pre>
 <script type="module" src="/web/main.js"></script>
 </body>

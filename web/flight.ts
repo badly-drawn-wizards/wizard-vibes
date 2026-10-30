@@ -192,6 +192,12 @@ export class FreeFlight {
     }
   }
 
+  // Where he is and which way he faces, in free flight or on the path.
+  where(time: number): { pos: V3; heading: number } {
+    if (this.active) return { pos: this.pos, heading: this.heading };
+    return { pos: [pathX(time), ALTITUDE, SPEED * time], heading: Math.atan2(pathDx(time), SPEED) };
+  }
+
   drive(): Drive {
     if (!this.active) return ON_PATH;
     // the felt acceleration in his frame (+x his left, +z ahead)
@@ -215,7 +221,7 @@ export class FreeFlight {
   }
 }
 
-function isTyping(e: KeyboardEvent): boolean {
+export function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   return !!t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA");
 }

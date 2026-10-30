@@ -107,15 +107,20 @@ import "params"
 import "wizard"
 import "scene"
 import "collide"
+import "config"
 
--- dr: free flight's state, from the harness (or on the flight path).
+-- dr: free flight's state, from the harness (or on the flight path);
+-- spells: the spells in flight (see spells.fut).
 entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
-             (prm: params) (dr: drive) : []u32 =
-  render_frame prm dr w vw h tm yaw pitch dst
+             (prm: params) (dr: drive) (spells: []f32) : []u32 =
+  render_frame prm dr spells w vw h tm yaw pitch dst
 
--- Free flight's collision probe (see collide.fut).
-entry probe (tm: f32) (prm: params) (dr: drive) : []f32 =
-  probe_frame prm dr tm
+-- The collision probe, for free flight and the spells (see collide.fut).
+entry probe (tm: f32) (prm: params) (dr: drive) (pts: []f32) : []f32 =
+  probe_frame prm dr tm pts
+
+-- How many spells may be in flight at once (a compile-time parameter).
+entry spell_limit (_: i32) : i32 = max_spells
 
 -- CPU reference image, with the default uniforms (see dev/ref-render.ts).
 entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)

@@ -6,7 +6,9 @@ import { readPad } from "./gamepad.ts";
 import { buildRecord, type FutharkArray, type FutInstance, loadFuthark, rawBuffer, unloadFuthark } from "./futhark-loader.ts";
 import { clearError, setStatus, showError } from "./overlay.ts";
 import { createDrawer, type Params } from "./params-drawer.ts";
-import { type Drive, FreeFlight, ON_PATH } from "./flight.ts";
+import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
+import { type Device, Help } from "./help.ts";
+import { Spells } from "./spells.ts";
 
 // The drawer's uniforms, passed to render as its params record: rebuilt
 // (per loaded build) only when they change.
@@ -20,25 +22,39 @@ function paramsRecord(i: FutInstance) {
   records.set(i, { version: params.version, rec });
   return rec;
 }
-// Runs render with the flight state as its drive record (builds from before
-// free flight take none: kept working for benchmarking against them).
-async function render(i: FutInstance, w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number, d: Drive): Promise<FutharkArray> {
-  if (!i.fut.manifest.types.drive) return i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i));
+// Whether an entry point of this build takes the named input (older builds
+// take fewer: kept working for benchmarking against them).
+const takes = (i: FutInstance, entry: string, input: string): boolean =>
+  !!i.fut.manifest.entry_points[entry]?.inputs.some((x: { name: string }) => x.name === input);
+
+// A []f32 input (freed by the caller).
+const f32Array = (i: FutInstance, data: Float32Array): FutharkArray => i.fut.types["[]f32"].from_data(data, data.length);
+
+// Runs render with the flight state as its drive record and the spells in
+// flight as an array.
+async function render(i: FutInstance, w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number, d: Drive, spellData?: Float32Array): Promise<FutharkArray> {
+  if (!takes(i, "render", "dr")) return i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i));
   const drive = buildRecord(i, "drive", d);
+  const sp = takes(i, "render", "spells") ? f32Array(i, spellData ?? new Float32Array(0)) : null;
   try {
-    return await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i), drive);
+    return await (sp
+      ? i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i), drive, sp)
+      : i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i), drive));
   } finally {
     drive.free();
+    sp?.free();
   }
 }
 
-// Free flight's collision probe, from the same state.
-async function probeEntry(i: FutInstance, t: number, d: Drive): Promise<FutharkArray> {
+// The collision probe, from the same state, also at the given points.
+async function probeEntry(i: FutInstance, t: number, d: Drive, pts: Float32Array): Promise<FutharkArray> {
   const drive = buildRecord(i, "drive", d);
+  const p = takes(i, "probe", "pts") ? f32Array(i, pts) : null;
   try {
-    return await i.fut.entry.probe(t, paramsRecord(i), drive);
+    return await (p ? i.fut.entry.probe(t, paramsRecord(i), drive, p) : i.fut.entry.probe(t, paramsRecord(i), drive));
   } finally {
     drive.free();
+    p?.free();
   }
 }
 
@@ -60,18 +76,44 @@ flight.onToggle = (on) => {
   cam.interacted = true;
 };
 
-// Free flight's collision probe: its few floats are copied into a mappable
-// buffer with the frame, and read back whenever the GPU gets to them, without
-// waiting. Meanwhile further probes are skipped.
-const PROBE_BYTES = 6 * 4 * 4; // see collision_spheres in fut/collide.fut
-const probes = new WeakMap<GPUDevice, { buf: GPUBuffer; busy: boolean }>();
-function probeReader(device: GPUDevice) {
+// Spells, cast from the orb along the camera's view: 1 2 3 choose, Space
+// casts (or X A B and RB on a controller). How many may be out at once is
+// a compile-time parameter, asked of each build.
+const spells = new Spells();
+const spellLimits = new WeakMap<FutInstance, number>();
+let casting = false; // Space held
+
+// The controls panel, showing the keys of whichever device was used last.
+const help = new Help(document.getElementById("help")!, document.getElementById("help-open")!);
+let device: Device = "keyboard";
+
+// The collision probe: its few floats (for the rock and him, then each
+// spell) are copied into a mappable buffer with the frame, and read back
+// whenever the GPU gets to them, without waiting. Meanwhile further probes
+// are skipped.
+const SPHERES = 6; // see collision_spheres in fut/collide.fut
+const probes = new WeakMap<GPUDevice, { buf: GPUBuffer; busy: boolean; ids: number[] }>();
+function probeReader(device: GPUDevice, bytes: number) {
   let r = probes.get(device);
-  if (!r) {
-    r = { buf: device.createBuffer({ size: PROBE_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false };
+  if (!r || r.buf.size !== bytes) {
+    if (r && !r.busy) r.buf.destroy();
+    r = { buf: device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false, ids: [] };
     probes.set(device, r);
   }
   return r;
+}
+
+// The orb, and the camera's view, in the world (for casting).
+function castFrom(): { origin: [number, number, number]; dir: [number, number, number] } {
+  const { pos, heading } = flight.where(time);
+  const c = Math.cos(heading), s = Math.sin(heading);
+  const turn = (x: number, y: number, z: number): [number, number, number] => [x * c + z * s, y, z * c - x * s];
+  const o = turn(0.55, 2.1, 0.5); // the orb, in his frame (orb_pos in fut/scene.fut)
+  const cp = Math.cos(cam.pitch);
+  return {
+    origin: [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]],
+    dir: turn(-cp * Math.sin(cam.yaw), -Math.sin(cam.pitch), -cp * Math.cos(cam.yaw)),
+  };
 }
 
 let renderScale = Number(sessionStorage.getItem("wizard-scale") ?? 1) || 1;
@@ -96,9 +138,18 @@ let fps = 0;
 let last = performance.now();
 
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Space") paused = !paused;
-
+  if (isTyping(e)) return;
+  device = "keyboard";
+  if (e.code === "KeyP") paused = !paused;
+  else if (e.code === "Space") {
+    casting = true;
+    e.preventDefault();
+  } else if (/^Digit[123]$/.test(e.code)) spells.select(Number(e.code.slice(5)) - 1);
 });
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Space") casting = false;
+});
+window.addEventListener("blur", () => (casting = false));
 
 function configure(device: GPUDevice): void {
   ctx.unconfigure();
@@ -124,6 +175,15 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   const pad = readPad();
   padConnected = !!pad;
   if (pad?.toggle) flight.toggle();
+  if (pad?.active) device = "pad";
+  if (pad?.spell != null) spells.select(pad.spell);
+  spells.limit = spellLimits.get(i) ?? spells.limit;
+  if (!paused && (casting || pad?.cast)) {
+    const { origin, dir } = castFrom();
+    spells.cast(origin, dir);
+  }
+  spells.update(paused ? 0 : dt);
+  help.update(device, spells.selected);
   // right stick: look right turns the view right (the camera's yaw is its
   // azimuth round him, so it decreases), up raises the view
   if (pad) nudgeCamera(cam, -2.5 * pad.look[0] * dt, -1.5 * pad.look[1] * dt);
@@ -137,11 +197,14 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   if (flight.active) cam.yaw -= flight.heading - heading;
 
   const d = flight.drive();
-  const reader = probeReader(i.device);
-  const probe = flight.active && !reader.busy && i.fut.entry.probe ? await probeEntry(i, time, d) : null;
-  const out = await render(i, w, vw, h, time, cam.yaw, cam.pitch, cam.dist, d);
+  const points = takes(i, "probe", "pts") ? spells.probePoints() : { ids: [], pts: new Float32Array(0) };
+  const probeBytes = (SPHERES + points.pts.length / 3) * 16;
+  const reader = probeReader(i.device, probeBytes);
+  const wanted = flight.active || spells.count > 0;
+  const probe = wanted && !reader.busy && i.fut.entry.probe ? await probeEntry(i, time, d, points.pts) : null;
+  const out = await render(i, w, vw, h, time, cam.yaw, cam.pitch, cam.dist, d, spells.pack());
   const enc = i.device.createCommandEncoder();
-  if (probe) enc.copyBufferToBuffer(rawBuffer(i, probe, "f32_1d"), 0, reader.buf, 0, PROBE_BYTES);
+  if (probe) enc.copyBufferToBuffer(rawBuffer(i, probe, "f32_1d"), 0, reader.buf, 0, probeBytes);
   enc.copyBufferToTexture(
     { buffer: rawBuffer(i, out), bytesPerRow: w * 4, rowsPerImage: h },
     { texture: ctx.getCurrentTexture() },
@@ -154,11 +217,14 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   if (probe) {
     probe.free(); // (likewise)
     reader.busy = true;
+    reader.ids = points.ids;
     reader.buf
       .mapAsync(GPUMapMode.READ)
       .then(() => {
-        flight.collide(new Float32Array(reader.buf.getMappedRange().slice(0)));
+        const data = new Float32Array(reader.buf.getMappedRange().slice(0));
         reader.buf.unmap();
+        flight.collide(data.subarray(0, SPHERES * 4));
+        spells.applyProbe(reader.ids, data.subarray(SPHERES * 4));
       })
       .catch(() => {}) // the device went away
       .finally(() => (reader.busy = false));
@@ -173,7 +239,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight: WASD, E/Q, shift · F: path" : ""}${padConnected ? " · controller (X: free flight)" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }
@@ -196,6 +262,7 @@ async function swapTo(version: string): Promise<void> {
       if (info.reason !== "destroyed") showError(`GPU device lost: ${info.message}`);
     });
     if (next.shaders.warnings) console.info(`${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
+    if (next.fut.entry.spell_limit) spellLimits.set(next, Number(await next.fut.entry.spell_limit(0)));
   }
   // Stop the loop on the old instance and let its last frame finish.
   const old = inst;
@@ -231,6 +298,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
 (window as unknown as { wizard: object }).wizard = {
   flight,
   cam,
+  spells,
   async readFrame(w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number) {
     const i = inst;
     if (!i) throw new Error("no Futhark instance loaded");
@@ -252,7 +320,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     inst = null;
     await inFlight;
     try {
-      const out = await probeEntry(i, time, d);
+      const out = await probeEntry(i, time, d, new Float32Array(0));
       const v = Array.from(await out.values());
       out.free();
       return v;
