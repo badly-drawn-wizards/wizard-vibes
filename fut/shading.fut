@@ -76,6 +76,15 @@ def material (tm: f32) (g: glow) (m: i32) (p: vec3) : material =
   else if m == m_eye then plain (splat 0.02) with ks = 0.8 with shininess = 120
   else if m == m_wood then
     plain (scale (0.75 + 0.25 * f32.sin (p.y * 45 + 3 * f32.sin (p.x * 40))) (vec 0.36 0.21 0.1))
+  else if m == m_leather then plain (vec 0.16 0.09 0.05) with ks = 0.2 with shininess = 20
+  else if m == m_tome then plain (vec 0.32 0.05 0.06) with ks = 0.15 with shininess = 16
+  else if m == m_pages then plain (vec 0.85 0.8 0.66)
+  else if m >= m_potion && m < m_potion + 3 then
+    -- dark glass with glowing liquid
+    let liquid = if m == m_potion then vec 1 0.12 0.2
+                 else if m == m_potion + 1 then vec 0.2 1 0.35
+                 else vec 0.65 0.25 1
+    in plain (scale 0.15 liquid) with emission = scale (0.45 * g.level) liquid with ks = 1.2 with shininess = 90
   else if m == m_ground then
     let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
     in plain (scale (0.8 + 0.4 * tile) (vec 0.11 0.11 0.13))

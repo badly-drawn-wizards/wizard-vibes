@@ -16,6 +16,10 @@ def m_gold : i32 = 5
 def m_eye : i32 = 6
 def m_wood : i32 = 7
 def m_ground : i32 = 9
+def m_leather : i32 = 10
+def m_tome : i32 = 11
+def m_pages : i32 = 12
+def m_potion : i32 = 20 -- 20, 21, 22: one per flask
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -164,6 +168,95 @@ def sd_band (p: vec3) : f32 = sd_torus (p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0
 
 def sd_staff (p: vec3) : f32 = sd_capsule p staff_foot staff_top staff_radius
 
+---------------------------------------------------------------------
+-- Belt, buckle, potions and tome
+
+-- Radius of the robe's cone at height y (before the hem ripple).
+def robe_radius (y: f32) : f32 = 0.55 - (0.55 - 0.17) * y / 1.35 + 0.03 -- the -0.03 in sd_robe rounds outward
+def belt_y : f32 = 0.92
+
+-- Outward horizontal direction at an angle round the body (0 = front, +x at 90 degrees).
+def around (a: f32) : vec3 = vec (f32.sin a) 0 (f32.cos a)
+def deg (d: f32) : f32 = d * f32.pi / 180
+
+def sd_belt (p: vec3) : f32 =
+  let r = length2 (vec2 p.x p.z)
+  let q = vec2 (r - (robe_radius p.y + 0.008)) (p.y - belt_y)
+  -- a rounded rectangle in the (radius, height) plane, swept round the body
+  let d = vec2 (f32.abs q.x - 0.008) (f32.abs q.y - 0.024)
+  in length2 (vec2 (f32.max d.x 0) (f32.max d.y 0)) + f32.min (f32.max d.x d.y) 0 - 0.006
+
+-- A gold pentagram in a ring, on the front of the belt. Every stroke is a
+-- round tube, so it reads as cast metal.
+def buckle_centre : vec3 = vec 0 belt_y (robe_radius belt_y + 0.03)
+
+def sd_buckle (p: vec3) : f32 =
+  let q = p -^ buckle_centre
+  let rad = 0.05
+  let corner (k: i32) =
+    let a = f32.pi / 2 + 2 * f32.pi * f32.i32 k / 5
+    in vec (rad * f32.cos a) (rad * f32.sin a) 0
+  let star = loop d = 1e9f32 for k < 5 do
+               f32.min d (sd_capsule q (corner k) (corner ((k + 2) % 5)) 0.006)
+  let ring = length2 (vec2 (length2 (vec2 q.x q.y) - (rad + 0.008)) q.z) - 0.007
+  in f32.min star ring
+
+-- Three potions hanging from the belt on the right hip: two round flasks
+-- either side of a tall bottle, each with a short neck and a cork.
+def potion_angle (i: i32) : f32 = deg (70 + 24 * f32.i32 i)
+
+def potion (i: i32) (p: vec3) : hit =
+  let a = potion_angle i
+  let neck_top_y = belt_y - 0.026
+  let neck_len = 0.03
+  let neck_top = scale (robe_radius neck_top_y + 0.02) (around a) +^ vec 0 neck_top_y 0
+  let body_top = neck_top -^ vec 0 neck_len 0
+  let glass =
+    if i == 1 then
+      -- tall bottle: a rounded cylinder under the neck
+      let c = body_top -^ vec 0 0.055 0
+      in smin 0.01 (sd_capsule p (c -^ vec 0 0.03 0) (c +^ vec 0 0.025 0) 0.03)
+                   (sd_capsule p body_top neck_top 0.012)
+    else
+      let r = 0.04
+      let c = body_top -^ vec 0 (r * 0.8) 0
+      in smin 0.015 (sd_sphere (p -^ c) r) (sd_capsule p body_top neck_top 0.013)
+  let cork = sd_capsule p (neck_top -^ vec 0 0.008 0) (neck_top +^ vec 0 0.01 0) 0.015
+  in umin (glass, m_potion + i) (cork, m_wood)
+
+-- A tome hanging on the left hip, lying against the robe's slope.
+def tome (p: vec3) : hit =
+  let a = deg (-100)
+  let y = belt_y - 0.12
+  let out = normalise (around a +^ vec 0 0.28 0) -- the robe's cone slopes inwards
+  let up = normalise (cross (cross out (vec 0 1 0)) out)
+  let side = cross up out
+  let c = scale (robe_radius y + 0.035) (around a) +^ vec 0 y 0
+  let v = p -^ c
+  let q = vec (dot v side) (dot v up) (dot v out) -- width, height, thickness
+  let box (cx: f32) (cz: f32) (b: vec3) (r: f32) = sd_box (q -^ vec cx 0 cz) (b -^ splat r) - r
+  let covers = f32.min (box 0 0.027 (vec 0.08 0.1 0.006) 0.003) (box 0 (-0.027) (vec 0.08 0.1 0.006) 0.003)
+  let spine = box (-0.077) 0 (vec 0.008 0.1 0.03) 0.006
+  let pages = box 0.004 0 (vec 0.074 0.094 0.022) 0.002
+  let clasp = box 0.08 0 (vec 0.006 0.016 0.031) 0.003
+  -- a strap from the belt down over the front cover
+  let strap = sd_box (q -^ vec 0 0.07 0.035) (vec 0.011 0.074 0.0025) - 0.0015
+  in (f32.min covers spine, m_tome) |> umin (pages, m_pages) |> umin (clasp, m_gold) |> umin (strap, m_leather)
+
+-- Evaluates f only within 0.15 of a bounding sphere around it; beyond, the
+-- sphere's distance is a safe stand-in (the tolerance contract in march.fut).
+def bounded (centre: vec3) (radius: f32) (f: vec3 -> hit) (p: vec3) : hit =
+  let b = length (p -^ centre) - radius
+  in if b > 0.15 then (b, m_leather) else f p
+
+def waist_gear (p: vec3) : hit =
+  let potions_at = scale (robe_radius 0.84 + 0.05) (around (potion_angle 1)) +^ vec 0 0.84 0
+  let tome_at = scale (robe_radius 0.8 + 0.035) (around (deg (-100))) +^ vec 0 0.82 0
+  in (sd_belt p, m_leather)
+     |> umin (bounded buckle_centre 0.07 (\q -> (sd_buckle q, m_gold)) p)
+     |> umin (bounded potions_at 0.26 (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
+     |> umin (bounded tome_at 0.19 tome p)
+
 def wizard (tm: f32) (p: vec3) : hit =
   (smin 0.06 (sd_robe tm p) (sd_arms p), m_robe)
   |> umin (sd_hands p, m_skin)
@@ -174,6 +267,7 @@ def wizard (tm: f32) (p: vec3) : hit =
   |> umin (sd_band p, m_gold)
   |> umin (sd_staff p, m_wood)
   |> umin (sd_cradle p, m_gold)
+  |> umin (waist_gear p)
 
 ---------------------------------------------------------------------
 -- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.
