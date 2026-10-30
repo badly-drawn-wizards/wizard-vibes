@@ -8,6 +8,8 @@ import "anim"
 import "world"
 import "march"
 
+-- Left and right are the wizard's own: he faces +z, so his left is +x.
+
 -- Material ids.
 def m_robe : i32 = 1
 def m_skin : i32 = 2
@@ -28,7 +30,7 @@ def m_staff : i32 = 15
 ---------------------------------------------------------------------
 -- Wizard
 
--- The staff stands just outside the robe's hem and leans forward; the right
+-- The staff stands just outside the robe's hem and leans forward; the left
 -- hand grips it at grip_height and the orb sits on its tip.
 def staff_foot : vec3 = vec 0.6 0 0.25
 def staff_top : vec3 = vec 0.52 2.0 0.46
@@ -38,15 +40,15 @@ def staff_at (y: f32) : vec3 = staff_foot +^ scale (y / staff_dir.y) staff_dir
 
 def grip_height : f32 = 1.15
 -- The elbow's rest position; only used to place the fist and the wrist.
-def right_elbow_rest : vec3 = vec 0.36 1.07 0.14
--- The right palm's centre, on the elbow's side of the staff, and the cuff
+def left_elbow_rest : vec3 = vec 0.36 1.07 0.14
+-- The left palm's centre, on the elbow's side of the staff, and the cuff
 -- of the sleeve, set back from it so the hand sticks out (the arm's IK
 -- reaches for the cuff).
-def right_palm : vec3 =
+def left_palm : vec3 =
   let g = staff_at grip_height
-  let towards = right_elbow_rest -^ g
+  let towards = left_elbow_rest -^ g
   in g +^ scale 0.045 (normalise (towards -^ scale (dot towards staff_dir) staff_dir))
-def right_wrist : vec3 = right_palm -^ scale 0.1 (normalise (right_palm -^ right_elbow_rest))
+def left_wrist : vec3 = left_palm -^ scale 0.1 (normalise (left_palm -^ left_elbow_rest))
 
 -- Two-bone IK: for a shoulder s reaching for target t with bone lengths l1
 -- and l2, returns (elbow, hand). The elbow bends towards `pole`; an
@@ -70,17 +72,17 @@ type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, loca
             , lean: f32 -- sideways shear of the body above the hips, per unit height
             , head: vec3 -- offset of the head, beard and hat
             , look: f32 -- head turn (radians, towards +x)
-            , point: f32 -- 0 idle .. 1 pointing with the left hand
+            , point: f32 -- 0 idle .. 1 pointing with the right hand
             , pix: f32 -- angle one pixel spans (for texture filtering)
-            , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3
-            , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3 }
+            , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
+            , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
 def pose_at (secs: f32) : pose =
   let tm = loop_angle secs
   let fl = flight_at secs
   let b = breath tm
   -- Turning towards local +x makes fl.turn positive. He leans into the turn,
-  -- and in sharper turns points the way with his left hand and looks there.
+  -- and in sharper turns points the way with his right hand and looks there.
   let side = f32.sgn fl.turn
   let point = smoothstep 0.03 0.12 (f32.abs fl.turn)
   let lean = clamp (-0.15) 0.15 (0.9 * fl.turn)
@@ -88,21 +90,21 @@ def pose_at (secs: f32) : pose =
   -- inhaling lifts the shoulders; the head rises and nods forward a little
   let lift = vec 0 (0.012 * b) (0.004 * b) +^ shift 1.33
   let head = vec 0 (0.012 * b) (0.007 * b) +^ shift 1.6
-  let r_shoulder = vec 0.2 1.33 0 +^ lift
-  let l_shoulder = vec (-0.2) 1.33 0 +^ lift
-  -- the right hand stays on the staff, so its elbow follows the body
-  let (r_elbow, r_wrist) = two_bone r_shoulder right_wrist 0.34 0.29 (vec 0.5 (-1) (-0.5))
-  -- the left hand drifts idly in front of the belly, or points into the turn
+  let l_shoulder = vec 0.2 1.33 0 +^ lift
+  let r_shoulder = vec (-0.2) 1.33 0 +^ lift
+  -- the left hand stays on the staff, so its elbow follows the body
+  let (l_elbow, l_wrist) = two_bone l_shoulder left_wrist 0.34 0.29 (vec 0.5 (-1) (-0.5))
+  -- the right hand drifts idly in front of the belly, or points into the turn
   let idle = vec (0.025 * f32.sin tm) (0.018 * f32.sin (2 * tm) + 0.01 * b) (0.02 * f32.cos tm)
   let rest = vec (-0.25) 1.02 0.27 +^ idle +^ shift 1.02
-  -- (pointing right means reaching across the body, so aim higher and more
+  -- (pointing to his left means reaching across the body, so aim higher and more
   -- forward to keep the arm clear of the beard)
   let aim_dir = if side < 0 then vec (-0.85) 0.3 0.75 else vec 0.5 0.55 0.9
-  let aim = l_shoulder +^ scale 0.62 (normalise aim_dir)
-  let (l_elbow, l_wrist) = two_bone l_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
+  let aim = r_shoulder +^ scale 0.62 (normalise aim_dir)
+  let (r_elbow, r_wrist) = two_bone r_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
   in { tm, secs, fl, moon = to_local_dir fl moon_world
      , breath = b, lean, head, look = 0.45 * point * side, point, pix = 0.0008
-     , r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist }
+     , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist }
 
 def orb_radius : f32 = 0.11
 def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
@@ -174,17 +176,13 @@ def sd_arm (shoulder: vec3) (elbow: vec3) (wrist: vec3) (p: vec3) : f32 =
                else smax 0.008 fore (-(sd_round_cone_ab p (wrist -^ scale 0.07 d) (wrist +^ scale 0.06 d) 0.05 0.062))
   in smin 0.04 (sd_capsule p shoulder elbow 0.075) sleeve
 
--- Where the left hand's palm is: out of the sleeve, along the forearm.
-def left_palm (pose: pose) : vec3 =
-  pose.l_wrist +^ scale 0.085 (normalise (pose.l_wrist -^ pose.l_elbow))
+-- Where the right hand's palm is: out of the sleeve, along the forearm.
+def right_palm (pose: pose) : vec3 =
+  pose.r_wrist +^ scale 0.085 (normalise (pose.r_wrist -^ pose.r_elbow))
 
 def sd_arms (pose: pose) (p: vec3) : f32 =
-  f32.min (sd_arm pose.r_shoulder pose.r_elbow pose.r_wrist p)
-          (sd_arm pose.l_shoulder pose.l_elbow pose.l_wrist p)
-
--- The left hand pokes out of its sleeve, along the forearm.
-def left_hand (pose: pose) : vec3 =
-  pose.l_wrist +^ scale 0.045 (normalise (pose.l_wrist -^ pose.l_elbow))
+  f32.min (sd_arm pose.l_shoulder pose.l_elbow pose.l_wrist p)
+          (sd_arm pose.r_shoulder pose.r_elbow pose.r_wrist p)
 
 -- Cartoon hands: a thumb and three fingers.
 
@@ -193,14 +191,13 @@ def sd_wrist (cuff: vec3) (palm: vec3) (p: vec3) : f32 =
   let d = normalise (palm -^ cuff)
   in sd_capsule p (cuff -^ scale 0.03 d) (palm -^ scale 0.02 d) 0.03
 
--- The hand closed round the staff (the wizard's own left hand; the
--- right_/left_ names in this file are as seen from the front). A palm on
+-- The left hand, closed round the staff. A palm on
 -- the elbow's side, and digits made of short straight segments with
 -- knuckles, like the pointing hand's: three fingers wrapping round the
 -- staff below the thumb, which wraps the other way above them.
-def sd_right_hand (p: vec3) : f32 =
+def sd_left_hand (p: vec3) : f32 =
   let g = staff_at grip_height
-  let towards = right_elbow_rest -^ g
+  let towards = left_elbow_rest -^ g
   let u = normalise (towards -^ scale (dot towards staff_dir) staff_dir) -- to the palm
   let v = cross u staff_dir -- the way the fingers wrap
   let q = p -^ g
@@ -210,24 +207,26 @@ def sd_right_hand (p: vec3) : f32 =
   let around (y: f32) (phi: f32) =
     g +^ scale y staff_dir +^ scale (0.048 * f32.cos phi) u +^ scale (0.048 * f32.sin phi) v
   let digit (y0: f32) (y1: f32) (angles: [4]f32) (r: f32) =
-    let pt (i: i32) = around (mix1 y0 y1 (f32.i32 i / 3)) angles[i]
+    -- (i is a loop counter in 0..3, so no bounds check; a check would make
+    -- Futhark emit f16 certificate variables, see web/wgsl-f32.ts)
+    let pt (i: i32) = around (mix1 y0 y1 (f32.i32 i / 3)) (#[unsafe] angles[i])
     in loop d = 1e9f32 for i < 3 do
          f32.min d (sd_capsule p (pt i) (pt (i + 1)) (r - 0.001 * f32.i32 i))
   let fingers = digit (-0.03) (-0.03) [0.2, 1.3, 2.4, 3.35] 0.0155
                 |> f32.min (digit 0 0 [0.2, 1.35, 2.5, 3.45] 0.016)
                 |> f32.min (digit 0.03 0.03 [0.2, 1.3, 2.4, 3.3] 0.0155)
   let thumb = digit 0.05 0.062 [0.4, -0.5, -1.35, -1.9] 0.016
-  in smin 0.012 (smin 0.02 palm (sd_wrist right_wrist right_palm p)) (f32.min fingers thumb)
+  in smin 0.012 (smin 0.02 palm (sd_wrist left_wrist left_palm p)) (f32.min fingers thumb)
 
--- The pointing hand (the wizard's own right hand): a palm in a frame along
+-- The right hand, which points: a palm in a frame along
 -- the forearm, three fingers of two straight segments side by side, and a
 -- thumb. At rest the fingers are nearly straight with a slight bend; as he
 -- points into a turn the index finger straightens and the others close.
-def sd_left_hand (pose: pose) (p: vec3) : f32 =
-  let f = normalise (pose.l_wrist -^ pose.l_elbow) -- along the forearm
+def sd_right_hand (pose: pose) (p: vec3) : f32 =
+  let f = normalise (pose.r_wrist -^ pose.r_elbow) -- along the forearm
   let side = normalise (cross f (vec 0 1 0)) -- away from the thumb
   let up = cross side f -- the back of the hand
-  let centre = left_palm pose
+  let centre = right_palm pose
   let q = p -^ centre
   let lq = vec (dot q side) (dot q up) (dot q f)
   let palm = sd_ellipsoid lq (vec 0.036 0.026 0.045)
@@ -247,7 +246,7 @@ def sd_left_hand (pose: pose) (p: vec3) : f32 =
   let tb = centre -^ scale 0.03 side +^ scale 0.005 f
   let tdir = normalise (scale 0.85 f -^ scale 0.4 side -^ scale (0.2 + 0.25 * pt) up)
   let thumb = sd_capsule p tb (tb +^ scale 0.042 tdir) 0.015
-  let wrist = sd_wrist pose.l_wrist centre p
+  let wrist = sd_wrist pose.r_wrist centre p
   in smin 0.012 (smin 0.02 palm wrist) (f32.min (f32.min index middle) (f32.min ring thumb))
 
 def sd_hands (pose: pose) (p: vec3) : f32 =
@@ -256,7 +255,7 @@ def sd_hands (pose: pose) (p: vec3) : f32 =
   let near (c: vec3) (f: vec3 -> f32) =
     let b = length (p -^ c) - 0.14
     in if b > 0.15 then b else f p
-  in f32.min (near right_palm sd_right_hand) (near (left_palm pose) (sd_left_hand pose))
+  in f32.min (near left_palm sd_left_hand) (near (right_palm pose) (sd_right_hand pose))
 
 -- The head, beard and hat move together: offset by the pose, and turned
 -- about the neck to look where he points.
@@ -411,7 +410,7 @@ def sd_buckle (p: vec3) : f32 =
   let ring = length2 (vec2 (length2 (vec2 q.x q.y) - (rad + 0.008)) q.z) - 0.007
   in f32.min star ring
 
--- Three potions hanging from the belt on the right hip: two round flasks
+-- Three potions hanging from the belt on the left hip: two round flasks
 -- either side of a tall bottle, each with a short neck and a cork.
 def potion_angle (i: i32) : f32 = deg (70 + 24 * f32.i32 i)
 
@@ -444,7 +443,7 @@ def sd_strap (p: vec3) (a: vec3) (b: vec3) (n: vec3) : f32 =
   let v = p -^ mix a b 0.5
   in sd_box (vec (dot v d) (dot v w) (dot v nn)) (vec (0.5 * len + 0.002) 0.01 0.0015) - 0.001
 
--- A tome hanging on the left hip, lying against the robe's slope.
+-- A tome hanging on the right hip, lying against the robe's slope.
 def tome (p: vec3) : hit =
   let a = deg (-100)
   let y = belt_y - 0.12
