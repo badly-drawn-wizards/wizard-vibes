@@ -42,6 +42,13 @@ def ray_segment (o: vec3) (d: vec3) (tmax: f32) (a: vec3) (b: vec3) : (f32, f32,
   let q = a +^ scale s v
   in (length (o +^ scale t d -^ q), t, f32.max 0 (dot (q -^ o) d - tmax))
 
+-- ray_segment for the polyline through point 0, 1, .., n: the nearest of
+-- its segments.
+def ray_polyline (o: vec3) (d: vec3) (tmax: f32) (n: i32) (point: i32 -> vec3) : (f32, f32, f32) =
+  loop (best, bt, bb) = (f32.inf, 0f32, 0f32) for k < n do
+    let (dd, tt, b) = ray_segment o d tmax (point k) (point (k + 1))
+    in if dd < best then (dd, tt, b) else (best, bt, bb)
+
 -- A glowing line: a hot core of radius r and a soft halo of radius h.
 def glow_line (r: f32) (h: f32) (dist: f32) : (f32, f32) =
   (f32.exp (-(dist * dist) / (r * r)), h * h / (dist * dist + h * h))
@@ -116,9 +123,7 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
             let fade = fade * saturate (8 * age)
             let point (k: i32) = let th = (f32.i32 k / 4 - 0.5) * 2.2
                                  in p +^ scale (width * f32.sin th) s -^ scale (bend * (1 - f32.cos th)) f
-            let (dist, t, behind) = loop (best, bt, bb) = (f32.inf, 0f32, 0f32) for k < 4 do
-                                      let (dd, tt, b) = ray_segment o d tmax (point k) (point (k + 1))
-                                      in if dd < best then (dd, tt, b) else (best, bt, bb)
+            let (dist, t, behind) = ray_polyline o d tmax 4 point
             let (core, halo) = glow_line 0.035 0.3 dist
             in c +^ scale (fade * seen t behind 0.2) (scale (3 * core) (vec 0.75 1 0.95) +^ scale (0.35 * halo) (vec 0.45 0.85 0.8))
           else if kind == spell_strike then
@@ -132,9 +137,7 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
               let jx = if k == 0 || k == 8 then 0 else hash2 (seed * 13 + k) flash - 0.5
               let jz = if k == 0 || k == 8 then 0 else hash2 (seed * 7 - k) (flash + 3) - 0.5
               in mix top p u +^ vec (2.4 * jx) 0 (2.4 * jz)
-            let (dist, t, behind) = loop (best, bt, bb) = (f32.inf, 0f32, 0f32) for k < 8 do
-                                      let (dd, tt, b) = ray_segment o d tmax (point k) (point (k + 1))
-                                      in if dd < best then (dd, tt, b) else (best, bt, bb)
+            let (dist, t, behind) = ray_polyline o d tmax 8 point
             let (core, halo) = glow_line 0.06 0.9 dist
             let (gd, gt, gb) = ray_segment o d tmax p p
             let ground = 3.5 * 3.5 / (gd * gd + 3.5 * 3.5)

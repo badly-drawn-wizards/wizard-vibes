@@ -55,6 +55,12 @@ export function attachCamera(cam: Camera, el: HTMLElement): void {
   );
 }
 
+// The way the camera looks, in his frame (as camera_ray in fut/wizard.fut).
+export function viewDir(cam: Camera): [number, number, number] {
+  const cp = Math.cos(cam.pitch);
+  return [-cp * Math.sin(cam.yaw), -Math.sin(cam.pitch), -cp * Math.cos(cam.yaw)];
+}
+
 // Turns the camera by (dyaw, dpitch), e.g. from a controller's stick.
 export function nudgeCamera(cam: Camera, dyaw: number, dpitch: number): void {
   if (dyaw === 0 && dpitch === 0) return;
