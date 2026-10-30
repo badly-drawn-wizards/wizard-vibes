@@ -63,9 +63,9 @@ type pose = { tm: f32, secs: f32, fl: flight
             , runes: f32 -- the runes' brightness, relative to their glow parameters
             -- The staff, held out to cast: its rest frame (where the staff,
             -- orb, cradle and the hand holding it are modelled) turns by
-            -- (staff_cos, staff_sin) about staff_axis through staff_pivot,
-            -- then shifts by staff_shift (see staff_world and staff_rest).
-            , staff_pivot: vec3, staff_axis: vec3, staff_cos: f32, staff_sin: f32, staff_shift: vec3
+            -- rigidly: rotated to columns (staff_x, staff_y, staff_z) and
+            -- moved by staff_t (see staff_world and staff_rest).
+            , staff_x: vec3, staff_y: vec3, staff_z: vec3, staff_t: vec3
             , orb: vec3 -- the orb's centre, where the staff holds it
             , orb_tint: vec3 -- the orb's glow colour, by spell
             , bolt_tint: vec3 -- tints its arcs and its light, by spell
@@ -103,9 +103,9 @@ def rotate_about (k: vec3) (c: f32) (s: f32) (v: vec3) : vec3 =
 
 -- The staff's rest frame to his, and back.
 def staff_world (pose: pose) (q: vec3) : vec3 =
-  pose.staff_pivot +^ rotate_about pose.staff_axis pose.staff_cos pose.staff_sin (q -^ pose.staff_pivot) +^ pose.staff_shift
+  pose.staff_t +^ scale q.x pose.staff_x +^ scale q.y pose.staff_y +^ scale q.z pose.staff_z
 def staff_rest (pose: pose) (p: vec3) : vec3 =
-  pose.staff_pivot +^ rotate_about pose.staff_axis pose.staff_cos (-pose.staff_sin) (p -^ pose.staff_shift -^ pose.staff_pivot)
+  let v = p -^ pose.staff_t in vec (dot v pose.staff_x) (dot v pose.staff_y) (dot v pose.staff_z)
 
 def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   let tm = loop_angle secs
@@ -125,28 +125,36 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   let head = vec 0 (0.012 * bd) (0.007 * bd) +^ shift 1.6
   let l_shoulder = vec 0.2 1.33 0 +^ lift
   let r_shoulder = vec (-0.2) 1.33 0 +^ lift
+  -- The staff leans with him, half as far, tilting about its foot (a shear
+  -- of lean per unit height is a tilt of atan lean).
+  let tilt = -(f32.atan (0.5 * lean))
+  let leaned (q: vec3) = staff_foot +^ rotate_about (vec 0 0 1) (f32.cos tilt) (f32.sin tilt) (q -^ staff_foot)
+  let leaned_dir = rotate_about (vec 0 0 1) (f32.cos tilt) (f32.sin tilt) staff_dir
   -- Casting: the staff turns about his grip to lead with the orb (raised a
   -- little above the aim) and is pushed forward, with a thrust on each cast.
   let aim = normalise (vec dr.sx dr.sy dr.sz +^ vec 0 0 1e-4)
   let want = normalise (aim +^ vec 0 0.9 0)
-  let k = cross staff_dir want
+  let k = cross leaned_dir want
   let staff_axis = if length k > 1e-4 then normalise k else vec 1 0 0
-  let angle = 0.85 * dr.staff * f32.acos (clamp (-1) 1 (dot staff_dir want))
+  let angle = 0.85 * dr.staff * f32.acos (clamp (-1) 1 (dot leaned_dir want))
   let kick = dr.staff * f32.exp (-12 * dr.flash)
-  let staff_pivot = staff_at grip_height
+  let staff_pivot = leaned (staff_at grip_height)
   -- Aiming to his right (local -x), he brings the staff across in front of
   -- his chest, the further the more he aims that way.
   let across = dr.staff * smoothstep 0 0.7 (-aim.x)
   let staff_shift = scale (0.16 * dr.staff + 0.07 * kick) (normalise (vec aim.x 0 aim.z +^ vec 0 0 1e-4))
                     +^ vec (-0.6 * across) (0.08 * dr.staff + 0.05 * across) (0.22 * across)
   let (staff_cos, staff_sin) = (f32.cos angle, f32.sin angle)
-  let held (q: vec3) = staff_pivot +^ rotate_about staff_axis staff_cos staff_sin (q -^ staff_pivot) +^ staff_shift
+  let held (q: vec3) = staff_pivot +^ rotate_about staff_axis staff_cos staff_sin (leaned q -^ staff_pivot) +^ staff_shift
+  -- (that, as a rotation and offset)
+  let staff_t = held (splat 0)
+  let column (e: vec3) = held e -^ staff_t
   -- The left hand stays on the staff, closed round it with the palm facing
   -- the elbow, wherever the staff and the elbow are: the arm reaches for the
   -- staff, then the hand is built round the staff's grip facing the elbow
   -- that gives, and the arm reaches again for its wrist.
   let l_grip = held (staff_at grip_height)
-  let l_axis = rotate_about staff_axis staff_cos staff_sin staff_dir
+  let l_axis = rotate_about staff_axis staff_cos staff_sin leaned_dir
   let hand_at (elbow: vec3) =
     let towards = elbow -^ l_grip
     let palm = l_grip +^ scale 0.045 (normalise (towards -^ scale (dot towards l_axis) l_axis))
@@ -184,4 +192,5 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
      , l_shoulder, l_elbow, l_wrist, l_grip, l_axis, l_palm, r_shoulder, r_elbow, r_wrist
-     , staff_pivot, staff_axis, staff_cos, staff_sin, staff_shift, orb = held orb_pos, orb_tint, bolt_tint, orb_boost, spell }
+     , staff_x = column (vec 1 0 0), staff_y = column (vec 0 1 0), staff_z = column (vec 0 0 1), staff_t
+     , orb = held orb_pos, orb_tint, bolt_tint, orb_boost, spell }
