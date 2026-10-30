@@ -18,6 +18,7 @@
             futhark.packages.${system}.futhark
             pkgs.emscripten
             pkgs.nodejs_24
+            pkgs.ffmpeg # dev/gif.ts
           ];
           shellHook = ''
             # The emscripten cache in the nix store is read-only; ports (emdawnwebgpu) need a writable one.

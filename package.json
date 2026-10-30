@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node dev/server.ts",
     "ref": "node dev/ref-render.ts",
+    "gif": "node dev/gif.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
