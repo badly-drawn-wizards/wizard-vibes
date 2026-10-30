@@ -1,5 +1,5 @@
 {
-  "$comment": "Tweakable parameters, shown in the drawer and generated into fut/params.fut (uniforms) and fut/config.fut (compile-time, \"compile\": true). Kinds: slider, int, color (linear RGB), checkbox, select. See dev/params.ts.",
+  "$comment": "Tweakable parameters, shown in the drawer and generated into fut/params.fut (uniforms) and fut/config.fut (compile-time, \"compile\": true). Kinds: slider, int, color (linear RGB), checkbox, select, flags (a bitmask of the options; each also becomes a <id>_<option> constant). See dev/params.ts.",
   "groups": [
     {
       "name": "Output",
@@ -33,6 +33,22 @@
             "Ambient occlusion"
           ],
           "default": 0
+        },
+        {
+          "id": "layers",
+          "label": "Layers",
+          "kind": "flags",
+          "options": [
+            "Figure",
+            "Staff",
+            "Gear",
+            "Rock",
+            "Terrain",
+            "Orb",
+            "Glow",
+            "Clouds"
+          ],
+          "default": 255
         }
       ]
     },

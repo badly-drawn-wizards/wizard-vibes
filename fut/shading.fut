@@ -132,12 +132,15 @@ def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse:
 -- A light: directional (pos is then its direction) or a point light whose
 -- intensity falls off as 1 / (1 + falloff d^2), and smoothly to nothing at
 -- `range` (cheap lights only reach nearby surfaces). Point lights of some
--- size stop their shadow rays short of it. One material can be exempt from
--- a light's shadows.
+-- size stop their shadow rays short of it. Which layers it involves:
+--   casters             block it (local layers only: shadow rays are only
+--                       traced through the sphere around the wizard);
+--   receivers           are lit by it;
+--   shadowed_receivers  of those, take its shadows.
 type light = { pos: vec3, directional: bool
              , diffuse: vec3, specular: vec3
              , falloff: f32, range: f32, radius: f32
-             , shadowed: bool, unshadowed: i32 }
+             , casters: i32, receivers: i32, shadowed_receivers: i32 }
 
 -- The moon, the orb, and a weak light in each potion.
 def n_lights : i32 = 5
@@ -147,50 +150,60 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     { pos = pose.moon, directional = true
     , diffuse = scale pose.prm.moon_strength pose.prm.moon_colour
     , specular = scale pose.prm.moon_strength (vec 0.7 0.75 1)
-    , falloff = 0, range = f32.inf, radius = 0, shadowed = true, unshadowed = -1 }
+    , falloff = 0, range = f32.inf, radius = 0
+    , casters = local_layers, receivers = layers_all, shadowed_receivers = layers_all }
   else if k == 1 then
     -- The orb's light flickers with the lightning, whitening in flashes.
     -- Its shadow rays stop short of it: the staff pokes into its underside,
     -- and a penumbra estimate taken right next to the light bands badly.
     -- The staff holds the orb on its tip, so its shadow rays towards the
     -- orb run along its own surface and graze every swelling and knot; a
-    -- branch cannot really shadow a light at its own tip, so it is exempt.
+    -- branch cannot really shadow a light at its own tip, so the staff
+    -- layer takes no shadows from it.
     let c = scale (pose.prm.orb_light * g.level) (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
     in { pos = orb_pos, directional = false, diffuse = c, specular = c
-       , falloff = 1.5, range = f32.inf, radius = orb_radius, shadowed = true, unshadowed = m_staff }
+       , falloff = 1.5, range = f32.inf, radius = orb_radius
+       , casters = local_layers, receivers = layers_all, shadowed_receivers = layers_all & !layers_staff }
   else
-    -- The potions: weak, unshadowed, reaching about half a unit, each with
-    -- a slight flicker of its own (whole multiples of the loop).
+    -- The potions: weak, unshadowed, reaching about half a unit and only
+    -- lighting the wizard's things, each with a slight flicker of its own
+    -- (whole multiples of the loop).
     let i = k - 2
     let flicker = 1 + 0.12 * f32.sin (f32.i32 (7 + 3 * i) * pose.tm + f32.i32 i * 2.1)
     let c = scale (pose.prm.potion_light * flicker) (glow_colour (m_potion + i))
     in { pos = from_body_space pose (potion_centre pose.prm i), directional = false, diffuse = c, specular = scale 0.3 c
-       , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04, shadowed = false, unshadowed = -1 }
+       , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04
+       , casters = 0, receivers = figure_layers, shadowed_receivers = 0 }
 
--- The lit colour of a surface hit at distance t along rd (fog included).
-def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+-- The lit colour of a surface hit at distance t along rd (fog included);
+-- m is the hit's tagged material (with its layer).
+def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+  let layer = hit_layer tagged
+  let m = hit_material tagged
+  let vis = pose.prm.layers -- only visible layers occlude, or show in AO
   -- The terrain's normal comes from its height gradient, worked out
   -- analytically (one evaluation instead of four of the whole scene), and it
   -- gets no AO: at its scale the probes see nothing.
   let n = if m == m_terrain
           then let w = to_world pose.fl p
                in to_local_dir pose.fl (terrain_normal (terrain_detail p) w.x w.z)
-          else normal (dist pose) p
+          else normal (dist vis pose) p
   -- textures tilt the normal used for lighting; shadows and AO keep the
   -- geometric one
   let fp = t * pose.pix
   let ng = n
   let n = if has_bump m then bumped (bump_height pose fp m) p ng else ng
   let mat = material pose g fp m p n
-  let occ = if m == m_terrain then 1 else ambient_occlusion (dist pose) p ng
+  let occ = if m == m_terrain then 1 else ambient_occlusion (dist vis pose) p ng
   let po = p +^ scale 0.002 ng
   -- (shadow rays that pass well clear of the figure and rock are fully lit)
-  let shadow (l: vec3) (tmax: f32) =
-    if shadow_misses occluder_centre occluder_radius po l tmax then 1
+  let shadow (casters: i32) (l: vec3) (tmax: f32) =
+    let casters = casters & vis & local_layers
+    in if casters == 0 || shadow_misses occluder_centre occluder_radius po l tmax then 1
     -- (and they end shortly after leaving that sphere: nothing lies beyond,
     -- and the shadow loop's steps are capped at 0.25, so marching on to
     -- tmax only crawled through empty space)
-    else soft_shadow (occluder_dist pose) po l
+    else soft_shadow (\tol q -> (local_scene casters pose tol q).0) po l
                      (f32.min tmax (sphere_exit occluder_centre occluder_radius po l + 1))
   -- All the lights, in one loop so the lighting and shadow code is
   -- compiled once. The moon's shadow is kept for the cloth sheen.
@@ -204,9 +217,9 @@ def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3
       let atten = if L.directional then 1
                   else smoothstep L.range (0.6 * L.range) d / (1 + L.falloff * d * d)
       -- (skipped where the light is negligible, e.g. the orb on the far terrain)
-      in if atten < 0.01 then (lit, moon_shadow) else
-      let sh = if !L.shadowed || d < L.radius || m == L.unshadowed then 1
-               else shadow l (if L.directional then 12 else d - L.radius - 0.15)
+      in if atten < 0.01 || !(has L.receivers layer) then (lit, moon_shadow) else
+      let sh = if !(has L.shadowed_receivers layer) || d < L.radius then 1
+               else shadow L.casters l (if L.directional then 12 else d - L.radius - 0.15)
       let c = light mat n rd l sh (scale atten L.diffuse) (scale atten L.specular)
       in (lit +^ c, if k == 0 then sh else moon_shadow)
   let to_orb = orb_pos -^ p
@@ -312,23 +325,26 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       (ro0, rd0, splat w0, splat 0, false, false, (false, ro0, rd0, 0f32))
     for _seg < 3 do
       if done then (ro, rd, w, acc, inside, done, refl) else
-      let (t_in, t_out) = orb_hit ro rd
+      let vis = pose.prm.layers
+      -- (a hidden orb is no glass at all)
+      let (t_in, t_out) = if has vis layers_orb then orb_hit ro rd else (f32.inf, -f32.inf)
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else 60
       -- Two passes: the terrain alone over the whole segment, then the scene
       -- near the wizard up to the terrain hit or the edge of the sphere that
       -- holds it (the peaks reach into that sphere, so the terrain goes
       -- first). Neither pass evaluates the other's geometry at every step.
-      let t_terrain = if inside || enters then f32.inf else march_terrain pose ro rd tmax
+      let t_terrain = if inside || enters || !(has vis layers_terrain) then f32.inf else march_terrain pose ro rd tmax
       let local_end = f32.max 0 (ray_sphere occluder_centre local_radius ro rd).1
       let local_max = f32.min tmax (f32.min t_terrain local_end)
-      let (t, m, emitted, tr) = march (local_scene pose) (media pose g) ro rd local_max
-      let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, m_terrain) else (t, m)
+      let (t, m, emitted, tr) = march (local_scene vis pose) (media pose g) ro rd local_max
+      let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, (tag layers_terrain (0, m_terrain)).1) else (t, m)
       -- the glows are above the cloud slab, so in front of the clouds
-      let (cloud_rad, cloud_tr) = clouds pose ro rd (if m >= 0 then t else tmax)
+      let (cloud_rad, cloud_tr) = if has vis layers_clouds then clouds pose ro rd (if m >= 0 then t else tmax)
+                                  else (splat 0, 1)
       -- the potions' glass, in front of whatever this segment reaches
       let (glass_added, glass_through) =
-        if inside then (splat 0, splat 1) else glass pose g ro rd (if m >= 0 then t else local_max)
+        if inside || !(has vis layers_gear) then (splat 0, splat 1) else glass pose g ro rd (if m >= 0 then t else local_max)
       let acc = acc +^ (w *^ glass_added)
       let w = w *^ glass_through
       let acc = acc +^ (w *^ emitted) +^ (scale tr w *^ cloud_rad)

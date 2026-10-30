@@ -3,7 +3,7 @@
 // record; compile-time parameters are sent to the server, which rebuilds
 // the shader once they settle. Native inputs throughout.
 
-type Kind = "slider" | "int" | "color" | "checkbox" | "select";
+type Kind = "slider" | "int" | "color" | "checkbox" | "select" | "flags";
 type Value = number | boolean | number[];
 interface Param {
   id: string;
@@ -97,6 +97,27 @@ function row(p: Param, initial: Value, onChange: (v: Value) => void): HTMLElemen
   let input: HTMLInputElement | HTMLSelectElement;
   let show: (v: Value) => void;
 
+  if (p.kind === "flags") {
+    // one checkbox per option; the value is the bitmask of the checked ones
+    const box = document.createElement("span");
+    box.className = "flags";
+    const checks = p.options!.map((o, i) => {
+      const l = document.createElement("label");
+      const c = document.createElement("input");
+      c.type = "checkbox";
+      c.onchange = () => onChange(checks.reduce((m, x, j) => m | (x.checked ? 1 << j : 0), 0));
+      l.append(c, o);
+      box.append(l);
+      return c;
+    });
+    show = (v) => checks.forEach((c, i) => (c.checked = ((v as number) & (1 << i)) !== 0));
+    show(initial);
+    const reset = resetButton(p, show, onChange);
+    label.classList.add("wide");
+    label.append(name, box, reset);
+    return label;
+  }
+
   if (p.kind === "select") {
     const sel = document.createElement("select");
     p.options!.forEach((o, i) => sel.add(new Option(o, String(i))));
@@ -132,6 +153,11 @@ function row(p: Param, initial: Value, onChange: (v: Value) => void): HTMLElemen
   }
   show(initial);
 
+  label.append(name, input, out, resetButton(p, show, onChange));
+  return label;
+}
+
+function resetButton(p: Param, show: (v: Value) => void, onChange: (v: Value) => void): HTMLButtonElement {
   const reset = document.createElement("button");
   reset.type = "button";
   reset.textContent = "↺";
@@ -141,6 +167,5 @@ function row(p: Param, initial: Value, onChange: (v: Value) => void): HTMLElemen
     show(p.default);
     onChange(p.default);
   };
-  label.append(name, input, out, reset);
-  return label;
+  return reset;
 }

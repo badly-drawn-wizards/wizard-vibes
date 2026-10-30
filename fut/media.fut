@@ -48,14 +48,18 @@ def potion_glow_density (prm: params) (ld: f32) : f32 = prm.potion_glow * f32.ex
 
 def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let tm = pose.tm
+  let vis = pose.prm.layers
+  let glow = has vis layers_glow -- the glow clouds round the orb, runes and potions
+  let orb = has vis layers_orb -- the haze and lightning inside the orb
   let od = sd_orb p
-  let gd = glyph_dist tm p
-  let bolts = lightning_media tm p
-  let haze = if od < 0 then globe_haze else 0
-  let (ld, lm) = nearest_liquid pose p
+  let gd = if glow then glyph_dist tm p else 1e9
+  let bolts = if orb then lightning_media tm p else {cap = 1e9, radiance = splat 0, extinction = 0}
+  let haze = if orb && od < 0 then globe_haze else 0
+  let od = if glow || orb then od else 1e9 -- (no step cap near a hidden orb)
+  let (ld, lm) = if glow then nearest_liquid pose p else (1e9, m_potion)
   in { cap = f32.min bolts.cap (f32.min (0.3 * f32.abs od + 0.015) (0.3 * gd + 0.01))
              |> f32.min (0.3 * f32.abs ld + 0.004)
-     , radiance = scale (orb_glow_density pose.prm g od) orb_glow_colour
+     , radiance = scale (if glow then orb_glow_density pose.prm g od else 0) orb_glow_colour
                   +^ scale (rune_glow_density pose.prm tm gd) rune_glow_colour
                   +^ scale haze orb_glow_colour
                   +^ bolts.radiance

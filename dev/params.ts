@@ -9,7 +9,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
-export type Kind = "slider" | "int" | "color" | "checkbox" | "select";
+export type Kind = "slider" | "int" | "color" | "checkbox" | "select" | "flags";
 export type Value = number | boolean | number[];
 export interface Param {
   id: string;
@@ -63,11 +63,22 @@ const lit = (p: Param, v: Value): string => {
 
 const HEADER = "-- Generated from params.json by dev/params.ts; do not edit.\n";
 
+// A flags option's constant: e.g. "layers" + "Figure" -> layers_figure.
+export const flagName = (p: Param, option: string): string => `${p.id}_${option.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+
+function flagDefs(s: Schema): string {
+  return allParams(s)
+    .filter((p) => p.kind === "flags")
+    .map((p) => `\n-- ${p.label}\n` + p.options!.map((o, i) => `def ${flagName(p, o)} : i32 = ${1 << i}`).join("\n") +
+                 `\ndef ${p.id}_all : i32 = ${(1 << p.options!.length) - 1}\n`)
+    .join("");
+}
+
 function paramsFut(s: Schema): string {
   const ps = allParams(s).filter((p) => !p.compile);
   return `${HEADER}
 import "vec3"
-
+${flagDefs(s)}
 -- The uniforms, passed to render as a record (see render.fut).
 type params =
   { ${ps.map((p) => `${p.id}: ${futType(p)}`).join("\n  , ")} }

@@ -582,20 +582,6 @@ def waist_gear (prm: params) (p: vec3) : hit =
      |> umin (sphere_bounded_hit (potions_at prm) potions_radius 0.15 m_leather (\q -> potion prm 0 q |> umin (potion prm 1 q) |> umin (potion prm 2 q)) p)
      |> umin (sphere_bounded_hit tome_at 0.19 0.15 m_tome (tome prm) p)
 
-def wizard (pose: pose) (p: vec3) : hit =
-  (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
-  |> umin (sd_hands pose p, m_skin)
-  |> umin (sd_head pose p, m_skin)
-  |> umin (sd_eyes pose p, m_eye)
-  |> umin (sd_eyelids pose p, m_skin)
-  |> umin (sd_brows pose p, m_brow)
-  |> umin (sd_beard pose p, m_beard)
-  |> umin (sd_hat pose p, m_hat)
-  |> umin (sd_band pose p, m_gold)
-  |> umin (sd_staff p, m_staff)
-  |> umin (sd_cradle p, m_gold)
-  |> umin (waist_gear pose.prm (body_space pose p))
-
 ---------------------------------------------------------------------
 -- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.
 
@@ -645,12 +631,48 @@ def rune_paint (tm: f32) (p: vec3) : f32 =
 -- Every wizard part lies inside this capsule, so its distance is a lower
 -- bound on the wizard's. Beyond the requested tolerance, return the bound and
 -- skip evaluating the parts (see the distance contract in march.fut).
+
+---------------------------------------------------------------------
+-- Layers. Every part of the scene belongs to one of the layers_* (generated
+-- from the "layers" parameter in params.json), and the scene functions take
+-- a mask of the layers to include. A hit's material id carries its layer in
+-- bits 8 and up (material ids are below 256).
+
+def tag (layer: i32) (h: hit) : hit = (h.0, h.1 | (layer << 8))
+def hit_material (m: i32) : i32 = m & 255
+def hit_layer (m: i32) : i32 = m >> 8
+def has (mask: i32) (layer: i32) : bool = mask & layer != 0
+def nothing : hit = (1e9, 0) -- (finite: shadow maths squares distances)
+
+-- The parts of the figure in the layers of `mask`.
+def wizard (mask: i32) (pose: pose) (p: vec3) : hit =
+  let figure =
+    if !(has mask layers_figure) then nothing
+    else (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
+         |> umin (sd_hands pose p, m_skin)
+         |> umin (sd_head pose p, m_skin)
+         |> umin (sd_eyes pose p, m_eye)
+         |> umin (sd_eyelids pose p, m_skin)
+         |> umin (sd_brows pose p, m_brow)
+         |> umin (sd_beard pose p, m_beard)
+         |> umin (sd_hat pose p, m_hat)
+         |> umin (sd_band pose p, m_gold)
+         |> tag layers_figure
+  let staff = if !(has mask layers_staff) then nothing
+              else (sd_staff p, m_staff) |> umin (sd_cradle p, m_gold) |> tag layers_staff
+  let gear = if !(has mask layers_gear) then nothing
+             else waist_gear pose.prm (body_space pose p) |> tag layers_gear
+  in figure |> umin staff |> umin gear
+
 def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.95
 
+def figure_layers : i32 = layers_figure | layers_staff | layers_gear
+
 #[noinline] -- (see scene; no 'z' in the name)
-def bounded_figure (pose: pose) (tol: f32) (p: vec3) : hit =
+def bounded_figure (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
-  in if b > tol then (b, m_robe) else wizard pose p
+  in if !(has mask figure_layers) then nothing
+     else if b > tol then (b, m_robe) else wizard mask pose p
 
 -- The orb is glass, refracted analytically by the shading (see shading.fut),
 -- so it is not part of the marched scene; what is inside it is drawn by the
@@ -673,7 +695,7 @@ def rock_exact (p: vec3) : hit =
   in (0.6 * (cone + rough), if p.y > -0.03 then m_ground else m_rock)
 
 -- (the rock fits in a sphere of radius 2.3; its noise needs a wider margin)
-def rock (p: vec3) : hit = sphere_bounded_hit (vec 0 (-1.2) 0) 2.3 0.3 m_rock rock_exact p
+def rock (p: vec3) : hit = sphere_bounded_hit (vec 0 (-1.2) 0) 2.3 0.3 m_rock rock_exact p |> tag layers_rock
 
 -- The terrain far below, sampled through the flight frame. No peak is above
 -- terrain_max, so well above it the height over terrain_max is a cheap lower
@@ -691,11 +713,11 @@ def terrain_detail (_p: vec3) : f32 = 5
 def terrain (pose: pose) (p: vec3) : hit =
   let w = to_world pose.fl p
   let detail = terrain_detail p
-  in if w.y > terrain_max + 1.5 then (w.y - terrain_max, m_terrain) else
+  in if w.y > terrain_max + 1.5 then (w.y - terrain_max, m_terrain) |> tag layers_terrain else
      -- the cheap bound clears most points near the wizard, his rock and the
      -- clouds; only close to the ground is the full terrain needed
      let gap = w.y - terrain_upper w.x w.z
-     in (if gap > 0.4 then 0.6 * gap else terrain_dist detail w, m_terrain)
+     in (if gap > 0.4 then 0.6 * gap else terrain_dist detail w, m_terrain) |> tag layers_terrain
 
 -- #[noinline]: Futhark inlines everything by default, and the scene is used
 -- by the march, normals, AO and both shadow loops, which made the shader
@@ -709,11 +731,14 @@ def terrain (pose: pose) (p: vec3) : hit =
 --   bounded_wizard. Fixed upstream; the pinned compiler predates the fix,
 --   so keep the name until flake.lock is updated. See
 --   dev/futhark-bugs/z-name-mangling.fut.
--- The scene near the wizard: the figure and its rock. (Primary rays march
--- this and the terrain in separate passes, see follow in shading.fut.)
+-- The scene near the wizard, in the layers of `mask`: the figure, its staff
+-- and gear, and the rock. (Primary rays march this and the terrain in
+-- separate passes, see follow in shading.fut.)
 #[noinline]
-def local_scene (pose: pose) (tol: f32) (p: vec3) : hit =
-  bounded_figure pose tol p |> umin (rock p)
+def local_scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
+  bounded_figure mask pose tol p |> umin (if has mask layers_rock then rock p else nothing)
+
+def local_layers : i32 = figure_layers | layers_rock
 
 -- Everything in local_scene lies in this sphere (radius 3.3), and so do the
 -- glowing media (the orb's cloud and tendrils, the rune circle; 3.6).
@@ -722,15 +747,10 @@ def occluder_radius : f32 = 3.3
 def local_radius : f32 = 3.6
 
 #[noinline]
-def scene (pose: pose) (tol: f32) (p: vec3) : hit =
-  local_scene pose tol p |> umin (terrain pose p)
+def scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
+  local_scene mask pose tol p |> umin (if has mask layers_terrain then terrain pose p else nothing)
 
-def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
-
--- What casts shadows: the wizard and his rock. The terrain is left out (it
--- would only shadow itself, at grazing angles, with penumbra artefacts), and
--- so is the orb, a light source itself.
-def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (local_scene pose tol p).0
+def dist (mask: i32) (pose: pose) (tol: f32) (p: vec3) : f32 = (scene mask pose tol p).0
 
 -- The terrain pass: sphere-traces the terrain alone along ro + t rd, for t in
 -- [0, tmax], returning the hit distance or infinity. A ray heading upwards
