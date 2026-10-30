@@ -345,7 +345,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
     -- (and they end shortly after leaving that sphere: nothing lies beyond,
     -- and the shadow loop's steps are capped at 0.25, so marching on to
     -- tmax only crawled through empty space)
-    else soft_shadow (\tol q -> (local_scene casters pose tol q).0) po l
+    else soft_shadow (\tol q -> shadow_scene casters pose tol q) po l
                      (f32.min tmax (sphere_exit occluder_centre occluder_radius po l + 1))
   -- All the lights, in one loop so the lighting and shadow code is
   -- compiled once. The moon's shadow is kept for the cloth sheen.

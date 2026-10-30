@@ -151,6 +151,27 @@ def local_scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
 
 def local_layers : i32 = figure_layers | layers_rock
 
+-- What casts the shadows near the wizard: a simpler stand-in for the
+-- figure (soft shadows need no fingers, beard locks, potions or tome),
+-- each part inside the real one, so no surface starts its shadow ray inside
+-- it: the robe and arms, the head as a sphere, the hat, the beard as a thin
+-- capsule along its axis, and the staff as a plain rod; and the rock.
+#[noinline]
+def shadow_scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : f32 =
+  let figure =
+    if !(has mask layers_figure) then 1e9
+    else let b = wizard_bound p
+         in if b > tol then b
+            else let hq = head_space pose p
+                 in smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p)
+                    |> f32.min (sd_sphere (hq -^ vec 0 1.6 0.02) 0.17)
+                    |> f32.min (sd_hat pose p)
+                    |> f32.min (sd_capsule hq beard_top beard_tip 0.05)
+  let staff = if !(has mask layers_staff) then 1e9
+              else sd_capsule (staff_rest pose p) staff_foot staff_top staff_radius
+  let rock = if !(has mask layers_rock) then 1e9 else (rock p).0
+  in f32.min figure (f32.min staff rock)
+
 -- Everything in local_scene lies in this sphere (radius 3.3), and so do the
 -- glowing media (the orb's cloud and tendrils, the rune circle; 3.6).
 def occluder_centre : vec3 = vec 0 (-0.3) 0
