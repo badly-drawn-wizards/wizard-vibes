@@ -224,6 +224,6 @@ def march_terrain (mask: i32) (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : (
       in if omega > 1 && safe + prev < step
          -- overshot: back to where the last safe step would have ended
          then (t - step + prev, i + 1, false, m, (sd, st, sm), (1, 0, 0))
-         else if d < 0.0004 * t then (t, i + 1, true, mat, (sd, st, sm), (omega, safe, 0))
+         else if d < 0.0015 * t then (t, i + 1, true, mat, (sd, st, sm), (omega, safe, 0))
          else (t + omega * safe, i + 1, false, m, (sd, st, sm), (omega, safe, omega * safe))
   in if hit then (t, m) else (f32.inf, 0)
