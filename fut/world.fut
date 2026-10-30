@@ -68,13 +68,19 @@ def vnoise3 (p: vec3) : f32 =
           (lerp (lerp (h 0 0 1) (h 1 0 1) u.x) (lerp (h 0 1 1) (h 1 1 1) u.x) u.y) u.z
 
 -- Fractal sum of `octaves` octaves of 2D value noise, rotating each octave
--- to hide the lattice; result roughly in [0, 1].
-def fbm2 (octaves: i32) (x: f32) (z: f32) : f32 =
+-- to hide the lattice; result in [0, 1]. `detail` (fractional) says how
+-- many octaves to actually evaluate: the rest are faded out smoothly to
+-- their average, so lowering it removes fine detail without moving the mean.
+def fbm2_lod (octaves: i32) (detail: f32) (x: f32) (z: f32) : f32 =
   let (sum, norm, _, _, _) =
-    loop (sum, norm, amp, x, z) = (0f32, 0f32, 0.5f32, x, z) for _i < octaves do
-      ( sum + amp * vnoise2 x z, norm + amp, amp * 0.5
-      , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3 )
+    loop (sum, norm, amp, x, z) = (0f32, 0f32, 0.5f32, x, z) for i < octaves do
+      let k = saturate (detail - f32.i32 i)
+      let v = if k > 0 then mix1 0.5 (vnoise2 x z) k else 0.5
+      in ( sum + amp * v, norm + amp, amp * 0.5
+         , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3 )
   in sum / norm
+
+def fbm2 (octaves: i32) (x: f32) (z: f32) : f32 = fbm2_lod octaves (f32.i32 octaves) x z
 
 -- Fractal 3D value noise, roughly in [0, 1].
 def fbm3 (octaves: i32) (p: vec3) : f32 =
@@ -92,15 +98,23 @@ def cloud_bottom : f32 = 7.5
 def cloud_top : f32 = 10
 def wind : vec3 = vec 0.6 0 (-0.9)
 
--- Density (extinction per unit length) at a world point.
-def cloud_density (secs: f32) (w: vec3) : f32 =
+-- Density (extinction per unit length) at a world point, and a distance
+-- that is safe to step without missing any cloud (0 inside one).
+--
+-- fbm3 4 = (0.5 o1 + 0.25 o2 + 0.125 o3 + 0.0625 o4) / 0.9375, each octave
+-- in [0, 1], so the first octave alone bounds it from above. Where even that
+-- bound is below the coverage threshold the sky is clear, and the other
+-- octaves are skipped. Octave 1 changes by at most about 1.5 per lattice
+-- unit, i.e. 0.165 per world unit, so the margin tells how far is clear.
+def cloud_sample (secs: f32) (w: vec3) : (f32, f32) =
   let h = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
-  in if h <= 0 || h >= 1 then 0 else
   let q = scale 0.11 (w -^ scale secs wind)
-  let n = fbm3 4 q
-  -- thinner towards the slab's top and bottom; mostly clear sky
-  let cover = n - 0.66 + 0.14 * (4 * h * (1 - h))
-  in 1.2 * f32.max 0 cover
+  let threshold = 0.66 - 0.14 * (4 * h * (1 - h)) -- thinner at top and bottom
+  let o1 = vnoise3 q
+  let upper = (0.5 * o1 + 0.4375) / 0.9375
+  in if upper < threshold then (0, (threshold - upper) / (0.165 * 0.5 / 0.9375))
+     else let n = fbm3 4 q
+          in (1.2 * f32.max 0 (n - threshold), 0)
 
 -- Vertical distance from a world height to the slab (0 inside).
 def cloud_gap (y: f32) : f32 = f32.max (cloud_bottom - y) (y - cloud_top) |> f32.max 0
@@ -110,11 +124,27 @@ def cloud_gap (y: f32) : f32 = f32.max (cloud_bottom - y) (y - cloud_top) |> f32
 
 def terrain_max : f32 = 11 -- 9 + 6 - 4: no height exceeds this
 
-def terrain_height (x: f32) (z: f32) : f32 =
-  let n = fbm2 5 (x * 0.035) (z * 0.035)
-  let ridge = 1 - f32.abs (2 * fbm2 3 (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
+-- `detail` in octaves (5 = full); far-away terrain needs fewer.
+def terrain_height_lod (detail: f32) (x: f32) (z: f32) : f32 =
+  let n = fbm2_lod 5 detail (x * 0.035) (z * 0.035)
+  let ridge = 1 - f32.abs (2 * fbm2_lod 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
   in 9 * n * n + 6 * ridge * ridge * ridge - 4
+
+def terrain_height (x: f32) (z: f32) : f32 = terrain_height_lod 5 x z
+
+-- An upper bound on terrain_height from the first octave of each fbm alone
+-- (2 noise lookups instead of 8): the other octaves can add at most their
+-- amplitudes. The height grows with n and with the ridge, so bounding those
+-- bounds it. (Refining the bound octave by octave was tried and is slower on
+-- the GPU: neighbouring pixels stop at different octaves and diverge.)
+def terrain_upper (x: f32) (z: f32) : f32 =
+  let n_hi = (0.5 * vnoise2 (x * 0.035) (z * 0.035) + 0.46875) / 0.96875
+  let f_lo = 0.5 * vnoise2 (x * 0.02 + 5.2) (z * 0.02 - 1.7) / 0.875
+  let f_hi = f_lo + 0.375 / 0.875
+  let ridge_hi = if f_lo <= 0.5 && f_hi >= 0.5 then 1
+                 else 1 - f32.min (f32.abs (2 * f_lo - 1)) (f32.abs (2 * f_hi - 1))
+  in 9 * n_hi * n_hi + 6 * ridge_hi * ridge_hi * ridge_hi - 4
 
 -- A heightfield is not a distance; its slopes stay below about 1.3, so
 -- scaling the height difference keeps sphere tracing safe.
-def terrain_dist (w: vec3) : f32 = 0.6 * (w.y - terrain_height w.x w.z)
+def terrain_dist (detail: f32) (w: vec3) : f32 = 0.6 * (w.y - terrain_height_lod detail w.x w.z)

@@ -158,7 +158,10 @@ events.addEventListener("building", () => setStatus("compiling…"));
 events.addEventListener("error", (e) => {
   if (e instanceof MessageEvent) showError(JSON.parse(e.data).message);
 });
-events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
+// ?build=N pins a specific build (for benchmarking variants); otherwise follow the server.
+const pinned = new URLSearchParams(location.search).get("build");
+if (pinned) reload(Number(pinned));
+else events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
 events.addEventListener("web-reload", () => location.reload());
 
 requestAnimationFrame(tick);

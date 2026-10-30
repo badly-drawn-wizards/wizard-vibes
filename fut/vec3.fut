@@ -37,4 +37,5 @@ def saturate (x: f32) : f32 = clamp 0 1 x
 def smoothstep (e0: f32) (e1: f32) (x: f32) : f32 =
   let t = saturate ((x - e0) / (e1 - e0)) in t * t * (3 - 2 * t)
 def fract (x: f32) : f32 = x - f32.floor x
+def mix1 (a: f32) (b: f32) (t: f32) : f32 = a + (b - a) * t
 def pow (x: f32) (y: f32) : f32 = x ** y

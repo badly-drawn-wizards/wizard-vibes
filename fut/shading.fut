@@ -201,9 +201,11 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else 60
       let (t, m, emitted, tr) = march (scene pose) (media pose g) ro rd tmax
-      let acc = acc +^ (w *^ emitted)
+      -- the glows are above the cloud slab, so in front of the clouds
+      let (cloud_rad, cloud_tr) = clouds pose ro rd (if m >= 0 then t else tmax)
+      let acc = acc +^ (w *^ emitted) +^ (scale tr w *^ cloud_rad)
       -- whatever lies beyond this segment is seen through its media
-      let w = scale tr w
+      let w = scale (tr * cloud_tr) w
       in if m >= 0 then
            (ro, rd, w, acc +^ (w *^ surface pose g m (ro +^ scale t rd) rd t), inside, true, refl)
          else if enters && t >= t_in then
