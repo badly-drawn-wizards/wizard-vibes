@@ -130,6 +130,25 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
       inst = i;
     }
   },
+  // Average GPU time per frame in ms, without presenting or vsync.
+  async bench(frames: number, vw: number, h: number) {
+    const i = inst;
+    if (!i) throw new Error("no Futhark instance loaded");
+    inst = null;
+    await inFlight;
+    try {
+      const w = Math.ceil(vw / 64) * 64;
+      const run = async (t: number) => (await i.fut.entry.render(w, vw, h, t, cam.yaw, cam.pitch, cam.dist)).free();
+      await run(0); // warm-up: pipeline creation
+      await i.fut.context_sync();
+      const start = performance.now();
+      for (let f = 0; f < frames; f++) await run(f / 30);
+      await i.fut.context_sync();
+      return (performance.now() - start) / frames;
+    } finally {
+      inst = i;
+    }
+  },
 };
 
 const events = new EventSource("/events");
