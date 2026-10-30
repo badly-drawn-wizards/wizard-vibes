@@ -25,24 +25,14 @@ let inst: FutInstance | null = null;
 let prev: FutharkArray | null = null; // last frame's output, freed after the next submit
 let inFlight: Promise<void> | null = null;
 let paused = false;
-// Orb lightning style, passed to the render entry point; L cycles it.
-const STYLES = ["arcs", "globe", "arcs + globe"];
-let style = 2;
-try {
-  style = Number(sessionStorage.getItem("wizard-style") ?? 2) % STYLES.length;
-} catch {
-  // storage unavailable; use the default
-}
+
 let time = 0;
 let fps = 0;
 let last = performance.now();
 
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") paused = !paused;
-  if (e.code === "KeyL") {
-    style = (style + 1) % STYLES.length;
-    try { sessionStorage.setItem("wizard-style", String(style)); } catch { /* ignore */ }
-  }
+
 });
 
 function configure(device: GPUDevice): void {
@@ -67,7 +57,7 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   if (!paused) time += dt;
   idle(cam, dt);
 
-  const out: FutharkArray = await i.fut.entry.render(w, vw, h, time, cam.yaw, cam.pitch, cam.dist, style);
+  const out: FutharkArray = await i.fut.entry.render(w, vw, h, time, cam.yaw, cam.pitch, cam.dist);
   const enc = i.device.createCommandEncoder();
   enc.copyBufferToTexture(
     { buffer: rawBuffer(i, out), bytesPerRow: w * 4, rowsPerImage: h },
@@ -88,7 +78,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`v${current.version}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${STYLES[style]} (L) · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
+    .then(() => setStatus(`v${current.version}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }
@@ -134,7 +124,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     inst = null;
     await inFlight;
     try {
-      const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, style);
+      const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist);
       const pixels: Uint32Array = await out.values();
       out.free();
       return { f32: i.f32, portable: i.portable, pixels: Array.from(pixels) };
@@ -150,7 +140,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     await inFlight;
     try {
       const w = Math.ceil(vw / 64) * 64;
-      const run = async (t: number) => (await i.fut.entry.render(w, vw, h, t, cam.yaw, cam.pitch, cam.dist, style)).free();
+      const run = async (t: number) => (await i.fut.entry.render(w, vw, h, t, cam.yaw, cam.pitch, cam.dist)).free();
       await run(0); // warm-up: pipeline creation
       await i.fut.context_sync();
       const start = performance.now();

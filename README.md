@@ -9,8 +9,7 @@ nix develop -c npm install   # once
 nix develop -c npm run dev   # http://localhost:8080
 ```
 
-Drag to orbit, scroll to zoom, space to pause, L to cycle the orb lightning
-(arcs, plasma globe, both). The ¼ / ½ / 1× buttons set the
+Drag to orbit, scroll to zoom, space to pause. The ¼ / ½ / 1× buttons set the
 render scale.
 
 ## How it works
@@ -96,3 +95,22 @@ handling:
 Firefox may log that it can't create a shared-texture swapchain and falls
 back to a slower presentation path. That's internal to Firefox and doesn't
 affect correctness.
+
+## The orb
+
+The orb is a refracting glass sphere (`orb_ior` in `fut/shading.fut`).
+`shade` follows each camera ray through up to three straight segments
+(outside, inside the glass, outside again), bending it by Snell's law at each
+crossing. The transmitted and reflected parts are weighted by Schlick's
+Fresnel term, and the reflection is traced as a second path. Both paths go
+through one loop, so the shading code is compiled only once. The march
+integrates the haze and lightning inside the glass along the refracted
+segment.
+
+Compile-time switches (save the file and hot reload picks them up):
+
+| Switch | File | Default |
+|---|---|---|
+| `orb_tendrils`: lightning inside the glass | `fut/lightning.fut` | on |
+| `orb_arcs`: lightning leaping out of the orb | `fut/lightning.fut` | off |
+| `orb_reflections`: reflect the scene in the glass | `fut/shading.fut` | on (about 0.1 ms at 1080p) |

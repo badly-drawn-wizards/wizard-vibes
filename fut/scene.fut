@@ -15,7 +15,6 @@ def m_hat : i32 = 4
 def m_gold : i32 = 5
 def m_eye : i32 = 6
 def m_wood : i32 = 7
-def m_orb : i32 = 8
 def m_ground : i32 = 9
 
 ---------------------------------------------------------------------
@@ -186,13 +185,12 @@ def bounded_wizard (tm: f32) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
   in if b > tol then (b, m_robe) else wizard tm p
 
--- With `solid_orb` false the orb is a glass globe: rays pass through it and
--- what is inside is drawn by the media (see media.fut and lightning.fut).
-def scene (tm: f32) (solid_orb: bool) (tol: f32) (p: vec3) : hit =
-  let s = bounded_wizard tm tol p |> umin (p.y, m_ground)
-  in if solid_orb then umin s (sd_orb p, m_orb) else s
+-- The orb is glass, refracted analytically by the shading (see shading.fut),
+-- so it is not part of the marched scene; what is inside it is drawn by the
+-- media (see media.fut and lightning.fut).
+def scene (tm: f32) (tol: f32) (p: vec3) : hit = bounded_wizard tm tol p |> umin (p.y, m_ground)
 
-def dist (tm: f32) (solid_orb: bool) (tol: f32) (p: vec3) : f32 = (scene tm solid_orb tol p).0
+def dist (tm: f32) (tol: f32) (p: vec3) : f32 = (scene tm tol p).0
 
 -- What casts shadows: only the wizard. Both lights are above the ground,
 -- which therefore cannot block them (as an occluder it would only add

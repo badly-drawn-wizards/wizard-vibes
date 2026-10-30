@@ -17,18 +17,19 @@ type media_sample = {cap: f32, radiance: vec3}
 
 type^ dist_fn = f32 -> vec3 -> f32
 
--- Returns (distance, material or -1, emission integrated up to the hit).
--- Stepping only needs exact distances near surfaces.
-def march (scene: f32 -> vec3 -> hit) (media: vec3 -> media_sample) (ro: vec3) (rd: vec3) : (f32, i32, vec3) =
+-- Marches up to distance tmax. Returns (distance, material or -1, emission
+-- integrated up to the hit). With no hit, the distance is >= tmax unless the
+-- step budget ran out. Stepping only needs exact distances near surfaces.
+def march (scene: f32 -> vec3 -> hit) (media: vec3 -> media_sample) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32, vec3) =
   let (t, _, m, acc) =
     loop (t, i, m, acc) = (0.02f32, 0i32, -1i32, splat 0)
-    while i < 220 && m < 0 && t < 40 do
+    while i < 220 && m < 0 && t < tmax do
       let p = ro +^ scale t rd
       let (d, mat) = scene 0.1 p
       in if d < 0.0004 * t then (t, i + 1, mat, acc)
          else
            let s = media p
-           let dt = f32.min (d * 0.85) s.cap
+           let dt = f32.min (f32.min (d * 0.85) s.cap) (tmax - t + 1e-4)
            in (t + dt, i + 1, -1, acc +^ scale dt s.radiance)
   in (t, m, acc)
 

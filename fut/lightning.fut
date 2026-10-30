@@ -13,17 +13,15 @@ import "hash"
 import "march"
 import "scene"
 
--- Which bolts to draw (an entry-point parameter, switchable in the harness).
-def style_arcs : i32 = 0
-def style_globe : i32 = 1
-def style_both : i32 = 2
-def has_arcs (style: i32) : bool = style != style_globe
-def has_globe (style: i32) : bool = style != style_arcs
+-- Compile-time switches: arcs leaping out from the orb, and tendrils inside
+-- its glass.
+def orb_arcs : bool = false
+def orb_tendrils : bool = true
 
 def kind_arc : i32 = 0
 def kind_tendril : i32 = 1
-def kind_enabled (style: i32) (kind: i32) : bool =
-  if kind == kind_arc then has_arcs style else has_globe style
+def kind_enabled (kind: i32) : bool =
+  if kind == kind_arc then orb_arcs else orb_tendrils
 
 def bolts_per_kind : i32 = 4
 def segments : i32 = 7
@@ -102,12 +100,12 @@ def bolt_halo_colour : vec3 = vec 0.3 0.75 1
 
 -- Lightning media at p: a thin white-hot core and a cyan halo around each
 -- bolt. Only evaluated near the orb.
-def lightning_media (tm: f32) (style: i32) (p: vec3) : media_sample =
+def lightning_media (tm: f32) (p: vec3) : media_sample =
   let reach = orb_radius + arc_reach + 0.15
   in if length (p -^ orb_pos) > reach then {cap = length (p -^ orb_pos) - reach + 0.02, radiance = splat 0}
      else
        loop acc = {cap = 1e9f32, radiance = splat 0} for kind < 2 do
-            if !(kind_enabled style kind) then acc else
+            if !(kind_enabled kind) then acc else
             loop acc for b < bolts_per_kind do
               let id = kind * 100 + b
               let l = bolt_life tm id
@@ -127,12 +125,12 @@ def lightning_media (tm: f32) (style: i32) (p: vec3) : media_sample =
 
 -- Overall brightness of the bolts right now, in [0, 1]: drives the flicker
 -- of the orb's light on the scene.
-def flash (tm: f32) (style: i32) : f32 =
-  let n = f32.i32 ((i32.bool (has_arcs style) + i32.bool (has_globe style)) * bolts_per_kind)
+def flash (tm: f32) : f32 =
+  let n = f32.i32 ((i32.bool orb_arcs + i32.bool orb_tendrils) * bolts_per_kind)
   let total =
     loop t = 0f32 for kind < 2 do
-      if !(kind_enabled style kind) then t else
+      if !(kind_enabled kind) then t else
       loop t for b < bolts_per_kind do
         let id = kind * 100 + b
         in t + envelope id (bolt_life tm id)
-  in total / n
+  in if n > 0 then total / n else 0
