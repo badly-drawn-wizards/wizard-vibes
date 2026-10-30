@@ -1,5 +1,9 @@
 # Futhark wizard
 
+> **AI disclaimer:** this project was written almost entirely by an AI
+> (Claude, through Claude Code), directed and reviewed by a human. Expect
+> the code, comments and docs to reflect that; check anything you rely on.
+
 A sphere-tracing (distance-estimation) renderer written in Futhark, compiled
 with Futhark's WebGPU backend and shown live in the browser. Saving any file in
 `fut/` recompiles it and hot-swaps it into the running page.
