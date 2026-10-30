@@ -6,6 +6,3 @@ import "vec3"
 
 def loop_seconds : f32 = 12
 def loop_angle (seconds: f32) : f32 = 2 * f32.pi * fract (seconds / loop_seconds)
-
--- Three glow pulses per loop; the orb's light and emission follow along.
-def pulse (tm: f32) : f32 = 0.92 + 0.08 * f32.sin (3 * tm)

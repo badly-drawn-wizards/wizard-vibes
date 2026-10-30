@@ -64,7 +64,7 @@ type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: boo
 def plain (albedo: vec3) : material =
   {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true}
 
-def material (tm: f32) (m: i32) (p: vec3) : material =
+def material (tm: f32) (g: glow) (m: i32) (p: vec3) : material =
   if m == m_robe then plain (vec 0.07 0.05 0.33)
   else if m == m_skin then plain (vec 0.85 0.6 0.48) with ks = 0.15 with shininess = 16
   else if m == m_beard then plain (scale (0.75 + 0.25 * beard_strands (beard_space tm p)) (vec 0.88 0.88 0.92))
@@ -78,7 +78,7 @@ def material (tm: f32) (m: i32) (p: vec3) : material =
   else if m == m_ground then
     let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
     in plain (scale (0.8 + 0.4 * tile) (vec 0.11 0.11 0.13))
-       with emission = scale (0.9 * rune_paint tm p) rune_glow_colour
+       with emission = scale (0.9 * g.level * rune_paint tm p) rune_glow_colour
        with ks = 0.3 with shininess = 40 with rim = false
   else plain (splat 0.5)
 
@@ -93,9 +93,9 @@ def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse:
   in scale lit (mat.albedo *^ diffuse) +^ scale spec specular
 
 -- The lit colour of a surface hit at distance t along rd (fog included).
-def surface (tm: f32) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+def surface (tm: f32) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   let n = normal (dist tm) p
-  let mat = material tm m p
+  let mat = material tm g m p
   let occ = ambient_occlusion (dist tm) p n
   let po = p +^ scale 0.002 n
   let moon_shadow = soft_shadow (occluder_dist tm) po moon_dir 12
@@ -103,13 +103,12 @@ def surface (tm: f32) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   let to_orb = orb_pos -^ p
   let od = length to_orb
   let ol = scale (1 / od) to_orb
-  -- lightning flashes brighten and whiten the orb's light
-  let fl = flash tm
-  let atten = 2.4 * pulse tm * (1 + 1.5 * fl) / (1 + 1.5 * od * od)
+  -- the orb's light flickers with the lightning, whitening in flashes
+  let atten = 2.4 * g.level / (1 + 1.5 * od * od)
   -- Stop short of the orb: the staff pokes into its underside, and a
   -- penumbra estimate taken right next to the light bands badly.
   let orb_shadow = if od < orb_radius then 1 else soft_shadow (occluder_dist tm) po ol (od - orb_radius - 0.15)
-  let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * fl))
+  let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
   let orb = light mat n rd ol orb_shadow orb_colour orb_colour
   let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
   let rim = if mat.rim then scale (occ * pow (1 - saturate (-(dot n rd))) 3 * 0.25) (vec 0.35 0.3 0.8)
@@ -154,7 +153,7 @@ type reflection = (bool, vec3, vec3, f32)
 -- the orb, outside again - refracting at the glass, and returns the colour
 -- it gathers, weighted by w. Also returns the reflection spawned where the
 -- ray first enters the orb.
-def follow (tm: f32) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
+def follow (tm: f32) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
   let (_, _, _, acc, _, _, refl) =
     loop (ro, rd, w, acc, inside, done, refl) =
       (ro0, rd0, splat w0, splat 0, false, false, (false, ro0, rd0, 0f32))
@@ -163,10 +162,10 @@ def follow (tm: f32) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
       let (t_in, t_out) = orb_hit ro rd
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else 40
-      let (t, m, glow) = march (scene tm) (media tm) ro rd tmax
-      let acc = acc +^ (w *^ glow)
+      let (t, m, emitted) = march (scene tm) (media tm g) ro rd tmax
+      let acc = acc +^ (w *^ emitted)
       in if m >= 0 then
-           (ro, rd, w, acc +^ (w *^ surface tm m (ro +^ scale t rd) rd t), inside, true, refl)
+           (ro, rd, w, acc +^ (w *^ surface tm g m (ro +^ scale t rd) rd t), inside, true, refl)
          else if enters && t >= t_in then
            -- into the glass
            let p = ro +^ scale t_in rd
@@ -183,6 +182,7 @@ def follow (tm: f32) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
   in (acc, refl)
 
 def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
+  let g = glow_now tm -- once per pixel, not per march step
   -- Path 0 is the camera ray; path 1 its reflection off the orb, if any.
   -- A loop, so that follow (and all the shading) is compiled only once.
   let paths = if orb_reflections then 2 else 1
@@ -190,6 +190,6 @@ def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
     loop (c, refl) = (splat 0, (false, ro, rd, 0f32)) for k < paths do
       if k == 1 && !refl.0 then (c, refl) else
       let (o, d, w) = if k == 0 then (ro, rd, 1) else (refl.1, refl.2, refl.3)
-      let (col, r) = follow tm o d w
+      let (col, r) = follow tm g o d w
       in (c +^ col, if k == 0 then r else refl)
   in c

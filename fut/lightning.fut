@@ -134,3 +134,13 @@ def flash (tm: f32) : f32 =
         let id = kind * 100 + b
         in t + envelope id (bolt_life tm id)
   in if n > 0 then total / n else 0
+
+-- How bright the orb's magic is right now. It follows the lightning, so the
+-- glow cloud, the orb's light and the runes flicker with the bolts. The
+-- flash averages 0.245 over a loop (range 0.05-0.68), so the level averages
+-- 0.94 (range 0.71-1.46).
+type glow = {flash: f32, level: f32}
+
+def glow_now (tm: f32) : glow =
+  let f = flash tm
+  in {flash = f, level = 0.65 + 1.2 * f}

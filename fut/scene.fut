@@ -165,13 +165,13 @@ def glyph_dist (tm: f32) (p: vec3) : f32 =
   else let d = f32.max 0 (glyph_sdf tm p.x p.z)
        in f32.sqrt (d * d + p.y * p.y)
 
--- Emission painted on the ground: two rings and the glyphs.
+-- Emission painted on the ground (before brightness): two rings and the glyphs.
 def rune_paint (tm: f32) (p: vec3) : f32 =
   let r = length2 (vec2 p.x p.z)
   let ring w c = 1 - smoothstep (w * 0.5) w (f32.abs (r - c))
   let rings = f32.max (ring 0.018 0.95) (ring 0.012 1.3)
   let glyph = 1 - smoothstep 0.0 0.008 (glyph_sdf tm p.x p.z)
-  in f32.max rings glyph * pulse tm
+  in f32.max rings glyph
 
 ---------------------------------------------------------------------
 -- Whole scene
