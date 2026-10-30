@@ -66,7 +66,10 @@ def breath (tm: f32) : f32 = 0.5 - 0.5 * f32.cos (3 * tm)
 -- the loop angle (for periodic motion), secs the time in seconds.
 type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, local
             , breath: f32
+            , lean: f32 -- sideways shear of the body above the hips, per unit height
             , head: vec3 -- offset of the head, beard and hat
+            , look: f32 -- head turn (radians, towards +x)
+            , point: f32 -- 0 idle .. 1 pointing with the left hand
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3 }
 
@@ -74,18 +77,30 @@ def pose_at (secs: f32) : pose =
   let tm = loop_angle secs
   let fl = flight_at secs
   let b = breath tm
+  -- Turning towards local +x makes fl.turn positive. He leans into the turn,
+  -- and in sharper turns points the way with his left hand and looks there.
+  let side = f32.sgn fl.turn
+  let point = smoothstep 0.03 0.12 (f32.abs fl.turn)
+  let lean = clamp (-0.15) 0.15 (0.9 * fl.turn)
+  let shift (y: f32) = vec (lean * f32.max 0 (y - 0.45)) 0 0
   -- inhaling lifts the shoulders; the head rises and nods forward a little
-  let lift = vec 0 (0.012 * b) (0.004 * b)
-  let head = vec 0 (0.012 * b) (0.007 * b)
+  let lift = vec 0 (0.012 * b) (0.004 * b) +^ shift 1.33
+  let head = vec 0 (0.012 * b) (0.007 * b) +^ shift 1.6
   let r_shoulder = vec 0.2 1.33 0 +^ lift
   let l_shoulder = vec (-0.2) 1.33 0 +^ lift
-  -- the right hand stays on the staff, so its elbow follows the breathing
+  -- the right hand stays on the staff, so its elbow follows the body
   let (r_elbow, r_wrist) = two_bone r_shoulder right_wrist 0.34 0.29 (vec 0.5 (-1) (-0.5))
-  -- the left hand drifts idly in front of the belly
+  -- the left hand drifts idly in front of the belly, or points into the turn
   let idle = vec (0.025 * f32.sin tm) (0.018 * f32.sin (2 * tm) + 0.01 * b) (0.02 * f32.cos tm)
-  let (l_elbow, l_wrist) = two_bone l_shoulder (vec (-0.25) 1.02 0.27 +^ idle) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
+  let rest = vec (-0.25) 1.02 0.27 +^ idle +^ shift 1.02
+  -- (pointing right means reaching across the body, so aim higher and more
+  -- forward to keep the arm clear of the beard)
+  let aim_dir = if side < 0 then vec (-0.85) 0.3 0.75 else vec 0.5 0.55 0.9
+  let aim = l_shoulder +^ scale 0.62 (normalise aim_dir)
+  let (l_elbow, l_wrist) = two_bone l_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
   in { tm, secs, fl, moon = to_local_dir fl moon_world
-     , breath = b, head, r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist }
+     , breath = b, lean, head, look = 0.45 * point * side, point
+     , r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist }
 
 def orb_radius : f32 = 0.11
 def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
@@ -159,10 +174,23 @@ def left_hand (pose: pose) : vec3 =
 
 def sd_hands (pose: pose) (p: vec3) : f32 =
   let fist = sd_capsule p (fist_centre -^ scale 0.04 staff_dir) (fist_centre +^ scale 0.04 staff_dir) 0.05
-  in f32.min fist (sd_sphere (p -^ left_hand pose) 0.052)
+  let hand = left_hand pose
+  -- a pointing finger grows out of the hand as he points
+  let along = normalise (pose.l_wrist -^ pose.l_elbow)
+  let finger = sd_capsule p hand (hand +^ scale (0.085 * pose.point) along) 0.016
+  in f32.min fist (smin 0.02 (sd_sphere (p -^ hand) 0.052) finger)
 
--- The head, beard and hat move together with the pose's head offset.
-def head_space (pose: pose) (p: vec3) : vec3 = p -^ pose.head
+-- The head, beard and hat move together: offset by the pose, and turned
+-- about the neck to look where he points.
+def neck : vec3 = vec 0 1.45 0
+
+def head_space (pose: pose) (p: vec3) : vec3 =
+  neck +^ yaw (-pose.look) (p -^ pose.head -^ neck)
+
+-- The body above the hips leans sideways into turns (a shear; the hem stays
+-- put). The lean is at most 0.15, so distances stretch by under 2%.
+def body_space (pose: pose) (p: vec3) : vec3 =
+  p -^ vec (pose.lean * f32.max 0 (p.y - 0.45)) 0 0
 
 def sd_head (pose: pose) (p: vec3) : f32 =
   let p = head_space pose p
@@ -334,7 +362,7 @@ def waist_gear (p: vec3) : hit =
      |> umin (bounded tome_at 0.19 tome p)
 
 def wizard (pose: pose) (p: vec3) : hit =
-  (smin 0.06 (sd_robe pose p) (sd_arms pose p), m_robe)
+  (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
   |> umin (sd_hands pose p, m_skin)
   |> umin (sd_head pose p, m_skin)
   |> umin (sd_eyes pose p, m_eye)
@@ -343,7 +371,7 @@ def wizard (pose: pose) (p: vec3) : hit =
   |> umin (sd_band pose p, m_gold)
   |> umin (sd_staff p, m_wood)
   |> umin (sd_cradle p, m_gold)
-  |> umin (waist_gear p)
+  |> umin (waist_gear (body_space pose p))
 
 ---------------------------------------------------------------------
 -- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.
