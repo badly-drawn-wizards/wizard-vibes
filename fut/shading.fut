@@ -156,7 +156,7 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m == m_ground then
     let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
     in plain (scale (0.8 + 0.4 * tile) pose.prm.rock_top)
-       with emission = scale (0.9 * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) pose.prm.rune_colour
+       with emission = scale (0.9 * pose.runes * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) pose.prm.rune_colour
        with ks = 0.3 with shininess = 40 with rim = false
   else plain (splat 0.5)
 

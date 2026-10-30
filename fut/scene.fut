@@ -88,16 +88,18 @@ type pose = { tm: f32, secs: f32, fl: flight
             , point: f32 -- 0 idle .. 1 pointing with the right hand
             , pix: f32 -- angle one pixel spans (for texture filtering)
             , blink: f32 -- 0 eyes open .. 1 closed
+            , runes: f32 -- the runes' brightness, relative to their glow parameters
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
 -- Free flight, driven from the harness (web/flight.ts): with `free` set, the
 -- wizard is where it says instead of on the flight path. (ax, ay, az) is the
 -- way he accelerates in his own frame, as long as how hard (0..1): he points
--- that way, the more the harder.
-type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32}
+-- that way, the more the harder. climb is his (smoothed) vertical speed: the
+-- runes brighten as he rises and dim as he sinks.
+type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32, climb: f32}
 
-def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0}
+def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0, climb = 0}
 
 def flight_of (prm: params) (dr: drive) (secs: f32) : flight =
   if !dr.free then flight_at prm.bank secs
@@ -142,6 +144,8 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   in { tm, secs, fl, prm, moon = to_local_dir fl moon_world, moon_world
      , breath = b, lean, head, look = 0.45 * point * side * (if dr.free then f32.min 1 (2 * f32.abs dr.ax) else 1)
      , point, pix = 0.0008
+     -- doubling for every 4 units/s of climb
+     , runes = if dr.free then clamp 0.1 3 (2 ** (dr.climb / 4)) else 1
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
      , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist }

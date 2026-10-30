@@ -58,7 +58,7 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   in { cap = f32.min bolts.cap (f32.min (0.3 * f32.abs od + 0.015) (0.3 * gd + 0.01))
              |> f32.min (0.3 * f32.abs ld + 0.004)
      , radiance = scale (if glow then orb_glow_density pose.prm g od else 0) pose.prm.orb_glow_colour
-                  +^ scale (rune_glow_density pose.prm tm gd) pose.prm.rune_colour
+                  +^ scale (pose.runes * rune_glow_density pose.prm tm gd) pose.prm.rune_colour
                   +^ scale haze pose.prm.orb_glow_colour
                   +^ scale pose.prm.lightning bolts.radiance
                   +^ scale (potion_glow_density pose.prm ld) (glow_colour pose.prm lm)

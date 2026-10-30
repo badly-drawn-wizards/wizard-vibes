@@ -119,7 +119,13 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   }
   if (!paused) time += dt;
   idle(cam, dt);
-  flight.update(paused ? 0 : dt, time);
+  // The camera orbits in his frame, which turns with him; in free flight keep
+  // it still in the world instead, so W (along the camera) does not chase its
+  // own tail as he turns to face the way he goes. (camera_ray in
+  // fut/wizard.fut looks along -(sin yaw, cos yaw) in his frame.)
+  const heading = flight.heading;
+  flight.update(paused ? 0 : dt, time, heading + cam.yaw + Math.PI);
+  if (flight.active) cam.yaw -= flight.heading - heading;
 
   const d = flight.drive();
   const reader = probeReader(i.device);
@@ -215,6 +221,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
 // loop is held off meanwhile, since entry points must not run concurrently.
 (window as unknown as { wizard: object }).wizard = {
   flight,
+  cam,
   async readFrame(w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number) {
     const i = inst;
     if (!i) throw new Error("no Futhark instance loaded");

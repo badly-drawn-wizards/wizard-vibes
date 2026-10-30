@@ -12,9 +12,11 @@ nix develop -c npm run dev   # http://localhost:8080
 Drag to orbit, scroll to zoom, space to pause. The ¼ / ½ / 1× buttons set the
 render scale.
 
-F toggles free flight: W / S accelerate and brake, A / D accelerate sideways,
-E / Q climb and descend, Shift boosts. He faces the way he travels, banks into
-turns and points the way he accelerates. The `probe` entry point
+F toggles free flight: W / S accelerate the way the camera looks and brake,
+A / D accelerate to the camera's left and right, E / Q climb and descend,
+Shift boosts. The camera then stays put in the world while he turns. He faces
+the way he travels, banks into turns, points the way he accelerates, and his
+runes brighten as he climbs and dim as he descends. The `probe` entry point
 (fut/collide.fut) samples the land around a few spheres covering the rock and
 him; the harness copies its 24 floats into a mappable buffer with each frame
 and reads them back without waiting, to push him out of anything he hits

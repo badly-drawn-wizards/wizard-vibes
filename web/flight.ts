@@ -3,8 +3,11 @@
 // the `probe` entry point reports the land around the rock (see
 // fut/collide.fut), which pushes it back out of anything it flies into.
 //
-//   W / S   accelerate / brake        A / D   accelerate left / right
+//   W / S   accelerate the way the camera looks / brake
+//   A / D   accelerate left / right (of the camera)
 //   E / Q   climb / descend           Shift   boost
+//
+// The runes brighten as he climbs and dim as he descends.
 //
 // He always faces the way he travels (turning towards it gradually), banks
 // into turns, and points the way he accelerates: the harder, the more.
@@ -19,9 +22,10 @@ export interface Drive {
   ax: number;
   ay: number;
   az: number;
+  climb: number;
 }
 
-export const ON_PATH: Drive = { free: false, x: 0, y: 0, z: 0, heading: 0, turn: 0, ax: 0, ay: 0, az: 0 };
+export const ON_PATH: Drive = { free: false, x: 0, y: 0, z: 0, heading: 0, turn: 0, ax: 0, ay: 0, az: 0, climb: 0 };
 
 // The automatic flight path (as in fut/world.fut), to take off from.
 const SPEED = 3;
@@ -61,6 +65,7 @@ export class FreeFlight {
   turn = 0;
   private accel: V3 = [0, 0, 0]; // smoothed, world space
   private lastVel: V3 = [0, 0, SPEED]; // at the end of the last update
+  private climb = 0; // vertical speed, smoothed
   private held = new Set<string>();
 
   constructor() {
@@ -103,17 +108,19 @@ export class FreeFlight {
       this.accel = [0, 0, 0];
       this.lastVel = [...this.vel];
     }
+    this.climb = 0;
     this.save();
     this.onToggle(this.active);
   }
 
-  update(dt: number, time: number): void {
+  // `view` is the camera's heading in the world (radians from +z towards +x).
+  update(dt: number, time: number, view: number): void {
     this.time = time;
     if (!this.active || dt <= 0) return;
     const h = this.held;
     const boost = h.has("boost") ? BOOST : 1;
-    const fwd: V3 = [Math.sin(this.heading), 0, Math.cos(this.heading)];
-    const right: V3 = [-fwd[2], 0, fwd[0]]; // his right: local -x
+    const fwd: V3 = [Math.sin(view), 0, Math.cos(view)];
+    const right: V3 = [-fwd[2], 0, fwd[0]]; // the camera's right
     const k = (a: string, b: string) => (h.has(a) ? 1 : 0) - (h.has(b) ? 1 : 0);
     const a: V3 = [0, 0, 0];
     const thrust = h.has("fwd") ? THRUST * boost : 0;
@@ -150,6 +157,7 @@ export class FreeFlight {
     const f = 1 - Math.exp(-dt / 0.2);
     for (let i = 0; i < 3; i++) this.accel[i] += ((this.vel[i] - this.lastVel[i]) / dt - this.accel[i]) * f;
     this.lastVel = [...this.vel];
+    this.climb += (this.vel[1] - this.climb) * (1 - Math.exp(-dt / 0.3));
     this.save();
   }
 
@@ -181,7 +189,7 @@ export class FreeFlight {
     const amount = smoothstep(1.5, 7, mag) / (mag || 1);
     return {
       free: true, x: this.pos[0], y: this.pos[1], z: this.pos[2], heading: this.heading, turn: this.turn,
-      ax: lx * amount, ay: wy * amount, az: lz * amount,
+      ax: lx * amount, ay: wy * amount, az: lz * amount, climb: this.climb,
     };
   }
 
