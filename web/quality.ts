@@ -19,10 +19,11 @@ const SLOW_FPS = 40;
 const FAST_FPS = 57; // near a 60 Hz display's rate: room for more
 
 export class Quality {
-  choice: Choice;
+  choice: Choice | null; // null: none (the compile-time parameters match no preset)
   level: Level | null;
   private buttons = new Map<Choice, HTMLButtonElement>();
   private apply: (level: Level) => Promise<void>;
+  private enabled: boolean;
   private busy = false;
   private since = performance.now(); // when the level last settled
   private frames = 0;
@@ -30,9 +31,13 @@ export class Quality {
   private tooSlow = new Set<Level>();
 
   // `level`: the level running now, if known. `apply` switches to a level
-  // and resolves once it is running.
-  constructor(host: HTMLElement, level: Level | null, apply: (level: Level) => Promise<void>) {
+  // and resolves once it is running. `fallback`: the choice when none is
+  // stored (the static site's is auto; under the dev server it is the level
+  // running, since auto there rewrites the compile-time parameters).
+  // Disabled, it does nothing (e.g. with a build pinned in the URL).
+  constructor(host: HTMLElement, level: Level | null, apply: (level: Level) => Promise<void>, fallback: Choice | null, enabled = true) {
     this.apply = apply;
+    this.enabled = enabled;
     this.level = level;
     let stored: string | null = null;
     try {
@@ -40,7 +45,7 @@ export class Quality {
     } catch {
       // storage unavailable
     }
-    this.choice = stored === "auto" || LEVELS.includes(stored as Level) ? (stored as Choice) : "auto";
+    this.choice = stored === "auto" || LEVELS.includes(stored as Level) ? (stored as Choice) : fallback;
     for (const c of ["auto", ...LEVELS] as Choice[]) {
       const b = document.createElement("button");
       b.type = "button";
@@ -53,7 +58,7 @@ export class Quality {
 
   // The level to start at: the chosen one, or medium for auto.
   get initial(): Level {
-    return this.choice === "auto" ? "med" : this.choice;
+    return this.choice === "auto" || this.choice === null ? "med" : this.choice;
   }
 
   private choose(c: Choice): void {
@@ -85,7 +90,7 @@ export class Quality {
 
   // Called once per drawn frame; `counting` is false while paused or hidden.
   frame(counting: boolean): void {
-    if (this.choice !== "auto" || this.busy || !counting) {
+    if (!this.enabled || this.choice !== "auto" || this.busy || !counting) {
       this.frames = 0;
       return;
     }

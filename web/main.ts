@@ -470,7 +470,9 @@ function reload(version: string): Promise<void> {
 const pinned = new URLSearchParams(location.search).get("build");
 const levelOf = (compile: Record<string, unknown>): Level | null =>
   LEVELS.find((l) => params.presets[l] && Object.entries(params.presets[l]).every(([k, v]) => compile[k] === v)) ?? null;
-const quality = new Quality(document.getElementById("quality")!, IS_STATIC ? null : levelOf(params.compile), async (level) => {
+const devLevel = IS_STATIC ? null : levelOf(params.compile);
+const qualityOn = !pinned && Object.keys(params.presets).length > 0 && (!IS_STATIC || !!params.builds);
+const quality = new Quality(document.getElementById("quality")!, devLevel, async (level) => {
   if (IS_STATIC) return reload(params.builds![level]);
   const running = new Promise<void>((done) => {
     swapWaiters.push(done);
@@ -478,8 +480,8 @@ const quality = new Quality(document.getElementById("quality")!, IS_STATIC ? nul
   });
   await fetch("/config", { method: "POST", body: JSON.stringify(params.presets[level]) });
   await running;
-});
-if (pinned || Object.keys(params.presets).length === 0 || (IS_STATIC && !params.builds)) document.getElementById("quality")!.hidden = true;
+}, IS_STATIC ? "auto" : devLevel, qualityOn);
+if (!qualityOn) document.getElementById("quality")!.hidden = true;
 
 // The static site loads its build for the starting quality; otherwise
 // follow the dev server's builds (hot reload).
