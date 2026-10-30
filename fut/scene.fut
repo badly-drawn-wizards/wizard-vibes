@@ -53,6 +53,10 @@ def prong_twist : f32 = 1.2 -- radians around the orb per radian climbed
 def prong_radius : f32 = 0.013
 
 def sd_cradle (p: vec3) : f32 =
+  -- The whole cradle fits in a sphere of radius 0.15 around this point; skip
+  -- the detail beyond it (exact within 0.15, which march and AO need).
+  let bound = length (p -^ (orb_pos -^ scale 0.04 staff_dir)) - 0.15
+  in if bound > 0.15 then bound else
   -- a frame around the staff's axis
   let ax = staff_dir
   let e1 = normalise (cross ax (vec 0 0 1))
