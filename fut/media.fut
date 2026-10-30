@@ -79,7 +79,8 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
 
 -- Towards the view distance, where rays stop, everything fades into the sky
 -- (1 near .. 0 at the view distance), so there is no edge.
-def view_fade (prm: params) (t: f32) : f32 = smoothstep prm.view_distance (0.7 * prm.view_distance) t
+def view_fade_at (view_distance: f32) (t: f32) : f32 = smoothstep view_distance (0.7 * view_distance) t
+def view_fade (prm: params) (t: f32) : f32 = view_fade_at prm.view_distance t
 
 -- What the clouds depend on, projected out of the pose (so clouds_through,
 -- a real GPU function, takes a few scalars rather than the whole pose's).
@@ -105,7 +106,7 @@ def clouds_through (ci: cloud_in) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32
     while t < t1 && i < 64 && tr > 0.02 do
       let w = wo +^ scale t wd
       let (dens, clear) = cloud_sample ci.cover ci.density ci.secs w
-      let dens = dens * smoothstep ci.view_distance (0.7 * ci.view_distance) t
+      let dens = dens * view_fade_at ci.view_distance t
       in if dens <= 0 then (t + f32.max dt clear, i + 1, rad, tr)
          else let ch = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
               in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour ci.colour ch), tr * f32.exp (-dens * dt))

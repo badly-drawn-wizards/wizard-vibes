@@ -82,7 +82,7 @@ def plain (albedo: vec3) : material =
 -- How far the sky shows through at distance t: the fog, and towards the view
 -- distance (where rays stop) a fade into the sky, so there is no edge.
 def fog_amount (fog: f32) (view_distance: f32) (t: f32) : f32 =
-  f32.max (1 - f32.exp (-fog * t * t)) (smoothstep (0.7 * view_distance) view_distance t)
+  f32.max (1 - f32.exp (-fog * t * t)) (1 - view_fade_at view_distance t)
 
 def fog_at (prm: params) (t: f32) : f32 = fog_amount prm.fog prm.view_distance t
 
