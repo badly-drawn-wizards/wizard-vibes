@@ -49,7 +49,7 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
 -- whole scene) to cross it.
 
 -- Radiance and transmittance of the clouds along ro + t rd for t in
--- [0, tend]. At most 40 samples, spread over the part of the ray inside the
+-- [0, tend]. About 24 samples, spread over the part of the ray inside the
 -- slab; clear sky is skipped using the bound from cloud_sample.
 def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
   let wo = to_world pose.fl ro
@@ -61,7 +61,7 @@ def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
          let tb = (cloud_top - wo.y) / wd.y
          in (f32.max 0 (f32.min ta tb), f32.min tend (f32.max ta tb))
   in if t1 <= t0 then (splat 0, 1) else
-  let dt = f32.max 0.2 ((t1 - t0) / 40)
+  let dt = f32.max 0.3 ((t1 - t0) / 24)
   let (_, _, rad, tr) =
     loop (t, i, rad, tr) = (t0 + 0.5 * dt, 0i32, splat 0, 1f32)
     while t < t1 && i < 64 && tr > 0.02 do

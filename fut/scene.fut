@@ -451,10 +451,10 @@ def rock (p: vec3) : hit =
 -- terrain_max, so well above it the height over terrain_max is a cheap lower
 -- bound (it stays >= 1.5 here, so it can never register as a hit). Detail
 -- fades with distance from the wizard (the camera is near him): full within
--- 15 units, two fewer octaves by 45.
+-- 10 units, two fewer octaves by 30.
 def terrain (pose: pose) (p: vec3) : hit =
   let w = to_world pose.fl p
-  let detail = 5 - 2 * saturate ((length p - 15) / 30)
+  let detail = 5 - 2 * saturate ((length p - 10) / 20)
   in if w.y > terrain_max + 1.5 then (w.y - terrain_max, m_terrain) else
      -- the cheap bound clears most points near the wizard, his rock and the
      -- clouds; only close to the ground is the full terrain needed
