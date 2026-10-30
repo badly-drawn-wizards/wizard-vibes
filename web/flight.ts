@@ -7,6 +7,9 @@
 //   A / D   accelerate left / right (of the camera)
 //   E / Q   climb / descend           Shift   boost
 //
+// or a game controller (see gamepad.ts), which can also fly back towards
+// the camera.
+//
 // The runes brighten as he climbs and dim as he descends.
 //
 // He always faces the way he travels (turning towards it gradually), banks
@@ -23,6 +26,15 @@ export interface Drive {
   ay: number;
   az: number;
   climb: number;
+}
+
+// Analog control, e.g. from a game controller: fwd and side along and across
+// the camera's view, up for climbing (each -1..1).
+export interface Stick {
+  fwd: number;
+  side: number;
+  up: number;
+  boost: boolean;
 }
 
 export const ON_PATH: Drive = { free: false, x: 0, y: 0, z: 0, heading: 0, turn: 0, ax: 0, ay: 0, az: 0, climb: 0 };
@@ -114,19 +126,20 @@ export class FreeFlight {
   }
 
   // `view` is the camera's heading in the world (radians from +z towards +x).
-  update(dt: number, time: number, view: number): void {
+  update(dt: number, time: number, view: number, pad?: Stick | null): void {
     this.time = time;
     if (!this.active || dt <= 0) return;
     const h = this.held;
-    const boost = h.has("boost") ? BOOST : 1;
+    const boost = h.has("boost") || pad?.boost ? BOOST : 1;
     const fwd: V3 = [Math.sin(view), 0, Math.cos(view)];
     const right: V3 = [-fwd[2], 0, fwd[0]]; // the camera's right
     const k = (a: string, b: string) => (h.has(a) ? 1 : 0) - (h.has(b) ? 1 : 0);
+    const clamp1 = (x: number) => Math.max(-1, Math.min(1, x));
     const a: V3 = [0, 0, 0];
-    const thrust = h.has("fwd") ? THRUST * boost : 0;
-    const side = k("right", "left") * SIDE * boost;
+    const thrust = clamp1((h.has("fwd") ? 1 : 0) + (pad?.fwd ?? 0)) * THRUST * boost;
+    const side = clamp1(k("right", "left") + (pad?.side ?? 0)) * SIDE * boost;
     for (let i = 0; i < 3; i++) a[i] = fwd[i] * thrust + right[i] * side - DRAG * this.vel[i];
-    a[1] += k("up", "down") * CLIMB * boost;
+    a[1] += clamp1(k("up", "down") + (pad?.up ?? 0)) * CLIMB * boost;
     if (h.has("back")) {
       // brake, down to a stop but not into reverse
       const sp = Math.hypot(...this.vel);

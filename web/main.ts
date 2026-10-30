@@ -1,7 +1,8 @@
 // WebGPU harness: Futhark renders the frame into a storage buffer on its own
 // device; we copy that buffer straight into the canvas texture on the GPU.
 
-import { attachCamera, idle, loadCamera } from "./camera.ts";
+import { attachCamera, idle, loadCamera, nudgeCamera } from "./camera.ts";
+import { readPad } from "./gamepad.ts";
 import { buildRecord, type FutharkArray, type FutInstance, loadFuthark, rawBuffer, unloadFuthark } from "./futhark-loader.ts";
 import { clearError, setStatus, showError } from "./overlay.ts";
 import { createDrawer, type Params } from "./params-drawer.ts";
@@ -88,6 +89,7 @@ let inst: FutInstance | null = null;
 let prev: FutharkArray | null = null; // last frame's output, freed after the next submit
 let inFlight: Promise<void> | null = null;
 let paused = false;
+let padConnected = false;
 
 let time = 0;
 let fps = 0;
@@ -119,12 +121,19 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   }
   if (!paused) time += dt;
   idle(cam, dt);
+  const pad = readPad();
+  padConnected = !!pad;
+  if (pad?.toggle) flight.toggle();
+  // right stick: look right turns the view right (the camera's yaw is its
+  // azimuth round him, so it decreases), up raises the view
+  if (pad) nudgeCamera(cam, -2.5 * pad.look[0] * dt, -1.5 * pad.look[1] * dt);
   // The camera orbits in his frame, which turns with him; in free flight keep
   // it still in the world instead, so W (along the camera) does not chase its
   // own tail as he turns to face the way he goes. (camera_ray in
   // fut/wizard.fut looks along -(sin yaw, cos yaw) in his frame.)
   const heading = flight.heading;
-  flight.update(paused ? 0 : dt, time, heading + cam.yaw + Math.PI);
+  const stick = pad && { fwd: pad.move[1], side: pad.move[0], up: pad.up, boost: pad.boost };
+  flight.update(paused ? 0 : dt, time, heading + cam.yaw + Math.PI, stick);
   if (flight.active) cam.yaw -= flight.heading - heading;
 
   const d = flight.drive();
@@ -164,7 +173,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight: WASD, E/Q, shift · F: path" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight: WASD, E/Q, shift · F: path" : ""}${padConnected ? " · controller (Y: free flight)" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }

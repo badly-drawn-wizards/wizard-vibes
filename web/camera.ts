@@ -55,6 +55,15 @@ export function attachCamera(cam: Camera, el: HTMLElement): void {
   );
 }
 
+// Turns the camera by (dyaw, dpitch), e.g. from a controller's stick.
+export function nudgeCamera(cam: Camera, dyaw: number, dpitch: number): void {
+  if (dyaw === 0 && dpitch === 0) return;
+  cam.interacted = true;
+  cam.yaw += dyaw;
+  cam.pitch = Math.max(-0.05, Math.min(1.2, cam.pitch + dpitch));
+  save(cam);
+}
+
 // Slow idle orbit until the user touches the camera: one revolution per
 // three 12 s animation loops, so the idle view loops too.
 export function idle(cam: Camera, dt: number): void {
