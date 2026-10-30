@@ -30,6 +30,13 @@ render scale.
   `futhark webgpu --library`, writing to a new `build/fut/v<N>/` directory.
   It notifies the page over server-sent events. Compile errors appear in an
   overlay while the last good build keeps running.
+- WGSL compile errors are caught too. `web/shader-check.ts` wraps
+  `createShaderModule` and reads `getCompilationInfo()` for every module.
+  - Each error is reported with the module, the enclosing `fn`, line and column,
+    and the source line with a caret.
+  - An error while loading fails the hot swap and keeps the previous build.
+  - An error after loading shows in the overlay.
+  - Warnings go to the console.
 - The animation loops every 12 s (`loop_seconds`). Every animated term is a
   whole-number harmonic of the loop.
 

@@ -98,6 +98,8 @@ async function swapTo(version: number): Promise<void> {
     if (info.reason !== "destroyed") showError(`GPU device lost: ${info.message}`);
   });
   configure(next.device);
+  next.shaders.onError = (report) => showError(`WGSL compilation error:\n\n${report}`);
+  if (next.shaders.warnings) console.info(`v${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
   inst = next;
   clearError();
 }
@@ -105,7 +107,7 @@ async function swapTo(version: number): Promise<void> {
 let loading = Promise.resolve();
 function reload(version: number): void {
   loading = loading.then(() =>
-    swapTo(version).catch((e) => showError(`failed to load build v${version}:\n${e?.stack ?? e}`)),
+    swapTo(version).catch((e) => showError(`failed to load build v${version}:\n${e?.message ?? e}`)),
   );
 }
 

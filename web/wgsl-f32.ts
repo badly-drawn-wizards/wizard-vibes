@@ -1,7 +1,8 @@
 // Futhark's WebGPU backend always requests the `shader-f16` device feature
 // and prefixes every shader with `enable f16;` plus f16 helper functions,
-// even when the program never uses f16. On adapters without f16 we drop the
-// feature request and strip those declarations before shader compilation.
+// even when the program never uses f16. On adapters without f16 the loader
+// drops the feature request and shader-check.ts strips those declarations
+// before shader compilation.
 
 const F16_TYPE = /\bf16\b|\bvec[234]h\b|\bmat[234]x[234]h\b/;
 
@@ -60,10 +61,4 @@ export function stripF16(code: string): string {
     }
   }
   return out;
-}
-
-// Wraps a device so every shader module it creates is f16-free.
-export function forceF32Shaders(device: GPUDevice): void {
-  const create = device.createShaderModule.bind(device);
-  device.createShaderModule = (desc: GPUShaderModuleDescriptor) => create({ ...desc, code: stripF16(desc.code) });
 }

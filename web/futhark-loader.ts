@@ -4,7 +4,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { forceF32Shaders } from "./wgsl-f32.ts";
+import { instrumentShaders, type ShaderLog } from "./shader-check.ts";
 
 export interface FutharkArray {
   arr: number;
@@ -17,12 +17,18 @@ export interface FutInstance {
   fut: any; // FutharkModule
   device: GPUDevice;
   f32: boolean; // running with f16 stripped from the shaders
+  shaders: ShaderLog; // WGSL compiler diagnostics
 }
 
 // Futhark asks emdawnwebgpu for its own adapter/device, with no way to pass
 // one in or read it back. Wrap requestDevice while it initialises to capture
 // it, and with `f32` set, drop the shader-f16 requirement (see wgsl-f32.ts).
-async function captureDevice<T>(f32: boolean, init: () => Promise<T>): Promise<[T, GPUDevice]> {
+// `setup` runs on the device before Futhark creates any shaders.
+async function captureDevice<T>(
+  f32: boolean,
+  setup: (d: GPUDevice) => void,
+  init: () => Promise<T>,
+): Promise<[T, GPUDevice]> {
   const proto = GPUAdapter.prototype;
   const original = proto.requestDevice;
   let device: GPUDevice | undefined;
@@ -31,8 +37,10 @@ async function captureDevice<T>(f32: boolean, init: () => Promise<T>): Promise<[
       desc = { ...desc, requiredFeatures: [...desc.requiredFeatures].filter((f) => f !== "shader-f16") };
     }
     const d = await original.call(this, desc);
-    if (f32) forceF32Shaders(d);
-    device ??= d;
+    if (!device) {
+      device = d;
+      setup(d);
+    }
     return d;
   };
   try {
@@ -62,7 +70,16 @@ export async function loadFuthark(version: number): Promise<FutInstance> {
   let stderr = "";
   let onExit: (e: Error) => void = () => {};
   const exited = new Promise<never>((_, reject) => (onExit = reject));
-  const [{ m, fut }, device] = await captureDevice(f32, async () => {
+  let shaders: ShaderLog | undefined;
+  let captured: GPUDevice | undefined;
+  let compileFailed = () => {};
+  const failed = new Promise<Error>((resolve) => (compileFailed = () => resolve(new Error("WGSL compilation failed"))));
+  const setup = (d: GPUDevice) => {
+    captured = d;
+    shaders = instrumentShaders(d, f32);
+    shaders.onError = () => compileFailed();
+  };
+  const loading = captureDevice(f32, setup, async () => {
     const m = await exports.Module({
       locateFile: (f: string) => `${base}/${f}`,
       printErr: (line: string) => {
@@ -75,7 +92,22 @@ export async function loadFuthark(version: number): Promise<FutInstance> {
     await Promise.race([fut.init(m), exited]);
     return { m, fut };
   });
-  return { version, m, fut, device, f32 };
+
+  // WGSL compile errors make loading fail. Futhark may panic, or hang, on the
+  // invalid pipeline, so stop at the first error and report the diagnostics
+  // in place of whatever init produced.
+  const result = await Promise.race([loading.catch((e: unknown) => e as Error), failed]);
+  await shaders?.settled();
+  if (shaders?.errors.length) {
+    if (!(result instanceof Error)) result[0].fut.free();
+    captured?.destroy();
+    const shown = shaders.errors.slice(0, 4);
+    const more = shaders.errors.length - shown.length;
+    throw new Error(`WGSL compilation failed:\n\n${shown.join("\n\n")}${more > 0 ? `\n\n…and ${more} more (see console)` : ""}`);
+  }
+  if (result instanceof Error) throw result;
+  const [{ m, fut }, device] = result;
+  return { version, m, fut, device, f32, shaders: shaders! };
 }
 
 export function unloadFuthark(inst: FutInstance): void {
