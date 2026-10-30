@@ -10,7 +10,7 @@ const ctx = canvas.getContext("webgpu")!;
 const cam = loadCamera();
 attachCamera(cam, canvas);
 
-let renderScale = Number(sessionStorage.getItem("wizard-scale") ?? 0.5) || 0.5;
+let renderScale = Number(sessionStorage.getItem("wizard-scale") ?? 1) || 1;
 for (const b of document.querySelectorAll<HTMLButtonElement>("#scale button")) {
   const s = Number(b.dataset.scale);
   b.setAttribute("aria-pressed", String(s === renderScale));
@@ -82,7 +82,9 @@ function tick(now: number): void {
 }
 
 async function swapTo(version: number): Promise<void> {
+  const started = performance.now();
   const next = await loadFuthark(version);
+  console.info(`loaded v${version} in ${Math.round(performance.now() - started)} ms`);
   // Stop the loop on the old instance and let its last frame finish.
   const old = inst;
   inst = null;

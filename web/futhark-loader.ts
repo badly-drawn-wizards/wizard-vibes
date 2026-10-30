@@ -43,10 +43,29 @@ export async function loadFuthark(version: number): Promise<FutInstance> {
   // top level; evaluating it in a function scope lets us load it repeatedly.
   const exports = new Function(`${src}\nreturn { Module, FutharkModule };\n//# sourceURL=${base}/wizard.js`)();
 
+  // Futhark's backend requires shader-f16; fail clearly rather than inside the runtime.
+  const adapter = await navigator.gpu?.requestAdapter();
+  if (!adapter) throw new Error("No WebGPU adapter available.");
+  if (!adapter.features.has("shader-f16")) {
+    throw new Error("This GPU/browser lacks the WebGPU 'shader-f16' feature, which Futhark's WebGPU backend requires.");
+  }
+
+  // If the runtime exits (e.g. device creation fails) its promises never
+  // settle, so turn the exit message into a rejection.
+  let stderr = "";
+  let onExit: (e: Error) => void = () => {};
+  const exited = new Promise<never>((_, reject) => (onExit = reject));
   const [{ m, fut }, device] = await captureDevice(async () => {
-    const m = await exports.Module({ locateFile: (f: string) => `${base}/${f}` });
+    const m = await exports.Module({
+      locateFile: (f: string) => `${base}/${f}`,
+      printErr: (line: string) => {
+        console.error(line);
+        stderr += line + "\n";
+        if (line.startsWith("program exited")) onExit(new Error(stderr));
+      },
+    });
     const fut = new exports.FutharkModule();
-    await fut.init(m);
+    await Promise.race([fut.init(m), exited]);
     return { m, fut };
   });
   return { version, m, fut, device };

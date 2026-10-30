@@ -4,13 +4,14 @@
 // usage: CHROME=$(which chromium) node dev/screenshot.ts [url] [out.png] [waitMs]
 
 import { chromium } from "playwright-core";
+import { CHROME_ARGS } from "./chrome-args.ts";
 
 const [url = "http://localhost:8080/", out = "build/screenshot.png", wait = "6000"] = process.argv.slice(2);
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROME ?? "chromium",
   headless: process.env.HEADED ? false : true,
-  args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan,WebGPU", "--ignore-gpu-blocklist", "--use-angle=vulkan"],
+  args: CHROME_ARGS,
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on("console", (m) => console.log(`[console.${m.type()}] ${m.text()}`));
