@@ -65,9 +65,9 @@
               "label": "Robe",
               "kind": "color",
               "default": [
-                0.2,
-                0.035,
-                0.3
+                0.2888,
+                0.0494,
+                0.4205
               ]
             },
             {
@@ -77,7 +77,7 @@
               "min": 0.35,
               "max": 0.8,
               "step": 0.01,
-              "default": 0.55
+              "default": 0.42
             },
             {
               "id": "belt_height",
@@ -86,7 +86,7 @@
               "min": 0.75,
               "max": 1.15,
               "step": 0.005,
-              "default": 0.92
+              "default": 0.795
             },
             {
               "id": "breath",
@@ -104,7 +104,7 @@
               "min": 0,
               "max": 2,
               "step": 0.05,
-              "default": 0.9
+              "default": 2
             }
           ]
         },
@@ -173,7 +173,7 @@
               "min": 0,
               "max": 1.5,
               "step": 0.01,
-              "default": 0.6
+              "default": 0.23
             },
             {
               "id": "band_height",
@@ -279,7 +279,7 @@
               "min": 0,
               "max": 3,
               "step": 0.01,
-              "default": 0.95
+              "default": 0.45
             },
             {
               "id": "orb_glow_extent",
@@ -288,7 +288,7 @@
               "min": 0.02,
               "max": 0.3,
               "step": 0.005,
-              "default": 0.1
+              "default": 0.07
             },
             {
               "id": "orb_ior",
@@ -303,7 +303,7 @@
               "id": "orb_reflections",
               "label": "Reflections",
               "kind": "checkbox",
-              "default": true
+              "default": false
             },
             {
               "id": "orb_glow_colour",
@@ -517,9 +517,9 @@
               "label": "Colour",
               "kind": "color",
               "default": [
-                0.375,
-                0.45,
-                0.75
+                1,
+                1,
+                1
               ]
             },
             {
@@ -529,7 +529,7 @@
               "min": 0,
               "max": 3,
               "step": 0.01,
-              "default": 1
+              "default": 0.42
             },
             {
               "id": "moon_azimuth",
@@ -538,7 +538,7 @@
               "min": -180,
               "max": 180,
               "step": 1,
-              "default": -37
+              "default": 43
             },
             {
               "id": "moon_elevation",
@@ -547,7 +547,7 @@
               "min": 2,
               "max": 85,
               "step": 0.5,
-              "default": 41
+              "default": 16
             },
             {
               "id": "moon_size",
@@ -556,7 +556,7 @@
               "min": 0.01,
               "max": 0.15,
               "step": 0.002,
-              "default": 0.05
+              "default": 0.036
             },
             {
               "id": "moon_brightness",
@@ -606,7 +606,7 @@
               "min": 0,
               "max": 0.7,
               "step": 0.01,
-              "default": 0.34
+              "default": 0.23
             },
             {
               "id": "cloud_density",
@@ -799,7 +799,7 @@
               "min": 0,
               "max": 8,
               "step": 0.05,
-              "default": 2
+              "default": 1.9
             }
           ]
         }
