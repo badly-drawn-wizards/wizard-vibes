@@ -22,25 +22,42 @@ def keep (fp: f32) (wavelength: f32) : f32 = smoothstep (0.5 * wavelength) (0.25
 -- everywhere, so it shows hardly any furrows.)
 
 -- (height, plate in [0, 1]: 0 in a furrow, 1 on a plate's crown)
-def bark (fp: f32) (p: vec3) : (f32, f32) =
-  let q = staff_local p
-  let s = vec (q.x * 75) (q.y * 6) (q.z * 75)
+-- Bark comes in three scales, each fading only once a pixel covers it, so
+-- the staff keeps a bark look at every distance rather than averaging to a
+-- flat brown: fine plates (~0.005 across), broad plates and furrows
+-- (~0.025), and lighter and darker patches along the length (never faded).
+
+-- One scale of plates: (height, plate in [0, 1]; 0 in a furrow, faded to
+-- 0.5 once too small to show). `across`/`along` are noise frequencies per
+-- unit; `bands` sets how many plates per unit of noise.
+def plates (fp: f32) (wavelength: f32) (across: f32) (along: f32) (bands: f32) (q: vec3) : f32 =
+  let s = vec (q.x * across) (q.y * along) (q.z * across)
   let n = 0.65 * vnoise3 s + 0.35 * vnoise3 (scale 2.3 s)
-  -- about 30-50 plates round the staff; their noise changes by ~80 per
-  -- unit across it, so a band is ~0.005 wide and this amplitude keeps the
-  -- bump's slope near 0.5
-  let band = fract (n * 3)
-  let plate = (0.5 - 0.5 * f32.cos (2 * f32.pi * band)) * keep fp 0.005
-  let cracks = vnoise3 (vec (s.x * 2.7) (s.y * 5) (s.z * 2.7)) * keep fp 0.003
-  in (0.0008 * plate + 0.0002 * cracks, plate)
+  let band = fract (n * bands)
+  in mix1 0.5 (0.5 - 0.5 * f32.cos (2 * f32.pi * band)) (keep fp wavelength)
+
+-- (height, fine plate, broad plate, patch tone)
+def bark (fp: f32) (p: vec3) : (f32, f32, f32, f32) =
+  let q = staff_local p
+  -- the noise changes by ~80 per unit across the staff at the fine scale
+  -- and ~25 at the broad one; these amplitudes keep each bump's slope
+  -- near 0.5
+  let fine = plates fp 0.005 75 6 3 q
+  let broad = plates fp 0.025 25 2.5 2 q
+  let tone = vnoise3 (vec (q.x * 8) (q.y * 1.6 + 3.1) (q.z * 8))
+  let cracks = vnoise3 (vec (q.x * 200) (q.y * 30) (q.z * 200)) * keep fp 0.003
+  in (0.0008 * fine + 0.002 * broad + 0.0002 * cracks, fine, broad, tone)
 
 def bark_albedo (fp: f32) (p: vec3) : vec3 =
-  let (_, plate) = bark fp p
+  let (_, fine, broad, tone) = bark fp p
   let q = staff_local p
-  -- far away (plate faded to 0) the colour averages to a mid brown
-  let k = keep fp 0.005
-  let t = mix1 0.55 (smoothstep 0.1 0.7 plate) k
-  let base = mix (vec 0.06 0.04 0.025) (vec 0.42 0.29 0.17) t
+  -- Bark reads as narrow dark crevices between lighter plates: darken only
+  -- near each plate's edge (plate values under ~0.2), at both scales.
+  let crevice (v: f32) = smoothstep 0.2 0.0 v
+  let wood = vec 0.4 0.28 0.16
+  let base = scale ((1 - 0.85 * crevice broad) * (1 - 0.6 * crevice fine)) wood
+  -- lighter and darker stretches along the length
+  let base = scale (0.7 + 0.6 * tone) base
   -- a few grey-green patches of lichen
   let lichen = smoothstep 0.8 0.86 (vnoise3 (vec (q.x * 60) (q.y * 9) (q.z * 60)))
   in mix base (vec 0.3 0.33 0.25) (0.6 * lichen)
