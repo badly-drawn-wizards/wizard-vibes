@@ -606,18 +606,43 @@ def terrain (pose: pose) (p: vec3) : hit =
 --   GPU function: the call site escapes the name ('zz') but the definition
 --   does not, so the call has no target. Hence bounded_figure, not
 --   bounded_wizard. See dev/futhark-bugs/z-name-mangling.fut.
+-- The scene near the wizard: the figure and its rock. (Primary rays march
+-- this and the terrain in separate passes, see follow in shading.fut.)
+#[noinline]
+def local_scene (pose: pose) (tol: f32) (p: vec3) : hit =
+  bounded_figure pose tol p |> umin (rock p)
+
+-- Everything in local_scene lies in this sphere (radius 3.3), and so do the
+-- glowing media (the orb's cloud and tendrils, the rune circle; 3.6).
+def occluder_centre : vec3 = vec 0 (-0.3) 0
+def occluder_radius : f32 = 3.3
+def local_radius : f32 = 3.6
+
 #[noinline]
 def scene (pose: pose) (tol: f32) (p: vec3) : hit =
-  bounded_figure pose tol p |> umin (rock p) |> umin (terrain pose p)
+  local_scene pose tol p |> umin (terrain pose p)
 
 def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 
 -- What casts shadows: the wizard and his rock. The terrain is left out (it
 -- would only shadow itself, at grazing angles, with penumbra artefacts), and
 -- so is the orb, a light source itself.
--- Everything occluder_dist sees (the figure and its rock) lies in this sphere.
-def occluder_centre : vec3 = vec 0 (-0.3) 0
-def occluder_radius : f32 = 3.3
+def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (local_scene pose tol p).0
 
-#[noinline] -- (see scene)
-def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_figure pose tol p |> umin (rock p)).0
+-- The terrain pass: sphere-traces the terrain alone along ro + t rd, for t in
+-- [0, tmax], returning the hit distance or infinity. A ray heading upwards
+-- from above the highest peak cannot hit it at all, and one heading down
+-- jumps straight to that height before stepping.
+#[noinline]
+def march_terrain (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
+  let wo = to_world pose.fl ro
+  let wd = to_world_dir pose.fl rd
+  let top = terrain_max + 1.5
+  in if wd.y >= 0 && wo.y > terrain_max then f32.inf else
+  let t0 = if wo.y > top then (wo.y - top) / -wd.y else 0
+  let (t, _, hit) =
+    loop (t, i, hit) = (f32.max 0.02 t0, 0i32, false)
+    while !hit && i < 300 && t < tmax do
+      let d = (terrain pose (ro +^ scale t rd)).0
+      in if d < 0.0004 * t then (t, i + 1, true) else (t + d * 0.85, i + 1, false)
+  in if hit then t else f32.inf

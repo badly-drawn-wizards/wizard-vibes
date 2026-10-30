@@ -243,7 +243,19 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       let (t_in, t_out) = orb_hit ro rd
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else 60
-      let (t, m, emitted, tr) = march (scene pose) (media pose g) ro rd tmax
+      -- Two passes: the terrain alone over the whole segment, then the scene
+      -- near the wizard up to the terrain hit or the edge of the sphere that
+      -- holds it (the peaks reach into that sphere, so the terrain goes
+      -- first). Neither pass evaluates the other's geometry at every step.
+      let t_terrain = if inside || enters then f32.inf else march_terrain pose ro rd tmax
+      let local_end =
+        let oc = occluder_centre -^ ro
+        let b = dot oc rd
+        let disc = b * b - (dot oc oc - local_radius * local_radius)
+        in if disc <= 0 then 0 else f32.max 0 (b + f32.sqrt disc)
+      let local_max = f32.min tmax (f32.min t_terrain local_end)
+      let (t, m, emitted, tr) = march (local_scene pose) (media pose g) ro rd local_max
+      let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, m_terrain) else (t, m)
       -- the glows are above the cloud slab, so in front of the clouds
       let (cloud_rad, cloud_tr) = clouds pose ro rd (if m >= 0 then t else tmax)
       let acc = acc +^ (w *^ emitted) +^ (scale tr w *^ cloud_rad)
