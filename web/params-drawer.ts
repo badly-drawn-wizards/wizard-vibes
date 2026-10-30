@@ -1,7 +1,7 @@
 // The parameter drawer: built from the schema the dev server serves
-// (params.json). Uniforms are packed into a Float32Array that is passed to
-// `render` every frame; compile-time parameters are sent to the server,
-// which rebuilds the shader once they settle. Native inputs throughout.
+// (params.json). The uniforms' values are passed to `render` as its params
+// record; compile-time parameters are sent to the server, which rebuilds
+// the shader once they settle. Native inputs throughout.
 
 type Kind = "slider" | "int" | "color" | "checkbox" | "select";
 type Value = number | boolean | number[];
@@ -21,7 +21,6 @@ interface Schema {
 }
 
 const STORE = "wizard-params";
-const width = (p: Param) => (p.kind === "color" ? 3 : 1);
 
 // Colours are linear RGB; the colour input shows them gamma-encoded.
 const toHex = (c: number[]) =>
@@ -44,32 +43,18 @@ function save(values: Record<string, Value>): void {
 }
 
 export interface Params {
-  // the uniforms, in schema order; `version` changes whenever they do
-  readonly values: Float32Array;
+  // the uniforms by id (colours as [r, g, b]); `version` changes with them
+  readonly values: Record<string, Value>;
   readonly version: number;
 }
 
 export async function createDrawer(host: HTMLElement): Promise<Params> {
   const { schema, compile } = (await (await fetch("/params")).json()) as { schema: Schema; compile: Record<string, Value> };
   const uniforms = schema.groups.flatMap((g) => g.params).filter((p) => !p.compile);
-  const offset = new Map<string, number>();
-  let n = 0;
-  for (const p of uniforms) {
-    offset.set(p.id, n);
-    n += width(p);
-  }
-
   const stored = load();
   const current: Record<string, Value> = {};
   for (const p of uniforms) current[p.id] = p.id in stored ? stored[p.id] : p.default;
-  const state = { values: new Float32Array(n), version: 0 };
-  const pack = (p: Param) => {
-    const v = current[p.id];
-    const o = offset.get(p.id)!;
-    if (Array.isArray(v)) state.values.set(v, o);
-    else state.values[o] = typeof v === "boolean" ? Number(v) : v;
-  };
-  uniforms.forEach(pack);
+  const state = { values: current, version: 0 };
 
   const pending: Record<string, Value> = {};
   let send: number | undefined;
@@ -84,7 +69,6 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
       }, 150);
     } else {
       current[p.id] = v;
-      pack(p);
       state.version++;
       save(current);
     }

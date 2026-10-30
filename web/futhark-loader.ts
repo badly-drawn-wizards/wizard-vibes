@@ -127,3 +127,36 @@ export function rawBuffer(inst: FutInstance, arr: FutharkArray): GPUBuffer {
   if (!(buf instanceof GPUBuffer)) throw new Error("could not resolve Futhark output buffer");
   return buf;
 }
+
+// Builds a value of a Futhark record type (an opaque in its API) from a JS
+// value, using the manifest: each field in the manifest's order, nested
+// records recursively (given as objects keyed by field name, or as arrays in
+// field order, e.g. a vec3 as [x, y, z]). The wrapper has no constructor for
+// records, so this calls the exported C one directly. Returns the opaque,
+// which the caller frees; nested records are copied into their parent, so
+// they are freed as soon as it exists.
+export function buildRecord(inst: FutInstance, type: string, value: unknown): { ptr: number; free(): void } {
+  const { m, fut } = inst;
+  const info = fut.manifest.types[type];
+  if (!info?.record) throw new Error(`${type} is not a record type`);
+  const children: { free(): void }[] = [];
+  const args = info.record.fields.map((f: { name: string; type: string }, i: number) => {
+    const v = Array.isArray(value) ? value[i] : (value as Record<string, unknown>)[f.name];
+    if (v === undefined) throw new Error(`${type}: no value for field ${f.name}`);
+    if (fut.manifest.types[f.type]?.record) {
+      const child = buildRecord(inst, f.type, v);
+      children.push(child);
+      return child.ptr;
+    }
+    return typeof v === "boolean" ? Number(v) : v;
+  });
+  const out = m._malloc(4);
+  try {
+    const err = m["_" + info.record.new](fut.ctx, out, ...args);
+    if (err !== 0) throw new Error(`${info.record.new} failed (${err})`);
+    return fut.types[type].from_native(m.HEAPU32[out >> 2]);
+  } finally {
+    m._free(out);
+    for (const c of children) c.free();
+  }
+}

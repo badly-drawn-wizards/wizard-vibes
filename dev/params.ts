@@ -1,9 +1,7 @@
 // Parameters: params.json describes every tweakable parameter and how the
 // drawer lays it out. From it this generates
 //   fut/params.fut  the uniforms' `params` record and their defaults;
-//   fut/render.fut  the entry points, render taking one scalar argument per
-//                   uniform value (Futhark puts scalar arguments in a
-//                   uniform struct);
+//   fut/render.fut  the entry points, render taking a params record;
 //   fut/config.fut  the compile-time constants, from their defaults overlaid
 //                   with the values the drawer saved in config.local.json.
 // Both are generated (and gitignored); files are only rewritten when their
@@ -65,25 +63,12 @@ const lit = (p: Param, v: Value): string => {
 
 const HEADER = "-- Generated from params.json by dev/params.ts; do not edit.\n";
 
-// The scalar entry-point arguments for a uniform (a colour takes three), and
-// the expression rebuilding its value from them. Every argument is an f32,
-// so the harness passes the values array as is.
-function args(p: Param): { names: string[]; value: string } {
-  if (p.kind === "color") {
-    const names = ["r", "g", "b"].map((c) => `${p.id}_${c}`);
-    return { names, value: `vec ${names.join(" ")}` };
-  }
-  const v = p.kind === "checkbox" ? `${p.id} > 0.5` : p.kind === "slider" ? p.id : `i32.f32 (f32.round ${p.id})`;
-  return { names: [p.id], value: v };
-}
-
 function paramsFut(s: Schema): string {
   const ps = allParams(s).filter((p) => !p.compile);
   return `${HEADER}
 import "vec3"
 
--- The uniforms. The harness passes them to render as scalar arguments (see
--- render.fut), which Futhark packs into each kernel's uniform struct.
+-- The uniforms, passed to render as a record (see render.fut).
 type params =
   { ${ps.map((p) => `${p.id}: ${futType(p)}`).join("\n  , ")} }
 
@@ -93,24 +78,19 @@ def default_params : params =
 }
 
 // The program's entry points (Futhark only takes entry points from the file
-// it compiles): render takes one scalar per uniform value, in schema order.
-function renderFut(s: Schema): string {
-  const ps = allParams(s).filter((p) => !p.compile);
-  const a = ps.map(args);
-  const decls = a.flatMap((x) => x.names).map((n) => `(${n}: f32)`);
-  const lines: string[] = [];
-  for (let i = 0; i < decls.length; i += 4) lines.push("             " + decls.slice(i, i + 4).join(" "));
+// it compiles). render takes the uniforms as a params record: an opaque type
+// in Futhark's API, which the harness builds from the manifest (see
+// buildRecord in web/futhark-loader.ts); its scalars reach the GPU in each
+// kernel's uniform struct.
+function renderFut(): string {
   return `${HEADER}
 import "vec3"
 import "params"
 import "wizard"
 
 entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
-${lines.join("\n")}
-             : []u32 =
-  let prm : params =
-    { ${ps.map((p, i) => `${p.id} = ${a[i].value}`).join("\n    , ")} }
-  in render_frame prm w vw h tm yaw pitch dst
+             (prm: params) : []u32 =
+  render_frame prm w vw h tm yaw pitch dst
 
 -- CPU reference image, with the default uniforms (see dev/ref-render.ts).
 entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
@@ -138,6 +118,6 @@ export function generate(dir = "fut"): boolean {
   const s = loadSchema();
   const a = writeIfChanged(`${dir}/params.fut`, paramsFut(s));
   const b = writeIfChanged(`${dir}/config.fut`, configFut(s));
-  const c = writeIfChanged(`${dir}/render.fut`, renderFut(s));
+  const c = writeIfChanged(`${dir}/render.fut`, renderFut());
   return a || b || c;
 }

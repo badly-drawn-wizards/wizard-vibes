@@ -37,6 +37,8 @@ render scale.
   - Each frame is then a single `copyBufferToTexture` into the canvas texture
     (`bgra8unorm`; Futhark packs pixels as BGRA).
   - Rows are padded to 64 pixels so `bytesPerRow` is 256-byte aligned.
+- `npm run dev` runs `dev/serve.ts`, which runs `dev/server.ts` and restarts it
+  when the server's own code under `dev/` changes.
 - `dev/server.ts` watches `fut/` and builds with `dev/build-fut.ts`.
   - Builds are content-addressed: `build/fut/<id>`, where the id hashes the
     sources, the shim, the compiler flags and the exact toolchain. Unchanged

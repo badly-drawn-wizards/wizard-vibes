@@ -2,13 +2,22 @@
 // device; we copy that buffer straight into the canvas texture on the GPU.
 
 import { attachCamera, idle, loadCamera } from "./camera.ts";
-import { type FutharkArray, type FutInstance, loadFuthark, rawBuffer, unloadFuthark } from "./futhark-loader.ts";
+import { buildRecord, type FutharkArray, type FutInstance, loadFuthark, rawBuffer, unloadFuthark } from "./futhark-loader.ts";
 import { clearError, setStatus, showError } from "./overlay.ts";
 import { createDrawer, type Params } from "./params-drawer.ts";
 
-// The drawer's uniforms, passed to render as scalar arguments in schema
-// order (Futhark packs them into the kernels' uniform struct).
+// The drawer's uniforms, passed to render as its params record: rebuilt
+// (per loaded build) only when they change.
 const params: Params = await createDrawer(document.getElementById("params")!);
+const records = new WeakMap<FutInstance, { version: number; rec: { ptr: number; free(): void } }>();
+function paramsRecord(i: FutInstance) {
+  const r = records.get(i);
+  if (r && r.version === params.version) return r.rec;
+  r?.rec.free();
+  const rec = buildRecord(i, "params", params.values);
+  records.set(i, { version: params.version, rec });
+  return rec;
+}
 document.getElementById("drawer-toggle")!.onclick = () => document.body.classList.toggle("drawer-open");
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
@@ -63,7 +72,7 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   if (!paused) time += dt;
   idle(cam, dt);
 
-  const out: FutharkArray = await i.fut.entry.render(w, vw, h, time, cam.yaw, cam.pitch, cam.dist, ...params.values);
+  const out: FutharkArray = await i.fut.entry.render(w, vw, h, time, cam.yaw, cam.pitch, cam.dist, paramsRecord(i));
   const enc = i.device.createCommandEncoder();
   enc.copyBufferToTexture(
     { buffer: rawBuffer(i, out), bytesPerRow: w * 4, rowsPerImage: h },
@@ -96,6 +105,7 @@ const KEEP_LOADED = 12;
 const loaded = new Map<string, FutInstance>(); // in least-recently-used order
 
 async function swapTo(version: string): Promise<void> {
+  if (inst?.version === version) return; // e.g. a restarted server re-announcing it
   let next = loaded.get(version);
   if (next) loaded.delete(version);
   else {
@@ -117,6 +127,7 @@ async function swapTo(version: string): Promise<void> {
   while (loaded.size > KEEP_LOADED) {
     const [id, evicted] = loaded.entries().next().value!;
     loaded.delete(id);
+    records.get(evicted)?.rec.free();
     unloadFuthark(evicted);
   }
   configure(next.device);
@@ -144,7 +155,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     inst = null;
     await inFlight;
     try {
-      const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, ...params.values);
+      const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i));
       const pixels: Uint32Array = await out.values();
       out.free();
       return { f32: i.f32, portable: i.portable, pixels: Array.from(pixels) };
@@ -167,7 +178,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     await inFlight;
     try {
       const w = Math.ceil(vw / 64) * 64;
-      const run = async (t: number) => (await i.fut.entry.render(w, vw, h, t, cam.yaw, cam.pitch, cam.dist, ...params.values)).free();
+      const run = async (t: number) => (await i.fut.entry.render(w, vw, h, t, cam.yaw, cam.pitch, cam.dist, paramsRecord(i))).free();
       await run(0); // warm-up: pipeline creation
       await i.fut.context_sync();
       const start = performance.now();
