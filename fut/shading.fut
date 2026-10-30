@@ -64,6 +64,54 @@ type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: boo
 def plain (albedo: vec3) : material =
   {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false, sheen = 0}
 
+-- The structures' materials, with lit windows on cottages and towers.
+def structure_material (pose: pose) (m: i32) (p: vec3) : material =
+  let prm = pose.prm
+  let w = to_world pose.fl p
+  let (_, kind, o, yaw) = structure_at (land_of prm) prm.structure_density w
+  let q = yaw_inv yaw (w -^ o)
+  let grain = 0.85 + 0.3 * vnoise2 (w.x * 3 + w.z) (w.y * 3)
+  let lit (window: bool) = if window then scale prm.window_glow prm.window_colour else splat 0
+  in if m == m_wall then
+       -- windows on the long walls (two each) and the gable ends (one each),
+       -- and a door on the front
+       let long = f32.abs q.z > 1.25 && f32.abs (f32.abs q.x - 0.9) < 0.22 && f32.abs (q.y - 1.25) < 0.28
+       let gable = f32.abs q.x > 1.75 && f32.abs q.z < 0.22 && f32.abs (q.y - 1.25) < 0.28
+       let door = q.z > 1.25 && f32.abs q.x < 0.3 && q.y < 1.5
+       let window = (long || gable) && kind == kind_cottage
+       let c = if door then vec 0.18 0.1 0.05 else scale grain prm.wall_colour
+       in plain (if window then splat 0.05 else c) with emission = lit window
+     else if m == m_thatch then plain (scale (0.7 + 0.5 * vnoise2 (q.x * 9) (q.y * 20)) prm.thatch_colour)
+     else if m == m_tower then
+       -- four narrow lit windows round the tower, on two floors
+       let a = f32.atan2 q.z q.x / (2 * f32.pi) * 4
+       let slot = f32.abs (fract a - 0.5) < 0.06
+       let floor = (q.y > 2.3 && q.y < 3) || (q.y > 4 && q.y < 4.6)
+       let window = slot && floor
+       let block = 0.8 + 0.2 * hash2 (i32.f32 (f32.floor (a * 6))) (i32.f32 (f32.floor (q.y * 3)))
+       in plain (if window then splat 0.05 else scale (block * grain) prm.tower_colour) with emission = lit window
+     else if m == m_slate then plain prm.slate_colour with ks = 0.3 with shininess = 30
+     else plain (scale grain prm.sandstone_colour)
+
+-- The water: rippled (the ripples fade with the pixel footprint), dark below,
+-- reflecting the sky by Fresnel, with a glint of the moon.
+def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+  let w = to_world pose.fl p
+  let s = pose.secs
+  let k = keep (t * pose.pix) 0.6
+  let (_, ax, az) = vnoise2_grad (w.x * 1.3 + s * 0.3) (w.z * 1.3 - s * 0.2)
+  let (_, bx, bz) = vnoise2_grad (w.x * 3.1 - s * 0.5) (w.z * 3.1 + s * 0.4)
+  let gx = k * (0.04 * ax * 1.3 + 0.015 * bx * 3.1)
+  let gz = k * (0.04 * az * 1.3 + 0.015 * bz * 3.1)
+  let n = to_local_dir pose.fl (normalise (vec (-gx) 1 (-gz)))
+  let cosi = saturate (-(dot n rd))
+  let f = 0.02 + 0.98 * pow (1 - cosi) 5
+  let r = reflect rd n
+  let glint = scale (1.5 * pow (saturate (dot r pose.moon)) 400) (vec 0.85 0.9 1)
+  let c = mix pose.prm.water_colour (sky pose (to_world_dir pose.fl r)) f +^ glint
+  let fog = 1 - f32.exp (-pose.prm.fog * t * t)
+  in mix c (sky pose (to_world_dir pose.fl rd)) fog
+
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
   if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = pose.prm.sheen with ks = 0.03
@@ -96,6 +144,7 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let c = mix stone moss (smoothstep 0.7 0.85 up)
     let c = mix c snow (smoothstep pose.prm.snow_line (pose.prm.snow_line + 1.5) w.y * smoothstep 0.6 0.8 up)
     in plain (scale grain c) with rim = false
+  else if m >= m_wall && m <= m_sandstone then structure_material pose m p
   else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28
   else if m == m_cork then plain (cork_albedo fp p) with ks = 0.05
   else if m == m_tome then plain pose.prm.tome_colour with ks = 0.15 with shininess = 16
@@ -177,12 +226,13 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   let layer = hit_layer tagged
   let m = hit_material tagged
   let vis = pose.prm.layers -- only visible layers occlude, or show in AO
+  in if m == m_water then water_surface pose p rd t else
   -- The terrain's normal comes from its height gradient, worked out
   -- analytically (one evaluation instead of four of the whole scene), and it
   -- gets no AO: at its scale the probes see nothing.
   let n = if m == m_terrain
           then let w = to_world pose.fl p
-               in to_local_dir pose.fl (terrain_normal (terrain_detail p) w.x w.z)
+               in to_local_dir pose.fl (terrain_normal (land_of pose.prm) (terrain_detail p) w.x w.z)
           else normal (dist vis pose) p
   -- textures tilt the normal used for lighting; shadows and AO keep the
   -- geometric one
@@ -330,11 +380,11 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       -- near the wizard up to the terrain hit or the edge of the sphere that
       -- holds it (the peaks reach into that sphere, so the terrain goes
       -- first). Neither pass evaluates the other's geometry at every step.
-      let t_terrain = if inside || enters || !(has vis layers_terrain) then f32.inf else march_terrain pose ro rd tmax
+      let (t_terrain, m_land) = if inside || enters || !(has vis land_layers) then (f32.inf, 0) else march_terrain vis pose ro rd tmax
       let local_end = f32.max 0 (ray_sphere occluder_centre local_radius ro rd).1
       let local_max = f32.min tmax (f32.min t_terrain local_end)
       let (t, m, emitted, tr) = march (local_scene vis pose) (media pose g) ro rd local_max
-      let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, (tag layers_terrain (0, m_terrain)).1) else (t, m)
+      let (t, m) = if m < 0 && t_terrain < tmax then (t_terrain, m_land) else (t, m)
       -- the glows are above the cloud slab, so in front of the clouds
       let (cloud_rad, cloud_tr) = if has vis layers_clouds then clouds pose ro rd (if m >= 0 then t else tmax)
                                   else (splat 0, 1)

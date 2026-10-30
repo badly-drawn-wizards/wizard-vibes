@@ -31,6 +31,12 @@ def m_staff : i32 = 15
 def m_cork : i32 = 16
 def m_brow : i32 = 17
 def m_band : i32 = 18
+def m_wall : i32 = 24 -- 24 .. 28: the structure parts (part_* in world.fut)
+def m_thatch : i32 = 25
+def m_tower : i32 = 26
+def m_slate : i32 = 27
+def m_sandstone : i32 = 28
+def m_water : i32 = 29
 
 ---------------------------------------------------------------------
 -- Wizard
@@ -726,14 +732,31 @@ def rock (p: vec3) : hit = sphere_bounded_hit (vec 0 (-1.2) 0) 2.3 0.3 m_rock ro
 -- no fade at all (17.2 ms at 1080p either way).
 def terrain_detail (_p: vec3) : f32 = 5
 
-def terrain (pose: pose) (p: vec3) : hit =
+def land_of (prm: params) : land = {sea = prm.sea_level, river = prm.river_width}
+
+-- The world below, in the layers of `mask`: the ground, the water (sea and
+-- rivers, a plane at sea level) and the structures.
+def land_layers : i32 = layers_terrain | layers_water | layers_structures
+
+def terrain (mask: i32) (pose: pose) (p: vec3) : hit =
+  let prm = pose.prm
+  let l = land_of prm
   let w = to_world pose.fl p
   let detail = terrain_detail p
-  in if w.y > terrain_max + 1.5 then (w.y - terrain_max, m_terrain) |> tag layers_terrain else
-     -- the cheap bound clears most points near the wizard, his rock and the
-     -- clouds; only close to the ground is the full terrain needed
-     let gap = w.y - terrain_upper w.x w.z
-     in (if gap > 0.4 then 0.6 * gap else terrain_dist detail w, m_terrain) |> tag layers_terrain
+  let ground =
+    if !(has mask layers_terrain) then nothing
+    else if w.y > terrain_max + 1.5 then (w.y - terrain_max, m_terrain) |> tag layers_terrain
+    else
+      -- the cheap bound clears most points near the wizard, his rock and
+      -- the clouds; only close to the ground is the full terrain needed
+      -- (rivers only lower the ground, so it stays an upper bound)
+      let gap = w.y - terrain_upper w.x w.z
+      in (if gap > 0.4 then 0.6 * gap else terrain_dist l detail w, m_terrain) |> tag layers_terrain
+  let water = if has mask layers_water then (w.y - prm.sea_level, m_water) |> tag layers_water else nothing
+  let built = if !(has mask layers_structures) then nothing
+              else let (d, part) = structures l prm.structure_density w
+                   in (d, m_wall + part) |> tag layers_structures
+  in ground |> umin water |> umin built
 
 -- #[noinline]: Futhark inlines everything by default, and the scene is used
 -- by the march, normals, AO and both shadow loops, which made the shader
@@ -764,24 +787,25 @@ def local_radius : f32 = 3.6
 
 #[noinline]
 def scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
-  local_scene mask pose tol p |> umin (if has mask layers_terrain then terrain pose p else nothing)
+  local_scene mask pose tol p |> umin (if has mask land_layers then terrain mask pose p else nothing)
 
 def dist (mask: i32) (pose: pose) (tol: f32) (p: vec3) : f32 = (scene mask pose tol p).0
 
--- The terrain pass: sphere-traces the terrain alone along ro + t rd, for t in
--- [0, tmax], returning the hit distance or infinity. A ray heading upwards
+-- The terrain pass: sphere-traces the land alone (the layers of `mask` among
+-- land_layers) along ro + t rd, for t in [0, tmax], returning the hit's
+-- distance and tagged material, or infinity. A ray heading upwards
 -- from above the highest peak cannot hit it at all, and one heading down
 -- jumps straight to that height before stepping.
 #[noinline]
-def march_terrain (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
+def march_terrain (mask: i32) (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
   let wo = to_world pose.fl ro
   let wd = to_world_dir pose.fl rd
-  let top = terrain_max + 1.5
-  in if wd.y >= 0 && wo.y > terrain_max then f32.inf else
+  let top = land_max + 1.5
+  in if wd.y >= 0 && wo.y > land_max then (f32.inf, 0) else
   let t0 = if wo.y > top then (wo.y - top) / -wd.y else 0
-  let (t, _, hit) =
-    loop (t, i, hit) = (f32.max 0.02 t0, 0i32, false)
+  let (t, _, hit, m) =
+    loop (t, i, hit, m) = (f32.max 0.02 t0, 0i32, false, 0i32)
     while !hit && i < terrain_steps && t < tmax do
-      let d = (terrain pose (ro +^ scale t rd)).0
-      in if d < 0.0004 * t then (t, i + 1, true) else (t + d * 0.85, i + 1, false)
-  in if hit then t else f32.inf
+      let (d, mat) = terrain mask pose (ro +^ scale t rd)
+      in if d < 0.0004 * t then (t, i + 1, true, mat) else (t + d * 0.85, i + 1, false, m)
+  in if hit then (t, m) else (f32.inf, 0)

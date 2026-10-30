@@ -46,9 +46,11 @@
             "Terrain",
             "Orb",
             "Glow",
-            "Clouds"
+            "Clouds",
+            "Structures",
+            "Water"
           ],
-          "default": 255
+          "default": 1023
         }
       ]
     },
@@ -626,6 +628,117 @@
           "max": 2,
           "step": 0.01,
           "default": 0.9
+        }
+      ]
+    },
+    {
+      "name": "Land",
+      "params": [
+        {
+          "id": "sea_level",
+          "label": "Sea level",
+          "kind": "slider",
+          "min": -3,
+          "max": 3,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "id": "river_width",
+          "label": "River width",
+          "kind": "slider",
+          "min": 0,
+          "max": 0.08,
+          "step": 0.002,
+          "default": 0.03
+        },
+        {
+          "id": "water_colour",
+          "label": "Water",
+          "kind": "color",
+          "default": [
+            0.01,
+            0.03,
+            0.06
+          ]
+        },
+        {
+          "id": "structure_density",
+          "label": "Buildings",
+          "kind": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.6
+        },
+        {
+          "id": "wall_colour",
+          "label": "Cottage walls",
+          "kind": "color",
+          "default": [
+            0.62,
+            0.58,
+            0.5
+          ]
+        },
+        {
+          "id": "thatch_colour",
+          "label": "Cottage roofs",
+          "kind": "color",
+          "default": [
+            0.3,
+            0.18,
+            0.08
+          ]
+        },
+        {
+          "id": "tower_colour",
+          "label": "Tower stone",
+          "kind": "color",
+          "default": [
+            0.35,
+            0.34,
+            0.36
+          ]
+        },
+        {
+          "id": "slate_colour",
+          "label": "Tower roofs",
+          "kind": "color",
+          "default": [
+            0.12,
+            0.14,
+            0.25
+          ]
+        },
+        {
+          "id": "sandstone_colour",
+          "label": "Pyramids",
+          "kind": "color",
+          "default": [
+            0.62,
+            0.5,
+            0.32
+          ]
+        },
+        {
+          "id": "window_colour",
+          "label": "Window light",
+          "kind": "color",
+          "default": [
+            1,
+            0.6,
+            0.25
+          ]
+        },
+        {
+          "id": "window_glow",
+          "label": "Window glow",
+          "kind": "slider",
+          "min": 0,
+          "max": 8,
+          "step": 0.05,
+          "default": 2
         }
       ]
     },
