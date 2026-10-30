@@ -55,7 +55,8 @@ export function attachCamera(cam: Camera, el: HTMLElement): void {
   );
 }
 
-// Slow idle orbit until the user touches the camera.
+// Slow idle orbit until the user touches the camera: one revolution per
+// three 12 s animation loops, so the idle view loops too.
 export function idle(cam: Camera, dt: number): void {
-  if (!cam.interacted) cam.yaw += dt * 0.15;
+  if (!cam.interacted) cam.yaw += (dt * 2 * Math.PI) / 36;
 }

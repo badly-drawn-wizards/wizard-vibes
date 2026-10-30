@@ -15,10 +15,17 @@ def m_wood : i32 = 7
 def m_orb : i32 = 8
 def m_ground : i32 = 9
 
+-- Animation loops every `loop_seconds`. Inside the renderer `tm` is the loop
+-- angle in [0, 2pi), and every animated term uses a whole-number multiple of
+-- it, so the last frame of the loop matches the first.
+def loop_seconds : f32 = 12
+def loop_angle (seconds: f32) : f32 = 2 * f32.pi * fract (seconds / loop_seconds)
+
 -- Scene constants.
 def orb_pos : vec3 = vec 0.43 2.12 0.1
-def orb_radius (tm: f32) : f32 = 0.11 + 0.008 * f32.sin (3 * tm)
-def pulse (tm: f32) : f32 = 0.75 + 0.25 * f32.sin (3 * tm)
+-- Three slight pulses per loop.
+def orb_radius (tm: f32) : f32 = 0.11 + 0.006 * f32.sin (3 * tm)
+def pulse (tm: f32) : f32 = 0.85 + 0.15 * f32.sin (3 * tm)
 def moon_dir : vec3 = normalise (vec (-0.45) 0.65 0.6)
 
 -- Integer hash -> [0,1).
@@ -38,7 +45,7 @@ def sd_orb (tm: f32) (p: vec3) : f32 = sd_sphere (p -^ orb_pos) (orb_radius tm)
 
 def sd_robe (tm: f32) (p: vec3) : f32 =
   let a = f32.atan2 p.z p.x
-  let hem = 0.02 * f32.sin (9 * a + 1.5 * tm) * saturate (1 - p.y / 0.8)
+  let hem = 0.02 * f32.sin (9 * a + 2 * tm) * saturate (1 - p.y / 0.8)
   let cone = sd_capped_cone p 1.35 0.55 0.17 - 0.03 + hem
   let shoulders = sd_ellipsoid (p -^ vec 0 1.3 0) (vec 0.29 0.14 0.2)
   in smin 0.12 cone shoulders
@@ -62,7 +69,7 @@ def sd_eyes (p: vec3) : f32 =
   in sd_sphere (q -^ vec 0.065 1.64 0.155) 0.022
 
 def sd_beard (tm: f32) (p: vec3) : f32 =
-  let sway = 0.03 * f32.sin (1.3 * tm) * saturate (1.55 - p.y)
+  let sway = 0.03 * f32.sin (2 * tm) * saturate (1.55 - p.y)
   let q = p -^ vec sway 1.54 0.11
   let q = {x = q.x, y = -q.y, z = q.z - 0.15 * q.y}
   let wave = 0.012 * f32.sin (30 * p.y + 10 * p.x)
@@ -72,7 +79,7 @@ def hat_base : vec3 = vec 0 1.74 0
 
 def sd_hat (tm: f32) (p: vec3) : f32 =
   let hp = p -^ hat_base
-  let bp = bend (0.9 + 0.15 * f32.sin (0.8 * tm)) hp
+  let bp = bend (0.9 + 0.15 * f32.sin tm) hp
   let cone = sd_capped_cone bp 0.72 0.2 0.012
   let brim = f32.min (sd_torus hp 0.3 0.022) (sd_cylinder hp 0.31 0.01)
   in smin 0.04 cone brim
@@ -167,9 +174,11 @@ def runes (tm: f32) (p: vec3) : f32 =
   let rings = f32.max (ring 0.018 0.95) (ring 0.012 1.3)
   let n = 14f32
   let sector = 2 * f32.pi / n
-  let a = f32.atan2 p.z p.x + f32.pi
+  -- The glyph band turns once per loop.
+  let q = rot2 tm (vec2 p.x p.z)
+  let a = f32.atan2 q.y q.x + f32.pi
   let idx = i32.f32 (f32.floor (a / sector))
-  let lp = rep_angle n {x = p.x, y = 0, z = p.z}
+  let lp = rep_angle n {x = q.x, y = 0, z = q.y}
   let c = 1.125
   let h1 = hash2 idx 3
   let h2 = hash2 idx 7
@@ -179,7 +188,11 @@ def runes (tm: f32) (p: vec3) : f32 =
   let g2 = seg (-0.08 + 0.16 * h2) (-0.06) (0.08 - 0.16 * h1) 0.06
   let g3 = if h2 > 0.5 then seg 0 (-0.07) 0 0.07 else sd_torus (lp -^ vec c 0 0) 0.05 0.004
   let glyph = 1 - smoothstep 0.0 0.008 (f32.min g1 (f32.min g2 g3))
-  in f32.max rings glyph * pulse tm
+  -- Inner tick ring counter-rotates.
+  let tq = rot2 (-2 * tm) (vec2 p.x p.z)
+  let tp = rep_angle 48 {x = tq.x, y = 0, z = tq.y}
+  let ticks = 1 - smoothstep 0.0 0.006 (sd_capsule tp (vec 0.83 0 0) (vec 0.89 0 0) 0.005)
+  in f32.max (f32.max rings glyph) ticks * pulse tm
 
 def sky (rd: vec3) : vec3 =
   let up = saturate (rd.y * 0.5 + 0.5)
@@ -282,7 +295,7 @@ def camera_ray (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y
 
 def pixel (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : vec3 =
   let (ro, rd) = camera_ray vw h yaw pitch dst x y
-  let c = shade tm ro rd
+  let c = shade (loop_angle tm) ro rd
   let c = vmap aces (scale 1.1 c)
   let c = vmap (\v -> (v ** (1 / 2.2))) c
   let ux = (f32.i32 x / f32.i32 vw - 0.5)
