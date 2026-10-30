@@ -186,37 +186,16 @@ def bounded_wizard (tm: f32) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
   in if b > tol then (b, m_robe) else wizard tm p
 
-def scene (tm: f32) (tol: f32) (p: vec3) : hit =
-  bounded_wizard tm tol p |> umin (p.y, m_ground) |> umin (sd_orb p, m_orb)
+-- With `solid_orb` false the orb is a glass globe: rays pass through it and
+-- what is inside is drawn by the media (see media.fut and lightning.fut).
+def scene (tm: f32) (solid_orb: bool) (tol: f32) (p: vec3) : hit =
+  let s = bounded_wizard tm tol p |> umin (p.y, m_ground)
+  in if solid_orb then umin s (sd_orb p, m_orb) else s
 
-def dist (tm: f32) (tol: f32) (p: vec3) : f32 = (scene tm tol p).0
+def dist (tm: f32) (solid_orb: bool) (tol: f32) (p: vec3) : f32 = (scene tm solid_orb tol p).0
 
 -- What casts shadows: only the wizard. Both lights are above the ground,
 -- which therefore cannot block them (as an occluder it would only add
 -- penumbra artefacts at grazing angles), and the orb is a light source
 -- itself, which would otherwise darken everything it lights.
 def occluder_dist (tm: f32) (tol: f32) (p: vec3) : f32 = (bounded_wizard tm tol p).0
-
----------------------------------------------------------------------
--- Glowing media
-
-def orb_glow_colour : vec3 = vec 0.35 0.55 1
-def rune_glow_colour : vec3 = vec 0.25 0.5 1
-
--- A cloud around the orb whose density falls off exponentially with
--- distance from the orb's surface; its strength and extent breathe.
-def orb_glow_density (tm: f32) (od: f32) : f32 =
-  let s = f32.sin (3 * tm)
-  let extent = 0.1 + 0.012 * s
-  in (0.9 + 0.2 * s) * f32.exp (-(f32.max od 0) / extent)
-
--- The rune letters glow the same way, in a thin layer hugging the strokes.
-def rune_glow_density (tm: f32) (gd: f32) : f32 =
-  4 * pulse tm * f32.exp (-gd / 0.05)
-
-def media (tm: f32) (p: vec3) : media_sample =
-  let od = sd_orb p
-  let gd = glyph_dist tm p
-  in { cap = f32.min (0.3 * od + 0.015) (0.3 * gd + 0.01)
-     , radiance = scale (orb_glow_density tm od) orb_glow_colour
-                  +^ scale (rune_glow_density tm gd) rune_glow_colour }

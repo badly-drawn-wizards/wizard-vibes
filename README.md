@@ -9,7 +9,8 @@ nix develop -c npm install   # once
 nix develop -c npm run dev   # http://localhost:8080
 ```
 
-Drag to orbit, scroll to zoom, space to pause. The ¼ / ½ / 1× buttons set the
+Drag to orbit, scroll to zoom, space to pause, L to cycle the orb lightning
+(arcs, plasma globe, both). The ¼ / ½ / 1× buttons set the
 render scale.
 
 ## How it works

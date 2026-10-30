@@ -11,6 +11,7 @@ export interface View {
   pitch: number;
   dist: number;
   target?: [number, number, number]; // orbit centre; defaults to the harness camera's
+  style?: number; // orb lightning: 0 arcs, 1 globe, 2 both (default: $STYLE or 2)
 }
 
 const EXE = "build/ref/wizard";
@@ -23,7 +24,8 @@ export function compileCpu(): void {
 // Returns packed RGB rows, top row first.
 export function renderRgb(v: View, time: number): Uint8Array {
   const [tx, ty, tz] = v.target ?? [0, 1.15, 0];
-  const input = `${v.width}i32 ${v.height}i32 ${time}f32 ${v.yaw}f32 ${v.pitch}f32 ${v.dist}f32 ${tx}f32 ${ty}f32 ${tz}f32`;
+  const style = v.style ?? Number(process.env.STYLE ?? 2);
+  const input = `${v.width}i32 ${v.height}i32 ${time}f32 ${v.yaw}f32 ${v.pitch}f32 ${v.dist}f32 ${tx}f32 ${ty}f32 ${tz}f32 ${style}i32`;
   const out = execFileSync(EXE, ["-e", "render_rgb", "-b"], { input, maxBuffer: 1 << 30 });
   // Futhark binary data format: 'b', version, rank, 4-char type, i64 dims, payload.
   if (out[0] !== 0x62 || out[2] !== 3 || out.toString("latin1", 3, 7) !== "  u8") {

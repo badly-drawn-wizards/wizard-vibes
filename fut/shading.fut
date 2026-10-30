@@ -6,6 +6,8 @@ import "hash"
 import "anim"
 import "march"
 import "scene"
+import "lightning"
+import "media"
 
 def moon_dir : vec3 = normalise (vec (-0.45) 0.65 0.6)
 
@@ -93,25 +95,42 @@ def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse:
   let spec = mat.ks * pow (saturate (dot n (normalise (l -^ rd)))) mat.shininess * lit
   in scale lit (mat.albedo *^ diffuse) +^ scale spec specular
 
-def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
-  let (t, m, glow) = march (scene tm) (media tm) ro rd
+-- The glass of a globe orb: a Fresnel rim where the view ray enters it
+-- before reaching distance t_hit.
+def glass_rim (ro: vec3) (rd: vec3) (t_hit: f32) : vec3 =
+  let oc = ro -^ orb_pos
+  let b = dot oc rd
+  let disc = b * b - (dot oc oc - orb_radius * orb_radius)
+  let t0 = -b - f32.sqrt (f32.max 0 disc)
+  in if disc <= 0 || t0 <= 0 || t0 > t_hit then splat 0
+     else let n = normalise (ro +^ scale t0 rd -^ orb_pos)
+          let f = pow (1 - f32.abs (dot n rd)) 3
+          in scale (0.12 + 0.9 * f) orb_glow_colour
+
+def shade (tm: f32) (style: i32) (ro: vec3) (rd: vec3) : vec3 =
+  let solid_orb = !(has_globe style)
+  let dist = dist tm solid_orb
+  let (t, m, glow) = march (scene tm solid_orb) (media tm style) ro rd
+  let glow = if has_globe style then glow +^ glass_rim ro rd (if m < 0 then 1e9 else t) else glow
   in if m < 0 then sky rd +^ glow
      else
        let p = ro +^ scale t rd
-       let n = normal (dist tm) p
+       let n = normal dist p
        let mat = material tm m p n rd
-       let occ = ambient_occlusion (dist tm) p n
+       let occ = ambient_occlusion dist p n
        let po = p +^ scale 0.002 n
        let moon_shadow = soft_shadow (occluder_dist tm) po moon_dir 12
        let moon = light mat n rd moon_dir moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
        let to_orb = orb_pos -^ p
        let od = length to_orb
        let ol = scale (1 / od) to_orb
-       let atten = 2.4 * pulse tm / (1 + 1.5 * od * od)
+       -- lightning flashes brighten and whiten the orb's light
+       let fl = flash tm style
+       let atten = 2.4 * pulse tm * (1 + 1.5 * fl) / (1 + 1.5 * od * od)
        -- Stop short of the orb: the staff pokes into its underside, and a
        -- penumbra estimate taken right next to the light bands badly.
        let orb_shadow = if m == m_orb then 0 else soft_shadow (occluder_dist tm) po ol (od - orb_radius - 0.15)
-       let orb_colour = scale atten (vec 0.6 0.5 1)
+       let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * fl))
        let orb = light mat n rd ol orb_shadow orb_colour orb_colour
        let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
        let rim = if mat.rim then scale (occ * pow (1 - saturate (-(dot n rd))) 3 * 0.25) (vec 0.35 0.3 0.8)
