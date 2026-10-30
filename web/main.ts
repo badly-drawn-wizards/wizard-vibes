@@ -173,7 +173,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight: WASD, E/Q, shift · F: path" : ""}${padConnected ? " · controller (Y: free flight)" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight: WASD, E/Q, shift · F: path" : ""}${padConnected ? " · controller (X: free flight)" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }

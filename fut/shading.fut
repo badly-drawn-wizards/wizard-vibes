@@ -64,12 +64,59 @@ type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: boo
 def plain (albedo: vec3) : material =
   {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false, sheen = 0}
 
--- The structures' materials, with lit windows on cottages and towers.
-def structure_material (pose: pose) (m: i32) (p: vec3) : material =
+-- The frame of the structure at local point p: (kind, origin, yaw). (It
+-- looks up the ground there, so work it out once per pixel.)
+def structure_frame (pose: pose) (p: vec3) : (i32, vec3, f32) =
+  let (_, kind, o, yaw) = structure_at (land_of pose.prm) pose.prm.structure_density (to_world pose.fl p)
+  in (kind, o, yaw)
+
+-- Local point p in that structure's own frame.
+def structure_q (pose: pose) (o: vec3) (yaw: f32) (p: vec3) : vec3 = yaw_inv yaw (to_world pose.fl p -^ o)
+
+-- Stone bricks in running bond, `size` high and twice as long, on a wall
+-- with coordinates (u along it, v up): (mortar: 1 in a joint .. 0 on a
+-- brick, faded out as the pixel footprint fp nears the brick size; a random
+-- value per brick).
+def bricks (size: f32) (fp: f32) (u: f32) (v: f32) : (f32, f32) =
+  let row = f32.floor (v / size)
+  let x = u / (2 * size) + 0.5 * (row - 2 * f32.floor (row / 2))
+  let dx = (0.5 - f32.abs (fract x - 0.5)) * 2 * size
+  let dy = (0.5 - f32.abs (fract (v / size) - 0.5)) * size
+  let joint = 0.07 * size
+  let mortar = smoothstep joint (0.5 * joint) (f32.min dx dy) * keep fp size
+  in (mortar, hash2 (i32.f32 (f32.floor x)) (i32.f32 row))
+
+-- Wall coordinates on a cottage (along whichever face is nearest) or round
+-- a tower (whole bricks round it, so no seam).
+def wall_uv (size: f32) (kind: i32) (q: vec3) : (f32, f32) =
+  if kind == kind_tower
+  then let around = f32.max 1 (f32.round (f32.pi / size)) -- bricks round the tower
+       in (f32.atan2 q.z q.x / (2 * f32.pi) * around * 2 * size, q.y)
+  else if f32.abs q.x / 1.8 > f32.abs q.z / 1.3 then (q.z, q.y) else (q.x, q.y)
+
+def is_brick (m: i32) : bool = m == m_wall || m == m_tower
+
+-- The bricks' relief: the mortar sits back in the joints.
+def brick_height (pose: pose) (fp: f32) (kind: i32) (o: vec3) (yaw: f32) (p: vec3) : f32 =
+  let size = pose.prm.brick_size
+  let (u, v) = wall_uv size kind (structure_q pose o yaw p)
+  in -0.06 * size * (bricks size fp u v).0
+
+-- Brick colours from a base colour: each brick a little different, the
+-- mortar greyer and darker.
+def brick_colour (size: f32) (fp: f32) (kind: i32) (q: vec3) (base: vec3) : vec3 =
+  let (u, v) = wall_uv size kind q
+  let (mortar, r) = bricks size fp u v
+  let brick = scale (0.75 + 0.4 * r) base
+  in mix brick (scale 0.6 (mix base (splat 0.5) 0.5)) mortar
+
+-- The structures' materials: stone bricks with lit windows on cottages and
+-- towers.
+def structure_material (pose: pose) (fp: f32) (m: i32) (p: vec3) : material =
   let prm = pose.prm
   let w = to_world pose.fl p
-  let (_, kind, o, yaw) = structure_at (land_of prm) prm.structure_density w
-  let q = yaw_inv yaw (w -^ o)
+  let (kind, o, yaw) = structure_frame pose p
+  let q = structure_q pose o yaw p
   let grain = 0.85 + 0.3 * vnoise2 (w.x * 3 + w.z) (w.y * 3)
   let lit (window: bool) = if window then scale prm.window_glow prm.window_colour else splat 0
   in if m == m_wall then
@@ -79,7 +126,7 @@ def structure_material (pose: pose) (m: i32) (p: vec3) : material =
        let gable = f32.abs q.x > 1.75 && f32.abs q.z < 0.22 && f32.abs (q.y - 1.25) < 0.28
        let door = q.z > 1.25 && f32.abs q.x < 0.3 && q.y < 1.5
        let window = (long || gable) && kind == kind_cottage
-       let c = if door then vec 0.18 0.1 0.05 else scale grain prm.wall_colour
+       let c = if door then vec 0.18 0.1 0.05 else brick_colour prm.brick_size fp kind q (scale grain prm.wall_colour)
        in plain (if window then splat 0.05 else c) with emission = lit window
      else if m == m_thatch then plain (scale (0.7 + 0.5 * vnoise2 (q.x * 9) (q.y * 20)) prm.thatch_colour)
      else if m == m_tower then
@@ -88,8 +135,8 @@ def structure_material (pose: pose) (m: i32) (p: vec3) : material =
        let slot = f32.abs (fract a - 0.5) < 0.06
        let floor = (q.y > 2.3 && q.y < 3) || (q.y > 4 && q.y < 4.6)
        let window = slot && floor
-       let block = 0.8 + 0.2 * hash2 (i32.f32 (f32.floor (a * 6))) (i32.f32 (f32.floor (q.y * 3)))
-       in plain (if window then splat 0.05 else scale (block * grain) prm.tower_colour) with emission = lit window
+       in plain (if window then splat 0.05 else brick_colour prm.brick_size fp kind q (scale grain prm.tower_colour))
+          with emission = lit window
      else if m == m_slate then plain prm.slate_colour with ks = 0.3 with shininess = 30
      else plain (scale grain prm.sandstone_colour)
 
@@ -144,7 +191,7 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let c = mix stone moss (smoothstep 0.7 0.85 up)
     let c = mix c snow (smoothstep pose.prm.snow_line (pose.prm.snow_line + 1.5) w.y * smoothstep 0.6 0.8 up)
     in plain (scale grain c) with rim = false
-  else if m >= m_wall && m <= m_sandstone then structure_material pose m p
+  else if m >= m_wall && m <= m_sandstone then structure_material pose fp m p
   else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28
   else if m == m_cork then plain (cork_albedo fp p) with ks = 0.05
   else if m == m_tome then plain pose.prm.tome_colour with ks = 0.15 with shininess = 16
@@ -238,7 +285,11 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   -- geometric one
   let fp = t * pose.pix
   let ng = n
-  let n = if has_bump m then bumped (bump_height pose fp m) p ng else ng
+  let n = if has_bump m then bumped (bump_height pose fp m) p ng
+          else if is_brick m && keep fp pose.prm.brick_size > 0
+          then let (kind, o, yaw) = structure_frame pose p
+               in bumped (brick_height pose fp kind o yaw) p ng
+          else ng
   let mat = material pose g fp m p n
   let occ = if m == m_terrain then 1 else ambient_occlusion (dist vis pose) p ng
   let po = p +^ scale 0.002 ng

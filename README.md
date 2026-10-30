@@ -19,7 +19,7 @@ the way he travels, banks into turns, points the way he accelerates, and his
 runes brighten as he climbs and dim as he descends.
 
 A game controller works too (Gamepad API; press a button once so the browser
-exposes it): Y or Start toggles free flight, the left stick flies along and
+exposes it): X or Start toggles free flight, the left stick flies along and
 across the camera's view, the right stick turns the camera, RB / RT climb,
 LB / LT descend, A or a left-stick click boosts. The `probe` entry point
 (fut/collide.fut) samples the land around a few spheres covering the rock and
