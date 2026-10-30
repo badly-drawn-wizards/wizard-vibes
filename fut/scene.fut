@@ -21,8 +21,26 @@ def m_ground : i32 = 9
 ---------------------------------------------------------------------
 -- Wizard
 
-def orb_pos : vec3 = vec 0.43 2.12 0.1
+-- The staff stands just outside the robe's hem and leans forward; the right
+-- hand grips it at grip_height and the orb sits on its tip.
+def staff_foot : vec3 = vec 0.6 0 0.25
+def staff_top : vec3 = vec 0.52 2.0 0.46
+def staff_dir : vec3 = normalise (staff_top -^ staff_foot)
+def staff_radius : f32 = 0.028
+def staff_at (y: f32) : vec3 = staff_foot +^ scale (y / staff_dir.y) staff_dir
+
+def grip_height : f32 = 1.15
+def right_elbow : vec3 = vec 0.36 1.07 0.14
+-- The fist is a short capsule along the staff, offset towards the elbow so
+-- the staff passes through its outer half and shows above and below it.
+def fist_centre : vec3 =
+  let g = staff_at grip_height
+  let towards = right_elbow -^ g
+  let off = towards -^ scale (dot towards staff_dir) staff_dir
+  in g +^ scale 0.02 (normalise off)
+
 def orb_radius : f32 = 0.11
+def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
 
 def sd_orb (p: vec3) : f32 = sd_sphere (p -^ orb_pos) orb_radius
 
@@ -34,13 +52,14 @@ def sd_robe (tm: f32) (p: vec3) : f32 =
   in smin 0.12 cone shoulders
 
 def sd_arms (p: vec3) : f32 =
-  let right = sd_capsule p (vec 0.2 1.33 0) (vec 0.42 1.17 0.12) 0.075
+  let upper = sd_capsule p (vec 0.2 1.33 0) right_elbow 0.075
+  let fore = sd_capsule p right_elbow (fist_centre -^ scale 0.05 (normalise (fist_centre -^ right_elbow))) 0.068
   let left = sd_capsule p (vec (-0.2) 1.33 0) (vec (-0.27) 1.02 0.24) 0.075
-  in f32.min right left
+  in f32.min (smin 0.04 upper fore) left
 
 def sd_hands (p: vec3) : f32 =
-  f32.min (sd_sphere (p -^ vec 0.44 1.16 0.13) 0.06)
-          (sd_sphere (p -^ vec (-0.27) 0.97 0.29) 0.055)
+  let fist = sd_capsule p (fist_centre -^ scale 0.04 staff_dir) (fist_centre +^ scale 0.04 staff_dir) 0.05
+  in f32.min fist (sd_sphere (p -^ vec (-0.27) 0.97 0.29) 0.055)
 
 def sd_head (p: vec3) : f32 =
   let head = sd_sphere (p -^ vec 0 1.6 0.02) 0.17
@@ -61,16 +80,19 @@ def sd_beard (tm: f32) (p: vec3) : f32 =
 def hat_base : vec3 = vec 0 1.74 0
 def hat_bend (tm: f32) : f32 = 0.9 + 0.15 * f32.sin tm
 
+def hat_height : f32 = 0.72
+def hat_radius (y: f32) : f32 = 0.2 - (0.2 - 0.012) * saturate (y / hat_height)
+
 def sd_hat (tm: f32) (p: vec3) : f32 =
   let hp = p -^ hat_base
   let bp = bend (hat_bend tm) hp
-  let cone = sd_capped_cone bp 0.72 0.2 0.012
+  let cone = sd_capped_cone bp hat_height (hat_radius 0) (hat_radius hat_height)
   let brim = f32.min (sd_torus hp 0.3 0.022) (sd_cylinder hp 0.31 0.01)
   in smin 0.04 cone brim
 
 def sd_band (p: vec3) : f32 = sd_torus (p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0.025
 
-def sd_staff (p: vec3) : f32 = sd_capsule p (vec 0.48 0 0.15) (vec 0.43 2.02 0.1) 0.028
+def sd_staff (p: vec3) : f32 = sd_capsule p staff_foot staff_top staff_radius
 
 def wizard (tm: f32) (p: vec3) : hit =
   (smin 0.06 (sd_robe tm p) (sd_arms p), m_robe)
@@ -132,7 +154,7 @@ def rune_paint (tm: f32) (p: vec3) : f32 =
 -- Every wizard part lies inside this capsule, so its distance is a lower
 -- bound on the wizard's. Beyond the requested tolerance, return the bound and
 -- skip evaluating the parts (see the distance contract in march.fut).
-def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.85
+def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.95
 
 def scene (tm: f32) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p

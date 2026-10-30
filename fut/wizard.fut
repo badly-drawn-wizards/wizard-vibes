@@ -8,9 +8,10 @@ import "shading"
 
 def aces (x: f32) : f32 = saturate ((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14))
 
+def default_target : vec3 = vec 0 1.15 0
+
 -- Camera orbits a target; returns the ray for pixel (x, y) with y down.
-def camera_ray (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : (vec3, vec3) =
-  let target = vec 0 1.15 0
+def camera_ray (target: vec3) (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : (vec3, vec3) =
   let ro = target +^ scale dst (vec (f32.cos pitch * f32.sin yaw) (f32.sin pitch) (f32.cos pitch * f32.cos yaw))
   let ro = {x = ro.x, y = f32.max ro.y 0.1, z = ro.z}
   let fw = normalise (target -^ ro)
@@ -22,8 +23,8 @@ def camera_ray (vw: i32) (h: i32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y
   let rd = normalise (scale 2.414 fw +^ scale u rt +^ scale v up)
   in (ro, rd)
 
-def pixel (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : vec3 =
-  let (ro, rd) = camera_ray vw h yaw pitch dst x y
+def pixel (target: vec3) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i32) (y: i32) : vec3 =
+  let (ro, rd) = camera_ray target vw h yaw pitch dst x y
   let c = shade (loop_angle tm) ro rd
   let c = vmap aces (scale 1.1 c)
   let c = vmap (\v -> (v ** (1 / 2.2))) c
@@ -43,11 +44,12 @@ entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst:
     let x = i32.i64 (i % i64.i32 w)
     let y = i32.i64 (i / i64.i32 w)
     in if x >= vw then 0xff000000
-       else let c = pixel vw h tm yaw pitch dst x y
+       else let c = pixel default_target vw h tm yaw pitch dst x y
             in to_u8 c.z | (to_u8 c.y << 8) | (to_u8 c.x << 16) | 0xff000000)
 
--- CPU reference image.
-entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) : [][][3]u8 =
+-- CPU reference image, orbiting an arbitrary target (for close-ups).
+entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
+                 (tx: f32) (ty: f32) (tz: f32) : [][][3]u8 =
   tabulate_2d (i64.i32 h) (i64.i32 w) (\y x ->
-    let c = pixel w h tm yaw pitch dst (i32.i64 x) (i32.i64 y)
+    let c = pixel (vec tx ty tz) w h tm yaw pitch dst (i32.i64 x) (i32.i64 y)
     in [u8.u32 (to_u8 c.x), u8.u32 (to_u8 c.y), u8.u32 (to_u8 c.z)])

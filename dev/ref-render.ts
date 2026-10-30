@@ -1,15 +1,15 @@
 // CPU reference render: writes build/ref.png.
 //
-// usage: node dev/ref-render.ts [width height time yaw pitch dist]
+// usage: node dev/ref-render.ts [width height time yaw pitch dist [tx ty tz]]
 
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import { compileCpu, renderRgb } from "./cpu-render.ts";
 
-const [w = 640, h = 360, t = 1.0, yaw = 0.35, pitch = 0.12, dist = 5.2] = process.argv.slice(2).map(Number);
+const [w = 640, h = 360, t = 1.0, yaw = 0.35, pitch = 0.12, dist = 5.2, tx = 0, ty = 1.15, tz = 0] = process.argv.slice(2).map(Number);
 
 compileCpu();
-const pixels = renderRgb({ width: w, height: h, yaw, pitch, dist }, t);
+const pixels = renderRgb({ width: w, height: h, yaw, pitch, dist, target: [tx, ty, tz] }, t);
 writeFileSync("build/ref.png", encodePng(w, h, pixels));
 console.log(`wrote build/ref.png (${w}x${h})`);
 
