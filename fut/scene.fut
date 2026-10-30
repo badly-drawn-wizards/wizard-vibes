@@ -547,7 +547,8 @@ def rune_paint (tm: f32) (p: vec3) : f32 =
 -- skip evaluating the parts (see the distance contract in march.fut).
 def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.95
 
-def bounded_wizard (pose: pose) (tol: f32) (p: vec3) : hit =
+#[noinline] -- (see scene; no 'z' in the name)
+def bounded_figure (pose: pose) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
   in if b > tol then (b, m_robe) else wizard pose p
 
@@ -598,13 +599,16 @@ def terrain (pose: pose) (p: vec3) : hit =
 -- #[noinline]: Futhark inlines everything by default, and the scene is used
 -- by the march, normals, AO and both shadow loops, which made the shader
 -- several megabytes (Firefox's compiler and runtime suffered most). The
--- scene, the occluders and the media are compiled once as real GPU
--- functions instead. The WebGPU backend's limits here: such functions may
--- not use arrays, and may not call one another (the callee is not emitted),
--- so bounded_wizard stays inlined into both scene and occluder_dist.
+-- figure, the scene, the occluders and the media are compiled once as real
+-- GPU functions instead. The WebGPU backend's limits here:
+-- - such functions may not use arrays;
+-- - a GPU function whose name contains a 'z' cannot be called from another
+--   GPU function: the call site escapes the name ('zz') but the definition
+--   does not, so the call has no target. Hence bounded_figure, not
+--   bounded_wizard. See dev/futhark-bugs/z-name-mangling.fut.
 #[noinline]
 def scene (pose: pose) (tol: f32) (p: vec3) : hit =
-  bounded_wizard pose tol p |> umin (rock p) |> umin (terrain pose p)
+  bounded_figure pose tol p |> umin (rock p) |> umin (terrain pose p)
 
 def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 
@@ -612,4 +616,4 @@ def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 -- would only shadow itself, at grazing angles, with penumbra artefacts), and
 -- so is the orb, a light source itself.
 #[noinline] -- (see scene)
-def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_wizard pose tol p |> umin (rock p)).0
+def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_figure pose tol p |> umin (rock p)).0
