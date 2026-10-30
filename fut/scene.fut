@@ -252,7 +252,8 @@ def sd_hat (pose: pose) (p: vec3) : f32 =
   let hp = head_space pose p -^ hat_base
   let bp = bend (hat_bend pose.tm) hp
   let cone = sd_capped_cone bp hat_height (hat_radius 0) (hat_radius hat_height)
-  let brim = f32.min (sd_torus hp 0.25 0.02) (sd_cylinder hp 0.26 0.01)
+  -- a flat disc with a slim rolled (welt) edge
+  let brim = f32.min (sd_torus hp 0.25 0.012) (sd_cylinder hp 0.255 0.01)
   in smin 0.04 cone brim
 
 def sd_band (pose: pose) (p: vec3) : f32 = sd_torus (head_space pose p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0.025
