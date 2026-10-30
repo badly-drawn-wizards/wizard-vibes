@@ -413,9 +413,9 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
          else (ro, rd, w, acc +^ (w *^ sky pose (to_world_dir pose.fl rd)), inside, true, refl)
   in (acc, refl)
 
-def shade (prm: params) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
+def shade (prm: params) (dr: drive) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
   -- worked out once per pixel, not per march step
-  let pose = pose_at secs prm with pix = pix
+  let pose = pose_at secs prm dr with pix = pix
   let g = glow_now pose.tm
   -- Path 0 is the camera ray; path 1 its reflection off the orb, if any.
   -- A loop, so that follow (and all the shading) is compiled only once.

@@ -5,6 +5,7 @@ import { attachCamera, idle, loadCamera } from "./camera.ts";
 import { buildRecord, type FutharkArray, type FutInstance, loadFuthark, rawBuffer, unloadFuthark } from "./futhark-loader.ts";
 import { clearError, setStatus, showError } from "./overlay.ts";
 import { createDrawer, type Params } from "./params-drawer.ts";
+import { type Drive, FreeFlight, ON_PATH } from "./flight.ts";
 
 // The drawer's uniforms, passed to render as its params record: rebuilt
 // (per loaded build) only when they change.
@@ -18,12 +19,59 @@ function paramsRecord(i: FutInstance) {
   records.set(i, { version: params.version, rec });
   return rec;
 }
+// Runs render with the flight state as its drive record (builds from before
+// free flight take none: kept working for benchmarking against them).
+async function render(i: FutInstance, w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number, d: Drive): Promise<FutharkArray> {
+  if (!i.fut.manifest.types.drive) return i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i));
+  const drive = buildRecord(i, "drive", d);
+  try {
+    return await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i), drive);
+  } finally {
+    drive.free();
+  }
+}
+
+// Free flight's collision probe, from the same state.
+async function probeEntry(i: FutInstance, t: number, d: Drive): Promise<FutharkArray> {
+  const drive = buildRecord(i, "drive", d);
+  try {
+    return await i.fut.entry.probe(t, paramsRecord(i), drive);
+  } finally {
+    drive.free();
+  }
+}
+
 document.getElementById("drawer-toggle")!.onclick = () => document.body.classList.toggle("drawer-open");
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
 const ctx = canvas.getContext("webgpu")!;
 const cam = loadCamera();
 attachCamera(cam, canvas);
+
+// Free flight (F toggles): fly in from behind him. Clicking the view takes
+// the keys back from the drawer's controls.
+const flight = new FreeFlight();
+canvas.addEventListener("pointerdown", () => (document.activeElement as HTMLElement | null)?.blur?.());
+flight.onToggle = (on) => {
+  if (!on) return;
+  cam.yaw = Math.PI;
+  cam.pitch = 0.3;
+  cam.interacted = true;
+};
+
+// Free flight's collision probe: its few floats are copied into a mappable
+// buffer with the frame, and read back whenever the GPU gets to them, without
+// waiting. Meanwhile further probes are skipped.
+const PROBE_BYTES = 6 * 4 * 4; // see collision_spheres in fut/collide.fut
+const probes = new WeakMap<GPUDevice, { buf: GPUBuffer; busy: boolean }>();
+function probeReader(device: GPUDevice) {
+  let r = probes.get(device);
+  if (!r) {
+    r = { buf: device.createBuffer({ size: PROBE_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false };
+    probes.set(device, r);
+  }
+  return r;
+}
 
 let renderScale = Number(sessionStorage.getItem("wizard-scale") ?? 1) || 1;
 for (const b of document.querySelectorAll<HTMLButtonElement>("#scale button")) {
@@ -71,9 +119,14 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   }
   if (!paused) time += dt;
   idle(cam, dt);
+  flight.update(paused ? 0 : dt, time);
 
-  const out: FutharkArray = await i.fut.entry.render(w, vw, h, time, cam.yaw, cam.pitch, cam.dist, paramsRecord(i));
+  const d = flight.drive();
+  const reader = probeReader(i.device);
+  const probe = flight.active && !reader.busy && i.fut.entry.probe ? await probeEntry(i, time, d) : null;
+  const out = await render(i, w, vw, h, time, cam.yaw, cam.pitch, cam.dist, d);
   const enc = i.device.createCommandEncoder();
+  if (probe) enc.copyBufferToBuffer(rawBuffer(i, probe, "f32_1d"), 0, reader.buf, 0, PROBE_BYTES);
   enc.copyBufferToTexture(
     { buffer: rawBuffer(i, out), bytesPerRow: w * 4, rowsPerImage: h },
     { texture: ctx.getCurrentTexture() },
@@ -83,6 +136,18 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   // Futhark may now recycle the previous buffer: its writes are queued after our copy.
   prev?.free();
   prev = out;
+  if (probe) {
+    probe.free(); // (likewise)
+    reader.busy = true;
+    reader.buf
+      .mapAsync(GPUMapMode.READ)
+      .then(() => {
+        flight.collide(new Float32Array(reader.buf.getMappedRange().slice(0)));
+        reader.buf.unmap();
+      })
+      .catch(() => {}) // the device went away
+      .finally(() => (reader.busy = false));
+  }
 }
 
 function tick(now: number): void {
@@ -93,7 +158,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight: WASD, E/Q, shift · F: path" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }
@@ -149,16 +214,32 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
 // Debug/test hook: render one frame and read it back to the CPU. The render
 // loop is held off meanwhile, since entry points must not run concurrently.
 (window as unknown as { wizard: object }).wizard = {
+  flight,
   async readFrame(w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number) {
     const i = inst;
     if (!i) throw new Error("no Futhark instance loaded");
     inst = null;
     await inFlight;
     try {
-      const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist, paramsRecord(i));
-      const pixels: Uint32Array = await out.values();
+      const out = await render(i, w, vw, h, t, yaw, pitch, dist, flight.drive());
+      const pixels = await out.values();
       out.free();
       return { f32: i.f32, portable: i.portable, pixels: Array.from(pixels) };
+    } finally {
+      inst = i;
+    }
+  },
+  // Run the collision probe for a flight state, read back (for tests).
+  async probe(d: Drive) {
+    const i = inst;
+    if (!i) throw new Error("no Futhark instance loaded");
+    inst = null;
+    await inFlight;
+    try {
+      const out = await probeEntry(i, time, d);
+      const v = Array.from(await out.values());
+      out.free();
+      return v;
     } finally {
       inst = i;
     }
@@ -178,7 +259,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     await inFlight;
     try {
       const w = Math.ceil(vw / 64) * 64;
-      const run = async (t: number) => (await i.fut.entry.render(w, vw, h, t, cam.yaw, cam.pitch, cam.dist, paramsRecord(i))).free();
+      const run = async (t: number) => (await render(i, w, vw, h, t, cam.yaw, cam.pitch, cam.dist, ON_PATH)).free();
       await run(0); // warm-up: pipeline creation
       await i.fut.context_sync();
       const start = performance.now();

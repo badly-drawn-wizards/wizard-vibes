@@ -8,6 +8,7 @@ import { instrumentShaders, type ShaderLog } from "./shader-check.ts";
 
 export interface FutharkArray {
   arr: number;
+  values(): Promise<ArrayLike<number>>; // a copy, read back from the GPU
   free(): void;
 }
 
@@ -120,9 +121,10 @@ export function unloadFuthark(inst: FutInstance): void {
   inst.device.destroy();
 }
 
-// The WGPUBuffer backing a []u32 result, as a JS GPUBuffer. No copy.
-export function rawBuffer(inst: FutInstance, arr: FutharkArray): GPUBuffer {
-  const handle = inst.m._futhark_values_raw_u32_1d(inst.fut.ctx, arr.arr);
+// The WGPUBuffer backing a result array (of Futhark type `type`, e.g. a
+// []f32 is "f32_1d"), as a JS GPUBuffer. No copy.
+export function rawBuffer(inst: FutInstance, arr: FutharkArray, type = "u32_1d"): GPUBuffer {
+  const handle = inst.m[`_futhark_values_raw_${type}`](inst.fut.ctx, arr.arr);
   const buf = inst.m.wgpuGetJsObject(handle);
   if (!(buf instanceof GPUBuffer)) throw new Error("could not resolve Futhark output buffer");
   return buf;

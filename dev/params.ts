@@ -92,16 +92,23 @@ def default_params : params =
 // it compiles). render takes the uniforms as a params record: an opaque type
 // in Futhark's API, which the harness builds from the manifest (see
 // buildRecord in web/futhark-loader.ts); its scalars reach the GPU in each
-// kernel's uniform struct.
+// kernel's uniform struct. The flight state (drive) is passed the same way.
 function renderFut(): string {
   return `${HEADER}
 import "vec3"
 import "params"
 import "wizard"
+import "scene"
+import "collide"
 
+-- dr: free flight's state, from the harness (or on the flight path).
 entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
-             (prm: params) : []u32 =
-  render_frame prm w vw h tm yaw pitch dst
+             (prm: params) (dr: drive) : []u32 =
+  render_frame prm dr w vw h tm yaw pitch dst
+
+-- Free flight's collision probe (see collide.fut).
+entry probe (tm: f32) (prm: params) (dr: drive) : []f32 =
+  probe_frame prm dr tm
 
 -- CPU reference image, with the default uniforms (see dev/ref-render.ts).
 entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# emcc, as `futhark webgpu` calls it (dev/build-fut.ts puts this directory
+# first on PATH), patching the generated C first:
+#
+# gpu_launch_kernel mallocs each launch's block of scalar arguments without
+# clearing it, then copies each argument in at its own size. A bool is copied
+# as one byte into the 4-byte i32 slot WGSL reads it from, so the other three
+# bytes are left over from the heap and a false can read as true. Allocating
+# the block cleared fixes it. See dev/futhark-bugs/bool-scalars.fut.
+set -eu
+for a in "$@"; do
+  case "$a" in
+    *.c) sed -i 's/void \*scalars = malloc(kernel_info->scalars_size);/void *scalars = calloc(1, kernel_info->scalars_size);/' "$a" ;;
+  esac
+done
+exec "$REAL_EMCC" "$@"

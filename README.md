@@ -12,6 +12,14 @@ nix develop -c npm run dev   # http://localhost:8080
 Drag to orbit, scroll to zoom, space to pause. The ¼ / ½ / 1× buttons set the
 render scale.
 
+F toggles free flight: W / S accelerate and brake, A / D accelerate sideways,
+E / Q climb and descend, Shift boosts. He faces the way he travels, banks into
+turns and points the way he accelerates. The `probe` entry point
+(fut/collide.fut) samples the land around a few spheres covering the rock and
+him; the harness copies its 24 floats into a mappable buffer with each frame
+and reads them back without waiting, to push him out of anything he hits
+(web/flight.ts).
+
 ## How it works
 
 - The Futhark sources, in `fut/`:

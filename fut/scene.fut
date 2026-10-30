@@ -91,14 +91,28 @@ type pose = { tm: f32, secs: f32, fl: flight
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
-def pose_at (secs: f32) (prm: params) : pose =
+-- Free flight, driven from the harness (web/flight.ts): with `free` set, the
+-- wizard is where it says instead of on the flight path. (ax, ay, az) is the
+-- way he accelerates in his own frame, as long as how hard (0..1): he points
+-- that way, the more the harder.
+type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32}
+
+def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0}
+
+def flight_of (prm: params) (dr: drive) (secs: f32) : flight =
+  if !dr.free then flight_at prm.bank secs
+  else {pos = vec dr.x dr.y dr.z, heading = dr.heading, turn = dr.turn, bank = clamp (-0.35) 0.35 (prm.bank * dr.turn)}
+
+def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   let tm = loop_angle secs
-  let fl = flight_at prm.bank secs
+  let fl = flight_of prm dr secs
   let b = breath tm
   -- Turning towards local +x makes fl.turn positive. He leans into the turn,
   -- and in sharper turns points the way with his right hand and looks there.
-  let side = f32.sgn fl.turn
-  let point = smoothstep 0.03 0.12 (f32.abs fl.turn)
+  -- (in free flight he points the way he accelerates instead)
+  let accel = vec dr.ax dr.ay dr.az
+  let side = if dr.free then f32.sgn dr.ax else f32.sgn fl.turn
+  let point = if dr.free then saturate (length accel) else smoothstep 0.03 0.12 (f32.abs fl.turn)
   let lean = clamp (-0.15) 0.15 (prm.lean * fl.turn)
   let shift (y: f32) = vec (lean * f32.max 0 (y - 0.45)) 0 0
   -- inhaling lifts the shoulders; the head rises and nods forward a little
@@ -114,12 +128,20 @@ def pose_at (secs: f32) (prm: params) : pose =
   let rest = vec (-0.25) 1.02 0.27 +^ idle +^ shift 1.02
   -- (pointing to his left means reaching across the body, so aim higher and more
   -- forward to keep the arm clear of the beard)
-  let aim_dir = if side < 0 then vec (-0.85) 0.3 0.75 else vec 0.5 0.55 0.9
+  let aim_dir =
+    if dr.free then
+      -- never behind him (he can't reach), and reaching across, higher and
+      -- further forward, like the turns
+      let a = normalise (accel +^ vec 0 0 1e-4)
+      let across = f32.max 0 a.x
+      in vec a.x (a.y + 0.3 + 0.25 * across) (f32.max 0.35 a.z + 0.4 * across)
+    else if side < 0 then vec (-0.85) 0.3 0.75 else vec 0.5 0.55 0.9
   let aim = r_shoulder +^ scale 0.62 (normalise aim_dir)
   let (r_elbow, r_wrist) = two_bone r_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
   let moon_world = moon_dir prm.moon_azimuth prm.moon_elevation
   in { tm, secs, fl, prm, moon = to_local_dir fl moon_world, moon_world
-     , breath = b, lean, head, look = 0.45 * point * side, point, pix = 0.0008
+     , breath = b, lean, head, look = 0.45 * point * side * (if dr.free then f32.min 1 (2 * f32.abs dr.ax) else 1)
+     , point, pix = 0.0008
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
      , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist }
