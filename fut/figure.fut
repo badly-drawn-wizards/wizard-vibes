@@ -506,18 +506,27 @@ def waist_gear (prm: gear) (p: vec3) : hit =
 -- The figure
 
 -- The parts of the figure in the layers of `mask`.
+-- The head's parts are bounded in groups (in head space, which only moves
+-- and turns, so distances there are distances here): far from a group, its
+-- bound stands in for it, so a step near the robe does not evaluate the
+-- beard's locks or the bent hat, and the reverse.
+-- (the face: head, eyes, lids and brows all lie within 0.3 of its centre;
+-- the hat, however it droops, within 0.75 of its base, bending keeping its
+-- length; the beard, swaying and widened, within 0.3 of its axis)
+def bounded (b: f32) (m: i32) (exact: () -> hit) : hit = if b > 0.1 then (b, m) else exact ()
+
 def wizard (mask: i32) (pose: pose) (p: vec3) : hit =
+  let hq = head_space pose p
+  let face () = (sd_head pose p, m_skin) |> umin (sd_eyes pose p, m_eye) |> umin (sd_eyelids pose p, m_skin) |> umin (sd_brows pose p, m_brow)
+  let hat () = (sd_hat pose p, m_hat) |> umin (sd_band pose p, m_band)
+  let beard () = (sd_beard pose p, m_beard)
   let figure =
     if !(has mask layers_figure) then nothing
     else (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
          |> umin (sd_hands pose p, m_skin)
-         |> umin (sd_head pose p, m_skin)
-         |> umin (sd_eyes pose p, m_eye)
-         |> umin (sd_eyelids pose p, m_skin)
-         |> umin (sd_brows pose p, m_brow)
-         |> umin (sd_beard pose p, m_beard)
-         |> umin (sd_hat pose p, m_hat)
-         |> umin (sd_band pose p, m_band)
+         |> umin (bounded (length (hq -^ vec 0 1.6 0.06) - 0.32) m_skin face)
+         |> umin (bounded (sd_capsule hq beard_top beard_tip 0.3) m_beard beard)
+         |> umin (bounded (length (hq -^ hat_base) - 0.8) m_hat hat)
          |> tag layers_figure
   let gear = if !(has mask layers_gear) then nothing
              else waist_gear (gear_of pose.prm) (body_space pose p) |> tag layers_gear
