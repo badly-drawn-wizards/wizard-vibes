@@ -6,7 +6,8 @@
     "dev": "node dev/serve.ts",
     "ref": "node dev/ref-render.ts",
     "gif": "node dev/gif.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:static": "node dev/build-static.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

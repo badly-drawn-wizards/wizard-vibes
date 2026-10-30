@@ -55,7 +55,7 @@ async function captureDevice<T>(
 }
 
 export async function loadFuthark(version: string): Promise<FutInstance> {
-  const base = `/fut/${version}`;
+  const base = `fut/${version}`; // (relative: the static build may live under a sub-path)
   const src = await (await fetch(`${base}/wizard.js`)).text();
   // The generated script declares `var Module` and `class FutharkModule` at
   // top level; evaluating it in a function scope lets us load it repeatedly.

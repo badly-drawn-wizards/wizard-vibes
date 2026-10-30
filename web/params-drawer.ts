@@ -4,7 +4,11 @@
 // params record; compile-time parameters are sent to the server, which
 // rebuilds the shader once they settle. Native inputs throughout. At the top,
 // "Copy changes" puts every value that differs from its default on the
-// clipboard as JSON (to hand over as new defaults).
+// clipboard as JSON (to hand over as new defaults). In the static build there
+// is no server to rebuild the shader, so the compile-time parameters are
+// shown but disabled.
+
+import { IS_STATIC } from "./static.ts";
 
 type Kind = "slider" | "int" | "color" | "checkbox" | "select" | "flags";
 type Value = number | boolean | number[];
@@ -113,7 +117,7 @@ export interface Params {
 }
 
 export async function createDrawer(host: HTMLElement): Promise<Params> {
-  const { schema, compile } = (await (await fetch("/params")).json()) as { schema: Schema; compile: Record<string, Value> };
+  const { schema, compile } = (await (await fetch(IS_STATIC ? "params.json" : "/params")).json()) as { schema: Schema; compile: Record<string, Value> };
   const all = schema.groups.flatMap(groupParams);
   const uniforms = all.filter((p) => !p.compile);
   const stored = load();
@@ -125,6 +129,7 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
   let send: number | undefined;
   const set = (p: Param, v: Value) => {
     if (p.compile) {
+      if (IS_STATIC) return;
       // the server waits for changes to settle before rebuilding; batch here too
       pending[p.id] = v;
       clearTimeout(send);
@@ -198,6 +203,10 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
         if (p.compile) compileNow[p.id] = v;
         set(p, v);
       });
+      if (p.compile && IS_STATIC) {
+        for (const c of r.el.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button")) c.disabled = true;
+        r.el.title = "Fixed in this build (changing it rebuilds the shader, which needs the dev server)";
+      }
       box.append(r.el);
       mine.push(r.reset);
     }

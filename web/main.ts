@@ -9,6 +9,7 @@ import { createDrawer, type Params } from "./params-drawer.ts";
 import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
 import { type Device, Help } from "./help.ts";
 import { Spells } from "./spells.ts";
+import { IS_STATIC } from "./static.ts";
 
 // The drawer's uniforms, passed to render as its params record: rebuilt
 // (per loaded build) only when they change.
@@ -362,15 +363,22 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
   },
 };
 
-const events = new EventSource("/events");
-events.addEventListener("building", () => setStatus("compiling…"));
-events.addEventListener("error", (e) => {
-  if (e instanceof MessageEvent) showError(JSON.parse(e.data).message);
-});
-// ?build=N pins a specific build (for benchmarking variants); otherwise follow the server.
-const pinned = new URLSearchParams(location.search).get("build");
-if (pinned) reload(pinned);
-else events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
-events.addEventListener("web-reload", () => location.reload());
+// The static build ships one build, named in params.json; otherwise follow
+// the dev server's builds (hot reload).
+if (IS_STATIC) {
+  const { build } = (await (await fetch("params.json")).json()) as { build: string };
+  reload(build);
+} else {
+  const events = new EventSource("/events");
+  events.addEventListener("building", () => setStatus("compiling…"));
+  events.addEventListener("error", (e) => {
+    if (e instanceof MessageEvent) showError(JSON.parse(e.data).message);
+  });
+  // ?build=N pins a specific build (for benchmarking variants); otherwise follow the server.
+  const pinned = new URLSearchParams(location.search).get("build");
+  if (pinned) reload(pinned);
+  else events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
+  events.addEventListener("web-reload", () => location.reload());
+}
 
 requestAnimationFrame(tick);

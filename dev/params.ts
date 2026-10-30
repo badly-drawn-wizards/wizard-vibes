@@ -39,9 +39,10 @@ export const loadSchema = (): Schema => JSON.parse(readFileSync(SCHEMA, "utf8"))
 const groupParams = (g: Group): Param[] => [...(g.params ?? []), ...(g.groups ?? []).flatMap(groupParams)];
 export const allParams = (s: Schema): Param[] => s.groups.flatMap(groupParams);
 
-// The compile-time values in force: defaults overlaid with saved changes.
-export function compileValues(s: Schema): Record<string, Value> {
-  const saved = existsSync(LOCAL) ? JSON.parse(readFileSync(LOCAL, "utf8")) : {};
+// The compile-time values in force: defaults overlaid with saved changes
+// (unless `local` is false: the defaults alone, as for the static build).
+export function compileValues(s: Schema, local = true): Record<string, Value> {
+  const saved = local && existsSync(LOCAL) ? JSON.parse(readFileSync(LOCAL, "utf8")) : {};
   const out: Record<string, Value> = {};
   for (const p of allParams(s).filter((p) => p.compile)) out[p.id] = p.id in saved ? saved[p.id] : p.default;
   return out;
@@ -129,8 +130,8 @@ entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32)
 `;
 }
 
-function configFut(s: Schema): string {
-  const vals = compileValues(s);
+function configFut(s: Schema, local: boolean): string {
+  const vals = compileValues(s, local);
   const ps = allParams(s).filter((p) => p.compile);
   return `${HEADER}-- Compile-time constants (changing one rebuilds the shader).
 ${ps.map((p) => `\n-- ${p.label}\ndef ${p.id} : ${futType(p)} = ${lit(p, vals[p.id])}`).join("\n")}
@@ -143,11 +144,13 @@ function writeIfChanged(path: string, text: string): boolean {
   return true;
 }
 
-// Regenerates both files; returns whether either changed.
-export function generate(dir = "fut"): boolean {
+// Regenerates the files in `dir`; returns whether any changed. With `local`
+// false the compile-time parameters take their defaults, ignoring
+// config.local.json.
+export function generate(dir = "fut", local = true): boolean {
   const s = loadSchema();
   const a = writeIfChanged(`${dir}/params.fut`, paramsFut(s));
-  const b = writeIfChanged(`${dir}/config.fut`, configFut(s));
+  const b = writeIfChanged(`${dir}/config.fut`, configFut(s, local));
   const c = writeIfChanged(`${dir}/render.fut`, renderFut());
   return a || b || c;
 }

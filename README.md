@@ -48,6 +48,25 @@ exposes it): left stick flies, right stick turns the camera, RT / LT climb
 and descend, LB or L3 boosts, X / A / B choose a spell and RB casts, Y or
 Start toggles free flight.
 
+## Static build and GitHub Pages
+
+```sh
+nix develop -c npm run build:static   # -> dist/
+```
+
+builds a self-contained site: the page, its bundled harness and the shader
+compiled with every compile-time parameter at its default (the drawer
+shows those disabled: changing one needs the dev server to rebuild). There
+is no hot reload; the uniforms work as usual. All paths are relative, so it
+can be served from any sub-path. It needs a browser with WebGPU and a secure
+context (https or localhost).
+
+`.github/workflows/pages.yml` builds it on every push to `main` and publishes
+it with GitHub Pages; enable that once under Settings > Pages > Source:
+GitHub Actions. The first run compiles Futhark's WebGPU branch from source
+(it has no binary cache), so it takes a while; the Nix store is cached
+between runs.
+
 ## How it works
 
 - The Futhark sources, in `fut/`:

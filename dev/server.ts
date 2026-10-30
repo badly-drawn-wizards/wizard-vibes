@@ -95,6 +95,7 @@ const web = await esbuild.context({
   format: "esm",
   target: "es2022",
   sourcemap: true,
+  define: { STATIC: "false" }, // (see web/static.ts)
   outdir: "build/web",
   logLevel: "warning",
   plugins: [
