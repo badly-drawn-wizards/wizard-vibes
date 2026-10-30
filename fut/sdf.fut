@@ -80,3 +80,23 @@ def rep_angle (n: f32) (p: vec3) : vec3 =
 -- Distance paired with a material id; umin keeps the closer one.
 type hit = (f32, i32)
 def umin (a: hit) (b: hit) : hit = if a.0 <= b.0 then a else b
+
+-- Cone with rounded ends between points a (radius ra) and b (radius rb).
+-- Exact (after Inigo Quilez).
+def sd_round_cone_ab (p: vec3) (a: vec3) (b: vec3) (ra: f32) (rb: f32) : f32 =
+  let ba = b -^ a
+  let l2 = dot ba ba
+  let rr = ra - rb
+  let a2 = l2 - rr * rr
+  let il2 = 1 / l2
+  let pa = p -^ a
+  let y = dot pa ba
+  let z = y - l2
+  let xv = scale l2 pa -^ scale y ba
+  let x2 = dot xv xv
+  let y2 = y * y * l2
+  let z2 = z * z * l2
+  let k = f32.sgn rr * rr * rr * x2
+  in if f32.sgn z * a2 * z2 > k then f32.sqrt (x2 + z2) * il2 - rb
+     else if f32.sgn y * a2 * y2 < k then f32.sqrt (x2 + y2) * il2 - ra
+     else (f32.sqrt (x2 * a2 * il2) + y * rr) * il2 - ra

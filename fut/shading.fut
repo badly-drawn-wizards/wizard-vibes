@@ -65,7 +65,7 @@ def plain (albedo: vec3) : material =
 def material (tm: f32) (m: i32) (p: vec3) (n: vec3) (rd: vec3) : material =
   if m == m_robe then plain (vec 0.07 0.05 0.33)
   else if m == m_skin then plain (vec 0.85 0.6 0.48) with ks = 0.15 with shininess = 16
-  else if m == m_beard then plain (vec 0.85 0.85 0.9)
+  else if m == m_beard then plain (scale (0.75 + 0.25 * beard_strands (beard_space tm p)) (vec 0.88 0.88 0.92))
   else if m == m_hat then
     let s = hat_stars tm p
     in plain (mix (vec 0.09 0.08 0.36) (vec 1 0.8 0.3) s) with emission = scale (0.6 * s) (vec 1 0.75 0.3)
@@ -102,13 +102,15 @@ def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
        let mat = material tm m p n rd
        let occ = ambient_occlusion (dist tm) p n
        let po = p +^ scale 0.002 n
-       let moon_shadow = soft_shadow (dist tm) po moon_dir 12
+       let moon_shadow = soft_shadow (occluder_dist tm) po moon_dir 12
        let moon = light mat n rd moon_dir moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
        let to_orb = orb_pos -^ p
        let od = length to_orb
        let ol = scale (1 / od) to_orb
        let atten = 2.4 * pulse tm / (1 + 1.5 * od * od)
-       let orb_shadow = if m == m_orb then 0 else soft_shadow (dist tm) po ol (od - orb_radius - 0.03)
+       -- Stop short of the orb: the staff pokes into its underside, and a
+       -- penumbra estimate taken right next to the light bands badly.
+       let orb_shadow = if m == m_orb then 0 else soft_shadow (occluder_dist tm) po ol (od - orb_radius - 0.15)
        let orb_colour = scale atten (vec 0.6 0.5 1)
        let orb = light mat n rd ol orb_shadow orb_colour orb_colour
        let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)

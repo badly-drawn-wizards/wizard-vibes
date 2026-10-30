@@ -48,11 +48,19 @@ def normal (dist: dist_fn) (p: vec3) : vec3 =
 -- the distance needs.
 def soft_shadow (dist: dist_fn) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
   let k = 10
-  let (res, _, _) =
-    loop (res, t, i) = (1f32, 0.02f32, 0i32)
-    while i < 48 && t < tmax && res > 0.002 do
+  -- Improved penumbra (after Quilez): from the previous and current distance
+  -- estimate where the ray passes closest to the occluder, rather than using
+  -- the samples themselves, which bands at grazing angles.
+  let (res, _, _, _) =
+    loop (res, t, ph, i) = (1f32, 0.02f32, 1e10f32, 0i32)
+    while i < 96 && t < tmax && res > 0.002 do
       let h = dist (t / k) (ro +^ scale t rd)
-      in (f32.min res (k * h / t), t + clamp 0.01 0.25 h, i + 1)
+      let y = h * h / (2 * ph)
+      let d = f32.sqrt (f32.max 0 (h * h - y * y))
+      -- Beyond t/k the distance may be only a bound, but there the penumbra
+      -- term would be >= 1 anyway, so leave res alone.
+      let res = if h < t / k then f32.min res (k * d / f32.max 1e-4 (t - y)) else res
+      in (res, t + clamp 0.01 0.25 h, h, i + 1)
   in smoothstep 0 1 (saturate res)
 
 -- Probes along the normal; each probe counts only how far its distance falls

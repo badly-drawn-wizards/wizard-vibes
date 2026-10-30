@@ -70,16 +70,43 @@ def sd_eyes (p: vec3) : f32 =
   let q = {x = f32.abs p.x, y = p.y, z = p.z}
   in sd_sphere (q -^ vec 0.065 1.64 0.155) 0.022
 
+-- The beard hangs from the cheeks to a forked tip resting on the chest.
+def beard_top : vec3 = vec 0 1.52 0.11
+def beard_tip : vec3 = vec 0 0.98 0.27
+
+-- Beard space: swaying with the loop, and squashed sideways so the beard is
+-- wider than deep (dividing x only contracts space, so distances stay safe).
+def beard_space (tm: f32) (p: vec3) : vec3 =
+  let sway = 0.03 * f32.sin (2 * tm) * saturate ((1.5 - p.y) / 0.5)
+  in {x = (p.x - sway) / 1.45, y = p.y, z = p.z}
+
+-- Strand grooves around the beard's axis, as a value in [0, 1] (0 = groove).
+-- Shared by the shape and the material, so shading follows the strands.
+def beard_strands (q: vec3) : f32 =
+  let ba = beard_tip -^ beard_top
+  let h = saturate (dot (q -^ beard_top) ba / dot ba ba)
+  let rv = q -^ (beard_top +^ scale h ba)
+  let phi = f32.atan2 rv.x rv.z
+  in f32.abs (f32.sin (10 * phi + 5 * h + 0.6 * f32.sin (9 * h)))
+
 def sd_beard (tm: f32) (p: vec3) : f32 =
-  let sway = 0.03 * f32.sin (2 * tm) * saturate (1.55 - p.y)
-  let q = p -^ vec sway 1.54 0.11
-  let q = {x = q.x, y = -q.y, z = q.z - 0.15 * q.y}
-  let wave = 0.012 * f32.sin (30 * p.y + 10 * p.x)
-  in sd_round_cone q 0.13 0.025 0.55 + wave
+  let q = beard_space tm p
+  -- fork the lower half into two points
+  let fork = 0.035 * smoothstep 1.3 0.98 q.y
+  let fq = {x = f32.abs q.x - fork, y = q.y, z = q.z}
+  let body = sd_round_cone_ab fq beard_top beard_tip 0.13 0.018
+  -- grooves cut in proportion to the local radius, keeping the field smooth
+  let ba = beard_tip -^ beard_top
+  let h = saturate (dot (q -^ beard_top) ba / dot ba ba)
+  let groove = 0.006 * (1 - h * 0.5) * (1 - beard_strands q)
+  let jaw = sd_ellipsoid (p -^ vec 0 1.53 0.05) (vec 0.155 0.1 0.13)
+  let moustache =
+    let m = {x = f32.abs p.x, y = p.y, z = p.z}
+    in sd_round_cone_ab m (vec 0.01 1.548 0.178) (vec 0.105 1.49 0.13) 0.024 0.01
+  in smin 0.03 (smin 0.06 (body + groove) jaw) moustache
 
 def hat_base : vec3 = vec 0 1.74 0
 def hat_bend (tm: f32) : f32 = 0.9 + 0.15 * f32.sin tm
-
 def hat_height : f32 = 0.72
 def hat_radius (y: f32) : f32 = 0.2 - (0.2 - 0.012) * saturate (y / hat_height)
 
@@ -103,7 +130,6 @@ def wizard (tm: f32) (p: vec3) : hit =
   |> umin (sd_hat tm p, m_hat)
   |> umin (sd_band p, m_gold)
   |> umin (sd_staff p, m_wood)
-  |> umin (sd_orb p, m_orb)
 
 ---------------------------------------------------------------------
 -- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.
@@ -156,12 +182,20 @@ def rune_paint (tm: f32) (p: vec3) : f32 =
 -- skip evaluating the parts (see the distance contract in march.fut).
 def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.95
 
-def scene (tm: f32) (tol: f32) (p: vec3) : hit =
+def bounded_wizard (tm: f32) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
-  let w = if b > tol then (b, m_robe) else wizard tm p
-  in w |> umin (p.y, m_ground)
+  in if b > tol then (b, m_robe) else wizard tm p
+
+def scene (tm: f32) (tol: f32) (p: vec3) : hit =
+  bounded_wizard tm tol p |> umin (p.y, m_ground) |> umin (sd_orb p, m_orb)
 
 def dist (tm: f32) (tol: f32) (p: vec3) : f32 = (scene tm tol p).0
+
+-- What casts shadows: only the wizard. Both lights are above the ground,
+-- which therefore cannot block them (as an occluder it would only add
+-- penumbra artefacts at grazing angles), and the orb is a light source
+-- itself, which would otherwise darken everything it lights.
+def occluder_dist (tm: f32) (tol: f32) (p: vec3) : f32 = (bounded_wizard tm tol p).0
 
 ---------------------------------------------------------------------
 -- Glowing media
