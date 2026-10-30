@@ -472,6 +472,9 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
   in (acc, refl, first)
 
 -- The colour seen along a camera ray, and how far it sees (see follow).
+-- (#[noinline]: render calls it from more than one kernel when it
+-- anti-aliases, which would otherwise each hold a copy of all the shading.)
+#[noinline]
 def shade (prm: params) (dr: drive) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : (vec3, f32) =
   -- worked out once per pixel, not per march step
   let pose = pose_at secs prm dr with pix = pix

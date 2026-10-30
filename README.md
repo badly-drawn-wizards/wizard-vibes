@@ -9,6 +9,12 @@ nix develop -c npm install   # once
 nix develop -c npm run dev   # http://localhost:8080
 ```
 
+Anti-aliasing (Output in the drawer) is a pass over the finished image:
+FXAA (about 0.4 ms at 1080p), or supersampling of edge pixels only, which
+gathers the pixels where the hit distance jumps or the contrast is high
+into a list and traces four more rays for each, one GPU thread per ray
+(about 11 ms at 1080p in Chrome; slower in Firefox).
+
 Drag to orbit, scroll to zoom, P to pause. The ¼ / ½ / 1× buttons set the
 render scale. The controls panel (bottom right; ✕ hides it, ? brings it
 back) shows the keys, or a controller's buttons once one is used.

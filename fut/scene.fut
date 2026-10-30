@@ -166,8 +166,11 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   let angle = 0.85 * dr.staff * f32.acos (clamp (-1) 1 (dot staff_dir want))
   let kick = dr.staff * f32.exp (-12 * dr.flash)
   let staff_pivot = staff_at grip_height
+  -- Aiming to his right (local -x), he brings the staff across in front of
+  -- his chest, the further the more he aims that way.
+  let across = dr.staff * smoothstep 0 0.7 (-aim.x)
   let staff_shift = scale (0.16 * dr.staff + 0.07 * kick) (normalise (vec aim.x 0 aim.z +^ vec 0 0 1e-4))
-                    +^ vec 0 (0.08 * dr.staff) 0
+                    +^ vec (-0.6 * across) (0.08 * dr.staff + 0.05 * across) (0.22 * across)
   let (staff_cos, staff_sin) = (f32.cos angle, f32.sin angle)
   let held (q: vec3) = staff_pivot +^ rotate_about staff_axis staff_cos staff_sin (q -^ staff_pivot) +^ staff_shift
   -- The left hand stays on the staff, closed round it with the palm facing

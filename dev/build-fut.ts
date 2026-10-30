@@ -20,7 +20,7 @@ const SHIM = "fut/expose.js"; // --post-js exposing WebGPU objects to the harnes
 const EMCC_WRAPPER = "dev/emcc"; // patches the generated C (see dev/emcc/emcc)
 const KEEP = 30; // builds kept, most recently used first
 // Bump when the build recipe below changes in a way the inputs don't show.
-const SCHEMA = 2;
+const SCHEMA = 3;
 
 export type BuildResult =
   | { ok: true; version: string; ms: number; cached: boolean }
@@ -76,7 +76,15 @@ function buildEnv(): { CFLAGS: string; EMCFLAGS: string; PATH: string; REAL_EMCC
     PATH: resolve(EMCC_WRAPPER) + delimiter + (process.env.PATH ?? ""),
     REAL_EMCC: which("emcc"),
     CFLAGS: process.env.CFLAGS ?? "-O1",
-    EMCFLAGS: [`--post-js ${resolve(SHIM)}`, "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$WebGPU", process.env.EMCFLAGS ?? ""].join(" "),
+    EMCFLAGS: [
+      `--post-js ${resolve(SHIM)}`,
+      "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$WebGPU",
+      // Reading a value back from the GPU mid-entry (e.g. a filter's count)
+      // suspends the wasm stack through Asyncify, which saves it here; the
+      // 4 KiB default overflowed ("unreachable") with render's many uniforms.
+      "-sASYNCIFY_STACK_SIZE=65536",
+      process.env.EMCFLAGS ?? "",
+    ].join(" "),
   };
 }
 
