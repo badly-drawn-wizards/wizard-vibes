@@ -120,9 +120,15 @@ def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse:
 
 -- The lit colour of a surface hit at distance t along rd (fog included).
 def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
-  let n = normal (dist pose) p
+  -- The terrain's normal comes from its height gradient, worked out
+  -- analytically (one evaluation instead of four of the whole scene), and it
+  -- gets no AO: at its scale the probes see nothing.
+  let n = if m == m_terrain
+          then let w = to_world pose.fl p
+               in to_local_dir pose.fl (terrain_normal (terrain_detail p) w.x w.z)
+          else normal (dist pose) p
   let mat = material pose g m p n
-  let occ = ambient_occlusion (dist pose) p n
+  let occ = if m == m_terrain then 1 else ambient_occlusion (dist pose) p n
   let po = p +^ scale 0.002 n
   let moon_shadow = soft_shadow (occluder_dist pose) po pose.moon 12
   let moon = light mat n rd pose.moon moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)

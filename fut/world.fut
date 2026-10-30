@@ -82,6 +82,44 @@ def fbm2_lod (octaves: i32) (detail: f32) (x: f32) (z: f32) : f32 =
 
 def fbm2 (octaves: i32) (x: f32) (z: f32) : f32 = fbm2_lod octaves (f32.i32 octaves) x z
 
+-- vnoise2 with its gradient: (value, d/dx, d/dz). The smoothstep weight
+-- u = f^2 (3 - 2f) has derivative 6 f (1 - f).
+def vnoise2_grad (x: f32) (z: f32) : (f32, f32, f32) =
+  let ix = i32.f32 (f32.floor x)
+  let iz = i32.f32 (f32.floor z)
+  let fx = fract x
+  let fz = fract z
+  let ux = fx * fx * (3 - 2 * fx)
+  let uz = fz * fz * (3 - 2 * fz)
+  let dux = 6 * fx * (1 - fx)
+  let duz = 6 * fz * (1 - fz)
+  let a = hash2 ix iz
+  let b = hash2 (ix + 1) iz
+  let c = hash2 ix (iz + 1)
+  let d = hash2 (ix + 1) (iz + 1)
+  let k = a - b - c + d
+  in (a + (b - a) * ux + (c - a) * uz + k * ux * uz, dux * (b - a + k * uz), duz * (c - a + k * ux))
+
+-- fbm2_lod with its gradient with respect to the *input* coordinates. Each
+-- octave's coordinates are a linear map of the input (the rotation-scale
+-- [1.6 -1.2; 1.2 1.6] applied i times), so its gradient is mapped back by
+-- that matrix's transpose; the matrix is tracked as (j00, j01, j10, j11).
+def fbm2_lod_grad (octaves: i32) (detail: f32) (x: f32) (z: f32) : (f32, f32, f32) =
+  let (sum, gx, gz, norm, _, _, _, _, _, _, _) =
+    loop (sum, gx, gz, norm, amp, x, z, j00, j01, j10, j11) =
+      (0f32, 0f32, 0f32, 0f32, 0.5f32, x, z, 1f32, 0f32, 0f32, 1f32) for i < octaves do
+      let k = saturate (detail - f32.i32 i)
+      let (v, dx, dz) = if k > 0 then vnoise2_grad x z else (0.5, 0, 0)
+      -- faded octave: 0.5 + k (v - 0.5)
+      let w = amp * k
+      in ( sum + amp * (0.5 + k * (v - 0.5))
+         , gx + w * (dx * j00 + dz * j10), gz + w * (dx * j01 + dz * j11)
+         , norm + amp, amp * 0.5
+         , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3
+         , 1.6 * j00 - 1.2 * j10, 1.6 * j01 - 1.2 * j11
+         , 1.2 * j00 + 1.6 * j10, 1.2 * j01 + 1.6 * j11 )
+  in (sum / norm, gx / norm, gz / norm)
+
 -- Fractal 3D value noise, roughly in [0, 1].
 def fbm3 (octaves: i32) (p: vec3) : f32 =
   let (sum, norm, _, _) =
@@ -131,6 +169,24 @@ def terrain_height_lod (detail: f32) (x: f32) (z: f32) : f32 =
   in 9 * n * n + 6 * ridge * ridge * ridge - 4
 
 def terrain_height (x: f32) (z: f32) : f32 = terrain_height_lod 5 x z
+
+-- terrain_height_lod with its gradient: (height, dh/dx, dh/dz).
+-- h = 9 n^2 + 6 r^3 - 4 with r = 1 - |2f - 1|.
+def terrain_height_grad (detail: f32) (x: f32) (z: f32) : (f32, f32, f32) =
+  let (n, nx, nz) = fbm2_lod_grad 5 detail (x * 0.035) (z * 0.035)
+  let (f, fx, fz) = fbm2_lod_grad 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7)
+  let r = 1 - f32.abs (2 * f - 1)
+  let dr = -2 * f32.sgn (2 * f - 1) -- dr/df
+  let hn = 18 * n -- dh/dn
+  let hr = 18 * r * r -- dh/dr
+  in ( 9 * n * n + 6 * r * r * r - 4
+     , 0.035 * hn * nx + 0.02 * hr * dr * fx
+     , 0.035 * hn * nz + 0.02 * hr * dr * fz )
+
+-- The terrain's upward unit normal in world space.
+def terrain_normal (detail: f32) (x: f32) (z: f32) : vec3 =
+  let (_, hx, hz) = terrain_height_grad detail x z
+  in normalise (vec (-hx) 1 (-hz))
 
 -- An upper bound on terrain_height from the first octave of each fbm alone
 -- (2 noise lookups instead of 8): the other octaves can add at most their
