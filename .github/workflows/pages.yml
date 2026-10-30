@@ -1,10 +1,15 @@
 # Builds the static site (npm run build:static) and publishes it to GitHub
 # Pages. Enable it once under Settings > Pages > Source: GitHub Actions.
 #
-# The toolchain comes from the flake. Futhark's WebGPU branch has no binary
-# cache, so the first run compiles it from source (expect most of an hour);
-# the Nix store is cached between runs, keyed on flake.lock, so later runs
-# only build the shader and the page.
+# The toolchain comes from the flake. Futhark's WebGPU branch has no public
+# binary cache, so it is kept in the badlydrawnwizards Cachix cache: builds
+# fetch it from there, and push anything they had to build themselves (that
+# needs the repository secret CACHIX_AUTH_TOKEN, a write token for the
+# cache; without it they still read from it).
+#
+# To fill the cache from a machine that has already built the toolchain:
+#   nix develop --profile /tmp/wizard-dev -c true
+#   cachix push badlydrawnwizards /tmp/wizard-dev
 
 name: Pages
 
@@ -31,11 +36,11 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
 
-      - name: Cache the Nix store
-        uses: nix-community/cache-nix-action@v6
+      - name: Binary cache (Cachix)
+        uses: cachix/cachix-action@v16
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
+          name: badlydrawnwizards
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Cache emscripten ports (emdawnwebgpu)
         uses: actions/cache@v4

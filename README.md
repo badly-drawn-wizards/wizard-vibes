@@ -70,9 +70,10 @@ context (https or localhost).
 
 `.github/workflows/pages.yml` builds it on every push to `main` and publishes
 it with GitHub Pages; enable that once under Settings > Pages > Source:
-GitHub Actions. The first run compiles Futhark's WebGPU branch from source
-(it has no binary cache), so it takes a while; the Nix store is cached
-between runs.
+GitHub Actions. Futhark's WebGPU branch has no public binary cache, so the
+toolchain is kept in the `badlydrawnwizards` Cachix cache, which the
+workflow reads from and pushes to (with the `CACHIX_AUTH_TOKEN` secret);
+see the workflow for filling it from a machine that has built it.
 
 ## How it works
 
