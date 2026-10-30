@@ -38,8 +38,12 @@ def to_world_dir (f: flight) (d: vec3) : vec3 = yaw f.heading (roll (-f.bank) d)
 def to_world (f: flight) (p: vec3) : vec3 = f.pos +^ to_world_dir f p
 def to_local_dir (f: flight) (d: vec3) : vec3 = roll f.bank (yaw (-f.heading) d)
 
--- The moon, fixed in the world.
-def moon_world : vec3 = normalise (vec (-0.45) 0.65 0.6)
+-- The moon's direction in the world, from its azimuth (degrees from +z
+-- towards +x) and elevation.
+def moon_dir (azimuth: f32) (elevation: f32) : vec3 =
+  let a = azimuth * f32.pi / 180
+  let e = elevation * f32.pi / 180
+  in vec (f32.cos e * f32.sin a) (f32.sin e) (f32.cos e * f32.cos a)
 
 ---------------------------------------------------------------------
 -- Noise

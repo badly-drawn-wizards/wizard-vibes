@@ -70,7 +70,8 @@ def breath (tm: f32) : f32 = 0.5 - 0.5 * f32.cos (3 * tm)
 
 -- Everything about the wizard that moves, worked out once per pixel. tm is
 -- the loop angle (for periodic motion), secs the time in seconds.
-type pose = { tm: f32, secs: f32, fl: flight, moon: vec3 -- moon direction, local
+type pose = { tm: f32, secs: f32, fl: flight
+            , moon: vec3, moon_world: vec3 -- moon direction, local and in the world
             , prm: params -- the drawer's uniforms
             , breath: f32
             , lean: f32 -- sideways shear of the body above the hips, per unit height
@@ -107,7 +108,8 @@ def pose_at (secs: f32) (prm: params) : pose =
   let aim_dir = if side < 0 then vec (-0.85) 0.3 0.75 else vec 0.5 0.55 0.9
   let aim = r_shoulder +^ scale 0.62 (normalise aim_dir)
   let (r_elbow, r_wrist) = two_bone r_shoulder (mix rest aim point) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
-  in { tm, secs, fl, prm, moon = to_local_dir fl moon_world
+  let moon_world = moon_dir prm.moon_azimuth prm.moon_elevation
+  in { tm, secs, fl, prm, moon = to_local_dir fl moon_world, moon_world
      , breath = b, lean, head, look = 0.45 * point * side, point, pix = 0.0008
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))

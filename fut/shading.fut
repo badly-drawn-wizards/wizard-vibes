@@ -47,17 +47,42 @@ def hat_stars (pose: pose) (p: vec3) : f32 =
   in if bp.y < y0 || row_radius < 0.035 || hash2 iu iv >= 0.55 then 0
      else star_mask ((u - cu - ox) * stretch) (v - cv - oy) 0.28
 
--- The night sky in a world direction.
-def sky (rd: vec3) : vec3 =
+-- The night sky in a world direction: a gradient, the moon, and stars.
+def sky (pose: pose) (rd: vec3) : vec3 =
   let up = saturate (rd.y * 0.5 + 0.5)
   let base = mix (vec 0.06 0.04 0.14) (vec 0.004 0.006 0.03) (f32.sqrt up)
-  let md = dot rd moon_world
-  let moon = smoothstep 0.9993 0.9996 md
-  let halo = 0.15 * f32.exp (-(1 - md) * 60)
+  -- The moon: a disc of angular radius moon_size, with darker maria and
+  -- limb darkening, in a soft halo.
+  let m = pose.moon_world
+  let r = pose.prm.moon_size
+  let md = dot rd m
+  let ang = f32.acos (clamp (-1) 1 md) -- angle from the moon's centre
+  let rr = ang / r -- 0 at the centre, 1 at the limb
+  let moon =
+    if rr > 1.05 then 0 else
+    let e1 = normalise (cross m (vec 0 1 0))
+    let e2 = cross e1 m
+    let u = dot rd e1 / r
+    let v = dot rd e2 / r
+    let maria = smoothstep 0.5 0.65 (0.6 * vnoise2 (u * 1.8 + 3.1) (v * 1.8 - 1.7) + 0.4 * vnoise2 (u * 4.3) (v * 4.3 + 5))
+    let craters = smoothstep 0.72 0.8 (vnoise2 (u * 9 + 11) (v * 9 - 7))
+    let limb = f32.sqrt (f32.max 0 (1 - rr * rr)) ** 0.4
+    in smoothstep 1 0.96 rr * (0.55 + 0.45 * limb) * (1 - 0.45 * maria) * (1 - 0.2 * craters)
+  let halo = 0.15 * f32.exp (-(1 - md) * 60) + 0.12 * f32.exp (-f32.max 0 (ang - r) / 0.06)
+  -- Stars: a few cells of a direction grid each hold a small round star at a
+  -- random point (kept off the cell's edges), twinkling at its own rate.
   let q = scale 220 rd
-  let s = hash3 (i32.f32 (f32.floor q.x)) (i32.f32 (f32.floor q.y)) (i32.f32 (f32.floor q.z))
-  let star = if s > 0.9975 && rd.y > 0.02 then (s - 0.9975) * 400 * saturate (rd.y * 4) else 0
-  in base +^ scale (moon * 2 + halo) (vec 0.85 0.9 1) +^ splat star
+  let c = vmap f32.floor q
+  let (ix, iy, iz) = (i32.f32 c.x, i32.f32 c.y, i32.f32 c.z)
+  let s = hash3 ix iy iz
+  let star =
+    if s <= 0.9975 || rd.y <= 0.02 then 0 else
+    let at = c +^ vec (0.2 + 0.6 * hash3 ix iy (iz + 71)) (0.2 + 0.6 * hash3 (ix + 13) iy iz) (0.2 + 0.6 * hash3 ix (iy + 29) iz)
+    let d = length (q -^ at) / 0.22 -- in units of the star's size (~1.3 pixels at 1080p)
+    let rate = 2 + 5 * hash3 (ix + 5) (iy + 3) iz
+    let twinkle = 0.55 + 0.45 * f32.sin (pose.secs * rate + 6.28 * hash3 ix (iy + 7) (iz + 3))
+    in (s - 0.9975) * 2500 * f32.exp (-(d * d)) * twinkle * saturate (rd.y * 4) * smoothstep 1.2 2 rr
+  in base +^ scale (moon * 0.9 + halo) (vec 0.85 0.9 1) +^ splat star
 
 ---------------------------------------------------------------------
 -- Materials
@@ -236,7 +261,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
          let cos_orb = dot r ol
          let disc = f32.cos (f32.asin (f32.min 1 (orb_radius / od)))
          let orb_seen = smoothstep (disc - 0.05) disc cos_orb + 0.25 * pow (saturate cos_orb) 6
-         in mat.albedo *^ (scale 0.6 (sky (to_world_dir pose.fl r)) +^ scale (1.6 * g.level * orb_seen) (vec 0.75 0.9 1))
+         in mat.albedo *^ (scale 0.6 (sky pose (to_world_dir pose.fl r)) +^ scale (1.6 * g.level * orb_seen) (vec 0.75 0.9 1))
   -- cloth sheen: brightest where the surface turns away from view, lit by
   -- the moon where it reaches and a little by the sky everywhere
   let sheen =
@@ -257,7 +282,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
      case 1 -> scale 0.5 (n +^ splat 1)
      case 2 -> mat.albedo
      case 3 -> splat occ
-     case _ -> mix c (sky (to_world_dir pose.fl rd)) fog
+     case _ -> mix c (sky pose (to_world_dir pose.fl rd)) fog
 
 ---------------------------------------------------------------------
 -- The glass orb
@@ -309,7 +334,7 @@ def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec
   let to_orb = normalise (orb_pos -^ p)
   let highlights = scale (2 * pow (saturate (dot rr pose.moon)) 300) (vec 0.8 0.85 1)
                    +^ scale (2.5 * g.level * pow (saturate (dot rr to_orb)) 120) (vec 0.7 0.85 1)
-  let added = scale f (sky (to_world_dir pose.fl rr)) +^ highlights +^ scale (0.08 * pow (1 - cosi) 2) (vec 0.6 0.7 0.9)
+  let added = scale f (sky pose (to_world_dir pose.fl rr)) +^ highlights +^ scale (0.08 * pow (1 - cosi) 2) (vec 0.6 0.7 0.9)
   in (added, scale (1 - f) (vec 0.9 0.95 0.97))
 
 -- Where a reflected path starts: (exists, point, direction, weight).
@@ -364,7 +389,7 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
            let p = ro +^ scale t_out rd
            let n = normalise (p -^ orb_pos)
            in (p, refract rd (scale (-1) n) pose.prm.orb_ior, w *^ glass_tint, acc, false, false, refl)
-         else (ro, rd, w, acc +^ (w *^ sky (to_world_dir pose.fl rd)), inside, true, refl)
+         else (ro, rd, w, acc +^ (w *^ sky pose (to_world_dir pose.fl rd)), inside, true, refl)
   in (acc, refl)
 
 def shade (prm: params) (secs: f32) (pix: f32) (ro: vec3) (rd: vec3) : vec3 =
