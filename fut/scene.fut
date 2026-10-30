@@ -21,6 +21,7 @@ open import "figure"
 def rune_radius : f32 = 1.125
 
 -- 2D distance in the ground plane to the nearest rune stroke.
+#[noinline]
 def glyph_sdf (tm: f32) (x: f32) (z: f32) : f32 =
   let c = rune_radius
   let r = length2 (vec2 x z)
@@ -51,6 +52,7 @@ def glyph_dist (tm: f32) (p: vec3) : f32 =
        in f32.sqrt (d * d + p.y * p.y)
 
 -- Emission painted on the ground (before brightness): two rings and the glyphs.
+#[noinline]
 def rune_paint (tm: f32) (p: vec3) : f32 =
   let r = length2 (vec2 p.x p.z)
   let ring w c = 1 - smoothstep (w * 0.5) w (f32.abs (r - c))
@@ -67,6 +69,7 @@ def rune_paint (tm: f32) (p: vec3) : f32 =
 def rock_radius : f32 = 1.6
 def rock_depth : f32 = 2.8
 
+#[noinline]
 def rock_exact (p: vec3) : hit =
   let cone = sd_capped_cone (p -^ vec 0 (-rock_depth) 0) rock_depth 0.3 rock_radius
   -- (the weight is 0 at and above the top face, where the wizard is, so the
@@ -98,11 +101,11 @@ def land_of (prm: params) : land = {sea = prm.sea_level, river = prm.river_width
 -- rivers, a plane at sea level) and the structures.
 def land_layers : i32 = layers_terrain | layers_water | layers_structures
 
--- The ground and the water.
-def land_ground (mask: i32) (pose: pose) (p: vec3) : hit =
-  let prm = pose.prm
-  let l = land_of prm
-  let w = to_world pose.fl p
+-- The ground and the water (a real GPU function taking just the flight and
+-- the land, not the whole pose).
+#[noinline]
+def ground_at (mask: i32) (fl: flight) (l: land) (p: vec3) : hit =
+  let w = to_world fl p
   let detail = terrain_detail p
   let ground =
     if !(has mask layers_terrain) then nothing
@@ -113,8 +116,10 @@ def land_ground (mask: i32) (pose: pose) (p: vec3) : hit =
       -- (rivers only lower the ground, so it stays an upper bound)
       let gap = w.y - terrain_upper w.x w.z
       in (if gap > 0.4 then 0.6 * gap else terrain_dist l detail w, m_terrain) |> tag layers_terrain
-  let water = if has mask layers_water then (w.y - prm.sea_level, m_water) |> tag layers_water else nothing
+  let water = if has mask layers_water then (w.y - l.sea, m_water) |> tag layers_water else nothing
   in ground |> umin water
+
+def land_ground (mask: i32) (pose: pose) (p: vec3) : hit = ground_at mask pose.fl (land_of pose.prm) p
 
 -- The structures.
 def land_built (mask: i32) (pose: pose) (p: vec3) : hit =

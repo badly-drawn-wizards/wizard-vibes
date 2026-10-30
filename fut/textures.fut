@@ -39,6 +39,7 @@ def plates (fp: f32) (wavelength: f32) (across: f32) (along: f32) (bands: f32) (
   in mix1 0.5 (0.5 - 0.5 * f32.cos (2 * f32.pi * band)) (keep fp wavelength)
 
 -- (height, fine plate, broad plate, patch tone)
+#[noinline]
 def bark (fp: f32) (p: vec3) : (f32, f32, f32, f32) =
   let q = staff_local p
   -- the noise changes by ~80 per unit across the staff at the fine scale
@@ -76,8 +77,11 @@ def cloth_coords (pose: pose) (p: vec3) : (f32, f32, f32) = -- (angle, arc lengt
 def fold (a: f32) (y: f32) : f32 =
   f32.sin (a * 13 + 0.7 * f32.sin (a * 5 + y * 2)) * (0.25 + 0.75 * saturate (1 - y / 1.1))
 
-def cloth (pose: pose) (fp: f32) (p: vec3) : f32 =
-  let (a, u, y) = cloth_coords pose p
+-- (the patterns below are real GPU functions taking the point in their own
+-- space, which the function after each works out from the pose: the bump
+-- mapping evaluates them four times a pixel)
+#[noinline]
+def cloth_pattern (fp: f32) (a: f32) (u: f32) (y: f32) : f32 =
   -- basket weave: in alternate cells the warp (running up) or the weft
   -- (running round) is on top, each a rounded thread
   let weave_w = 0.008
@@ -87,6 +91,10 @@ def cloth (pose: pose) (fp: f32) (p: vec3) : f32 =
   let thread (x: f32) = f32.sin (f32.pi * fract (x / weave_w))
   let weave = if warp_on_top then thread u else thread y
   in 0.012 * fold a y + 0.00025 * weave * keep fp (2 * weave_w)
+
+def cloth (pose: pose) (fp: f32) (p: vec3) : f32 =
+  let (a, u, y) = cloth_coords pose p
+  in cloth_pattern fp a u y
 
 def cloth_albedo (pose: pose) (p: vec3) : vec3 =
   let (a, _, y) = cloth_coords pose p
@@ -104,7 +112,7 @@ def belt_coords (pose: pose) (p: vec3) : (f32, f32, bool) =
   let prm = pose.prm
   let dy = b.y - prm.belt_height
   let r = length2 (vec2 b.x b.z)
-  in (f32.atan2 b.x b.z * robe_radius prm prm.belt_height, dy, f32.abs dy < 0.035 && f32.abs (r - robe_radius prm b.y) < 0.03)
+  in (f32.atan2 b.x b.z * robe_radius (gear_of prm) prm.belt_height, dy, f32.abs dy < 0.035 && f32.abs (r - robe_radius (gear_of prm) b.y) < 0.03)
 
 -- How much of a stitch is at this point, in [0, 1].
 def stitch (u: f32) (dy: f32) : f32 =
@@ -113,12 +121,16 @@ def stitch (u: f32) (dy: f32) : f32 =
   let along = if phase < 0.65 then f32.sqrt (f32.sin (f32.pi * phase / 0.65)) else 0
   in along * smoothstep 0.0026 0.0008 across
 
-def leather (pose: pose) (fp: f32) (p: vec3) : f32 =
-  let (u, dy, on_belt) = belt_coords pose p
+#[noinline]
+def leather_pattern (fp: f32) (u: f32) (dy: f32) (on_belt: bool) (p: vec3) : f32 =
   let g = vnoise3 (scale 85 p)
   let grain = 0.0006 * g * g * keep fp 0.012
   let st = if on_belt then 0.0011 * stitch u dy * keep fp 0.011 else 0
   in grain + st
+
+def leather (pose: pose) (fp: f32) (p: vec3) : f32 =
+  let (u, dy, on_belt) = belt_coords pose p
+  in leather_pattern fp u dy on_belt p
 
 def leather_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
   let (u, dy, on_belt) = belt_coords pose p
@@ -133,11 +145,14 @@ def leather_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
 -- Hair: fine strands within each beard lock, faded by footprint, and the
 -- locks' colours varying from white through cream to light grey.
 
-def hair (pose: pose) (fp: f32) (p: vec3) : f32 =
-  let l = beard_lock (beard_space pose p)
+#[noinline]
+def hair_pattern (fp: f32) (b: vec3) : f32 =
+  let l = beard_lock b
   -- six strands per lock; a lock is ~0.035 across, so ~0.006 per strand
   let strand = f32.abs (f32.sin (f32.pi * fract (l.phase * 6 + 0.3 * f32.sin (l.h * 20))))
   in 0.0003 * strand * keep fp 0.006
+
+def hair (pose: pose) (fp: f32) (p: vec3) : f32 = hair_pattern fp (beard_space pose p)
 
 def hair_albedo (pose: pose) (p: vec3) : vec3 =
   let l = beard_lock (beard_space pose p)
@@ -194,10 +209,11 @@ def sd_star5 (x: f32) (y: f32) (r: f32) (rf: f32) : f32 =
 -- it, and the star is measured in arc length, so stars keep their shape as
 -- the cone narrows. Each star has its own size and tilt; its edge is
 -- antialiased by the pixel footprint fp, and its bevel fades out with it.
-def hat_stars (pose: pose) (fp: f32) (p: vec3) : (f32, f32) =
-  let bp = bend pose.prm.hat_droop (head_space pose p -^ hat_base)
+-- (bp: in the bent hat's space; y0: the band's top)
+#[noinline]
+def hat_star_pattern (fp: f32) (y0: f32) (bp: vec3) : (f32, f32) =
   let cell = 0.085
-  let y0 = band_top pose.prm + 0.012 -- start above the band
+  let y0 = y0 + 0.012 -- start above the band
   let v = (bp.y - y0) / cell
   let cv = f32.floor v
   let row_radius = hat_radius (y0 + (cv + 0.5) * cell)
@@ -220,9 +236,13 @@ def hat_stars (pose: pose) (fp: f32) (p: vec3) : (f32, f32) =
   let height = 0.0025 * smoothstep 0.01 (-0.06) d * keep fp 0.01
   in (cover, height)
 
+def hat_stars (pose: pose) (fp: f32) (p: vec3) : (f32, f32) =
+  hat_star_pattern fp (band_top pose.prm) (bend pose.prm.hat_droop (head_space pose p -^ hat_base))
+
 ---------------------------------------------------------------------
 -- Cork: tan, with dark speckled pores (small pits in the bump).
 
+#[noinline]
 def cork_pores (fp: f32) (p: vec3) : f32 =
   smoothstep 0.7 0.82 (vnoise3 (scale 420 p)) * keep fp 0.004
 

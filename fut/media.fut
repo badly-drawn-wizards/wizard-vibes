@@ -29,7 +29,7 @@ def globe_haze : f32 = 0.3
 
 -- Clouds are lit by the moon, more brightly towards their tops, over a dim
 -- ambient; they scatter what they absorb.
-def cloud_colour (prm: params) (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (0.12 + 0.3 * h) prm.cloud_colour
+def cloud_colour (colour: vec3) (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (0.12 + 0.3 * h) colour
 
 #[noinline] -- compiled once (see scene in scene.fut)
 -- The colour a glowing material gives off, used both for its surface and
@@ -45,6 +45,7 @@ def glow_colour (prm: params) (m: i32) : vec3 =
 -- nearest.
 def potion_glow_density (prm: params) (ld: f32) : f32 = prm.potion_glow * f32.exp (-(f32.max ld 0) / 0.012)
 
+#[noinline] -- (few call sites: the whole pose is passed)
 def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let tm = pose.tm
   let vis = pose.prm.layers
@@ -80,12 +81,17 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
 -- (1 near .. 0 at the view distance), so there is no edge.
 def view_fade (prm: params) (t: f32) : f32 = smoothstep prm.view_distance (0.7 * prm.view_distance) t
 
+-- What the clouds depend on, projected out of the pose (so clouds_through,
+-- a real GPU function, takes a few scalars rather than the whole pose's).
+type cloud_in = {fl: flight, secs: f32, cover: f32, density: f32, colour: vec3, view_distance: f32}
+
 -- Radiance and transmittance of the clouds along ro + t rd for t in
 -- [0, tend]. About 24 samples, spread over the part of the ray inside the
 -- slab; clear sky is skipped using the bound from cloud_sample.
-def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
-  let wo = to_world pose.fl ro
-  let wd = to_world_dir pose.fl rd
+#[noinline]
+def clouds_through (ci: cloud_in) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
+  let wo = to_world ci.fl ro
+  let wd = to_world_dir ci.fl rd
   -- where the ray's world height crosses the slab's bottom and top
   let (t0, t1) =
     if f32.abs wd.y < 1e-5 then (if cloud_gap wo.y > 0 then (1, 0) else (0, tend))
@@ -98,9 +104,14 @@ def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
     loop (t, i, rad, tr) = (t0 + 0.5 * dt, 0i32, splat 0, 1f32)
     while t < t1 && i < 64 && tr > 0.02 do
       let w = wo +^ scale t wd
-      let (dens, clear) = cloud_sample pose.prm.cloud_cover pose.prm.cloud_density pose.secs w
-      let dens = dens * view_fade pose.prm t
+      let (dens, clear) = cloud_sample ci.cover ci.density ci.secs w
+      let dens = dens * smoothstep ci.view_distance (0.7 * ci.view_distance) t
       in if dens <= 0 then (t + f32.max dt clear, i + 1, rad, tr)
          else let ch = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
-              in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour pose.prm ch), tr * f32.exp (-dens * dt))
+              in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour ci.colour ch), tr * f32.exp (-dens * dt))
   in (rad, tr)
+
+def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
+  let prm = pose.prm
+  in clouds_through { fl = pose.fl, secs = pose.secs, cover = prm.cloud_cover, density = prm.cloud_density
+                    , colour = prm.cloud_colour, view_distance = prm.view_distance } ro rd tend

@@ -310,6 +310,7 @@ def part_sandstone : i32 = 4
 
 -- A structure in its own frame (ground at y = 0): (distance, part). Each is
 -- sunk into the ground on a foundation, so slopes leave no gap beneath it.
+#[noinline]
 def sd_structure (kind: i32) (q: vec3) : (f32, i32) =
   if kind == kind_cottage then
     let walls = sd_box (q -^ vec 0 0.1 0) (vec 1.8 2.1 1.3)
@@ -331,6 +332,7 @@ def sd_structure (kind: i32) (q: vec3) : (f32, i32) =
 
 -- The structure of the cell holding a world point, if there is one: (present,
 -- kind, its frame's origin and yaw). Evaluates the ground there.
+#[noinline]
 def structure_at (l: land) (density: f32) (w: vec3) : (bool, i32, vec3, f32) =
   let (kind, px, pz, yaw) = structure_candidate w.x w.z
   let ground = terrain_height l px pz
@@ -345,6 +347,7 @@ def structure_at (l: land) (density: f32) (w: vec3) : (bool, i32, vec3, f32) =
 --   cell inside its cell;
 -- - the own cell's structure lies at least (xz distance - struct_reach) away.
 -- The ground (8 noise lookups) is only evaluated close to a structure.
+#[noinline]
 def structures (l: land) (density: f32) (w: vec3) : (f32, i32) =
   let above = w.y - structure_top
   in if above > 0.3 then (above, part_wall) else

@@ -15,6 +15,7 @@ def orbfx_reach : f32 = orb_radius + 0.5
 
 -- Fire: flames licking upwards inside the glass, hottest low down, and
 -- embers drifting up off the top of the orb, swaying as they rise and cool.
+#[noinline]
 def fire_media (secs: f32) (q: vec3) : media_sample =
   let v = q -^ orb_pos
   let r = length v
@@ -42,6 +43,7 @@ def fire_media (secs: f32) (q: vec3) : media_sample =
 
 -- Wind: a vortex of pale streaks spinning inside the glass, and wisps
 -- circling the orb on a tilted ring, each trailing a fading tail.
+#[noinline]
 def wind_media (secs: f32) (q: vec3) : media_sample =
   let v = q -^ orb_pos
   let r = length v

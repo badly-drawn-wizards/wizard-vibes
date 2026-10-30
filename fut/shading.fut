@@ -16,14 +16,27 @@ import "textures"
 ---------------------------------------------------------------------
 -- Surface detail
 
+-- What the sky depends on: projected out of the pose, so that sky_colour,
+-- a real GPU function (#[noinline]; it is called from many places), takes a
+-- few scalars rather than the whole pose's.
+type sky_in = {horizon: vec3, zenith: vec3, moon: vec3, moon_size: f32, moon_halo: f32, moon_brightness: f32,
+               star_density: f32, star_brightness: f32, twinkle: f32, secs: f32}
+
+def sky_in_of (pose: pose) : sky_in =
+  { horizon = pose.prm.sky_horizon, zenith = pose.prm.sky_zenith, moon = pose.moon_world
+  , moon_size = pose.prm.moon_size, moon_halo = pose.prm.moon_halo, moon_brightness = pose.prm.moon_brightness
+  , star_density = pose.prm.star_density, star_brightness = pose.prm.star_brightness
+  , twinkle = pose.prm.twinkle, secs = pose.secs }
+
 -- The night sky in a world direction: a gradient, the moon, and stars.
-def sky (pose: pose) (rd: vec3) : vec3 =
+#[noinline]
+def sky_colour (sk: sky_in) (rd: vec3) : vec3 =
   let up = saturate (rd.y * 0.5 + 0.5)
-  let base = mix pose.prm.sky_horizon pose.prm.sky_zenith (f32.sqrt up)
+  let base = mix sk.horizon sk.zenith (f32.sqrt up)
   -- The moon: a disc of angular radius moon_size, with darker maria and
   -- limb darkening, in a soft halo.
-  let m = pose.moon_world
-  let r = pose.prm.moon_size
+  let m = sk.moon
+  let r = sk.moon_size
   let md = dot rd m
   let ang = f32.acos (clamp (-1) 1 md) -- angle from the moon's centre
   let rr = ang / r -- 0 at the centre, 1 at the limb
@@ -37,7 +50,7 @@ def sky (pose: pose) (rd: vec3) : vec3 =
     let craters = smoothstep 0.72 0.8 (vnoise2 (u * 9 + 11) (v * 9 - 7))
     let limb = f32.sqrt (f32.max 0 (1 - rr * rr)) ** 0.4
     in smoothstep 1 0.96 rr * (0.55 + 0.45 * limb) * (1 - 0.45 * maria) * (1 - 0.2 * craters)
-  let halo = 0.15 * f32.exp (-(1 - md) * 60) + pose.prm.moon_halo * f32.exp (-f32.max 0 (ang - r) / 0.06)
+  let halo = 0.15 * f32.exp (-(1 - md) * 60) + sk.moon_halo * f32.exp (-f32.max 0 (ang - r) / 0.06)
   -- Stars: a few cells of a direction grid each hold a small round star at a
   -- random point (kept off the cell's edges), twinkling at its own rate.
   let q = scale 220 rd
@@ -45,14 +58,16 @@ def sky (pose: pose) (rd: vec3) : vec3 =
   let (ix, iy, iz) = (i32.f32 c.x, i32.f32 c.y, i32.f32 c.z)
   let s = hash3 ix iy iz
   let star =
-    let thr = 1 - pose.prm.star_density
+    let thr = 1 - sk.star_density
     in if s <= thr || rd.y <= 0.02 then 0 else
     let at = c +^ vec (0.2 + 0.6 * hash3 ix iy (iz + 71)) (0.2 + 0.6 * hash3 (ix + 13) iy iz) (0.2 + 0.6 * hash3 ix (iy + 29) iz)
     let d = length (q -^ at) / 0.22 -- in units of the star's size (~1.3 pixels at 1080p)
     let rate = 2 + 5 * hash3 (ix + 5) (iy + 3) iz
-    let twinkle = 1 - pose.prm.twinkle + pose.prm.twinkle * f32.sin (pose.secs * rate + 6.28 * hash3 ix (iy + 7) (iz + 3))
-    in (s - thr) / 0.0025 * pose.prm.star_brightness * 0.0025 * f32.exp (-(d * d)) * twinkle * saturate (rd.y * 4) * smoothstep 1.2 2 rr
-  in base +^ scale (moon * pose.prm.moon_brightness + halo) (vec 0.85 0.9 1) +^ splat star
+    let twinkle = 1 - sk.twinkle + sk.twinkle * f32.sin (sk.secs * rate + 6.28 * hash3 ix (iy + 7) (iz + 3))
+    in (s - thr) / 0.0025 * sk.star_brightness * 0.0025 * f32.exp (-(d * d)) * twinkle * saturate (rd.y * 4) * smoothstep 1.2 2 rr
+  in base +^ scale (moon * sk.moon_brightness + halo) (vec 0.85 0.9 1) +^ splat star
+
+def sky (pose: pose) (rd: vec3) : vec3 = sky_colour (sky_in_of pose) rd
 
 ---------------------------------------------------------------------
 -- Materials
@@ -66,8 +81,10 @@ def plain (albedo: vec3) : material =
 
 -- How far the sky shows through at distance t: the fog, and towards the view
 -- distance (where rays stop) a fade into the sky, so there is no edge.
-def fog_at (prm: params) (t: f32) : f32 =
-  f32.max (1 - f32.exp (-prm.fog * t * t)) (1 - view_fade prm t)
+def fog_amount (fog: f32) (view_distance: f32) (t: f32) : f32 =
+  f32.max (1 - f32.exp (-fog * t * t)) (smoothstep (0.7 * view_distance) view_distance t)
+
+def fog_at (prm: params) (t: f32) : f32 = fog_amount prm.fog prm.view_distance t
 
 -- The frame of the structure at local point p: (kind, origin, yaw). (It
 -- looks up the ground there, so work it out once per pixel.)
@@ -115,15 +132,20 @@ def brick_colour (size: f32) (fp: f32) (kind: i32) (q: vec3) (base: vec3) : vec3
   let brick = scale (0.75 + 0.4 * r) base
   in mix brick (scale 0.6 (mix base (splat 0.5) 0.5)) mortar
 
+-- What the structures' materials depend on, projected out of the pose (see
+-- sky_in).
+type structure_in = {fl: flight, land: land, density: f32, brick_size: f32, wall: vec3, thatch: vec3, tower: vec3,
+                     slate: vec3, sandstone: vec3, window: vec3, window_glow: f32}
+
 -- The structures' materials: stone bricks with lit windows on cottages and
 -- towers.
-def structure_material (pose: pose) (fp: f32) (m: i32) (p: vec3) : material =
-  let prm = pose.prm
-  let w = to_world pose.fl p
-  let (kind, o, yaw) = structure_frame pose p
-  let q = structure_q pose o yaw p
+#[noinline]
+def structure_shade (si: structure_in) (fp: f32) (m: i32) (p: vec3) : material =
+  let w = to_world si.fl p
+  let (_, kind, o, yaw) = structure_at si.land si.density w
+  let q = yaw_inv yaw (w -^ o)
   let grain = 0.85 + 0.3 * vnoise2 (w.x * 3 + w.z) (w.y * 3)
-  let lit (window: bool) = if window then scale prm.window_glow prm.window_colour else splat 0
+  let lit (window: bool) = if window then scale si.window_glow si.window else splat 0
   in if m == m_wall then
        -- windows on the long walls (two each) and the gable ends (one each),
        -- and a door on the front
@@ -131,39 +153,55 @@ def structure_material (pose: pose) (fp: f32) (m: i32) (p: vec3) : material =
        let gable = f32.abs q.x > 1.75 && f32.abs q.z < 0.22 && f32.abs (q.y - 1.25) < 0.28
        let door = q.z > 1.25 && f32.abs q.x < 0.3 && q.y < 1.5
        let window = (long || gable) && kind == kind_cottage
-       let c = if door then vec 0.18 0.1 0.05 else brick_colour prm.brick_size fp kind q (scale grain prm.wall_colour)
+       let c = if door then vec 0.18 0.1 0.05 else brick_colour si.brick_size fp kind q (scale grain si.wall)
        in plain (if window then splat 0.05 else c) with emission = lit window
-     else if m == m_thatch then plain (scale (0.7 + 0.5 * vnoise2 (q.x * 9) (q.y * 20)) prm.thatch_colour)
+     else if m == m_thatch then plain (scale (0.7 + 0.5 * vnoise2 (q.x * 9) (q.y * 20)) si.thatch)
      else if m == m_tower then
        -- four narrow lit windows round the tower, on two floors
        let a = f32.atan2 q.z q.x / (2 * f32.pi) * 4
        let slot = f32.abs (fract a - 0.5) < 0.06
        let floor = (q.y > 2.3 && q.y < 3) || (q.y > 4 && q.y < 4.6)
        let window = slot && floor
-       in plain (if window then splat 0.05 else brick_colour prm.brick_size fp kind q (scale grain prm.tower_colour))
+       in plain (if window then splat 0.05 else brick_colour si.brick_size fp kind q (scale grain si.tower))
           with emission = lit window
-     else if m == m_slate then plain prm.slate_colour with ks = 0.3 with shininess = 30
-     else plain (scale grain prm.sandstone_colour)
+     else if m == m_slate then plain si.slate with ks = 0.3 with shininess = 30
+     else plain (scale grain si.sandstone)
+
+def structure_material (pose: pose) (fp: f32) (m: i32) (p: vec3) : material =
+  let prm = pose.prm
+  in structure_shade { fl = pose.fl, land = land_of prm, density = prm.structure_density, brick_size = prm.brick_size
+                     , wall = prm.wall_colour, thatch = prm.thatch_colour, tower = prm.tower_colour, slate = prm.slate_colour
+                     , sandstone = prm.sandstone_colour, window = prm.window_colour, window_glow = prm.window_glow }
+                     fp m p
+
+-- What the water depends on, projected out of the pose (see sky_in).
+type water_in = {sky: sky_in, fl: flight, moon: vec3, pix: f32, colour: vec3, fog: f32, view_distance: f32}
 
 -- The water: rippled (the ripples fade with the pixel footprint), dark below,
 -- reflecting the sky by Fresnel, with a glint of the moon.
-def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
-  let w = to_world pose.fl p
-  let s = pose.secs
-  let k = keep (t * pose.pix) 0.6
+#[noinline]
+def water_shade (wi: water_in) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+  let w = to_world wi.fl p
+  let s = wi.sky.secs
+  let k = keep (t * wi.pix) 0.6
   let (_, ax, az) = vnoise2_grad (w.x * 1.3 + s * 0.3) (w.z * 1.3 - s * 0.2)
   let (_, bx, bz) = vnoise2_grad (w.x * 3.1 - s * 0.5) (w.z * 3.1 + s * 0.4)
   let gx = k * (0.04 * ax * 1.3 + 0.015 * bx * 3.1)
   let gz = k * (0.04 * az * 1.3 + 0.015 * bz * 3.1)
-  let n = to_local_dir pose.fl (normalise (vec (-gx) 1 (-gz)))
+  let n = to_local_dir wi.fl (normalise (vec (-gx) 1 (-gz)))
   let cosi = saturate (-(dot n rd))
   let f = 0.02 + 0.98 * pow (1 - cosi) 5
   let r = reflect rd n
-  let glint = scale (1.5 * pow (saturate (dot r pose.moon)) 400) (vec 0.85 0.9 1)
-  let c = mix pose.prm.water_colour (sky pose (to_world_dir pose.fl r)) f +^ glint
-  let fog = fog_at pose.prm t
-  in mix c (sky pose (to_world_dir pose.fl rd)) fog
+  let glint = scale (1.5 * pow (saturate (dot r wi.moon)) 400) (vec 0.85 0.9 1)
+  let c = mix wi.colour (sky_colour wi.sky (to_world_dir wi.fl r)) f +^ glint
+  let fog = fog_amount wi.fog wi.view_distance t
+  in mix c (sky_colour wi.sky (to_world_dir wi.fl rd)) fog
 
+def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+  water_shade { sky = sky_in_of pose, fl = pose.fl, moon = pose.moon, pix = pose.pix, colour = pose.prm.water_colour
+              , fog = pose.prm.fog, view_distance = pose.prm.view_distance } p rd t
+
+#[noinline] -- (few call sites: the whole pose is passed)
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
   if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = pose.prm.sheen with ks = 0.03
@@ -242,6 +280,7 @@ type light = { pos: vec3, directional: bool
 -- The moon, the orb, and a weak light in each potion.
 def n_lights : i32 = 5
 
+#[noinline] -- (few call sites: the whole pose is passed)
 def light_at (pose: pose) (g: glow) (k: i32) : light =
   if k == 0 then
     { pos = pose.moon, directional = true
@@ -268,12 +307,13 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     let i = k - 2
     let flicker = 1 + 0.12 * f32.sin (f32.i32 (7 + 3 * i) * pose.tm + f32.i32 i * 2.1)
     let c = scale (pose.prm.potion_light * flicker) (glow_colour pose.prm (m_potion + i))
-    in { pos = from_body_space pose (potion_centre pose.prm i), directional = false, diffuse = c, specular = scale 0.3 c
+    in { pos = from_body_space pose (potion_centre (gear_of pose.prm) i), directional = false, diffuse = c, specular = scale 0.3 c
        , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04
        , casters = 0, receivers = figure_layers, shadowed_receivers = 0 }
 
 -- The lit colour of a surface hit at distance t along rd (fog included);
 -- m is the hit's tagged material (with its layer).
+#[noinline] -- (few call sites: the whole pose is passed)
 def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   let layer = hit_layer tagged
   let m = hit_material tagged
@@ -389,9 +429,10 @@ def fresnel (ior: f32) (cosi: f32) : f32 =
 -- Fresnel reflection of the sky, highlights from the moon and the orb, and a
 -- faint rim) and what it lets through (Fresnel transmission, slightly
 -- tinted). Only rays passing near the potions are traced.
+#[noinline] -- (few call sites: the whole pose is passed)
 def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec3) =
   -- the potions' bounding sphere, in local space (body space leans)
-  let c = from_body_space pose (potions_at pose.prm)
+  let c = from_body_space pose (potions_at (gear_of pose.prm))
   let r = potions_radius + 0.02
   let (enter, exit) = ray_sphere c r ro rd
   in if enter > exit then (splat 0, splat 1) else
@@ -422,6 +463,7 @@ type reflection = (bool, vec3, vec3, f32)
 -- it gathers, weighted by w. Also returns the reflection spawned where the
 -- ray first enters the orb, and how far the ray sees before anything opaque
 -- or the orb's glass (infinity if nothing).
+#[noinline] -- (few call sites: the whole pose is passed)
 def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection, f32) =
   let (_, _, _, acc, _, _, refl, first) =
     loop (ro, rd, w, acc, inside, done, refl, first) =

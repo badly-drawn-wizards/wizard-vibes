@@ -98,6 +98,7 @@ def bolt_halo_colour : vec3 = vec 0.3 0.75 1
 
 -- Lightning media at p: a thin white-hot core and a cyan halo around each
 -- bolt. Only evaluated near the orb.
+#[noinline]
 def lightning_media (tm: f32) (p: vec3) : media_sample =
   let reach = orb_radius + arc_reach + 0.15
   in if length (p -^ orb_pos) > reach then {cap = length (p -^ orb_pos) - reach + 0.02, radiance = splat 0, extinction = 0}

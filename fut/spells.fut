@@ -53,24 +53,18 @@ def ray_polyline (o: vec3) (d: vec3) (tmax: f32) (n: i32) (point: i32 -> vec3) :
 def glow_line (r: f32) (h: f32) (dist: f32) : (f32, f32) =
   (f32.exp (-(dist * dist) / (r * r)), h * h / (dist * dist + h * h))
 
--- The light the spells add along the world-space ray o + t d, t in
--- [0, tmax] (nearer than whatever the ray hits), dimmed by the fog.
-def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3) (tmax: f32) : vec3 =
-  let n = k / spell_stride
-  let at (i: i64) (k: i64) = #[unsafe] spells[i * spell_stride + k]
-  let tmax = f32.min tmax prm.view_distance
-  -- (glows fade with the fog, and with depth behind what the ray hits, over
-  -- about their size: a burst on the ground still shows, but nothing
-  -- shines through the rock)
-  let seen (t: f32) (behind: f32) (size: f32) = (1 - fog_at prm t) * f32.exp (-behind / size)
-  in loop c = splat 0 for i < n do
-       let kind = i32.f32 (at i 0)
-       let p = vec (at i 1) (at i 2) (at i 3)
-       let q = vec (at i 4) (at i 5) (at i 6)
-       let age = at i 7
-       let fade = smoothstep (at i 8) (0.6 * at i 8) age
-       let seed = i32.f32 (at i 9)
+-- The light one spell (in slot i) adds along the ray. A real GPU function,
+-- taking the slot's values as scalars (such a function cannot take the
+-- array): spell_glow sums it over the slots.
+#[noinline]
+def spell_light (fog: f32) (view_distance: f32) (secs: f32) (o: vec3) (d: vec3) (tmax: f32)
+                (i: i64) (kind: i32) (p: vec3) (q: vec3) (age: f32) (life: f32) (seed: i32) : vec3 =
+       let fade = smoothstep life (0.6 * life) age
        let rnd (n: i32) = hash2 (seed + n * 7919) 23
+       -- (glows fade with the fog, and with depth behind what the ray hits,
+       -- over about their size: a burst on the ground still shows, but
+       -- nothing shines through the rock)
+       let seen (t: f32) (behind: f32) (size: f32) = (1 - fog_amount fog view_distance t) * f32.exp (-behind / size)
        in if kind == spell_fire then
             -- a ball with a short trail behind it, flickering
             let tail = p -^ scale 0.06 q
@@ -78,7 +72,7 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
             let (core, halo) = glow_line 0.12 0.8 dist
             let flick = 0.85 + 0.15 * f32.sin (secs * 43 + f32.i64 i * 1.7)
             let hot = f32.exp (-(dist * dist) / 0.0016)
-            in c +^ scale (fade * flick * seen t behind 0.3) (scale (5 * core) (mix (vec 1 0.42 0.08) (vec 1 0.9 0.6) hot)
+            in scale (fade * flick * seen t behind 0.3) (scale (5 * core) (mix (vec 1 0.42 0.08) (vec 1 0.9 0.6) hot)
                                            +^ scale (0.5 * halo) (vec 1 0.35 0.05))
           else if kind == spell_burst then
             -- An explosion: a billowing fireball that swells fast and cools
@@ -106,7 +100,7 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
               let (sd, _, _) = ray_segment o d tmax (at_t (f32.max 0 (age - 0.05))) (at_t age)
               in acc + f32.exp (-(sd * sd) / 0.0025)
             let ember = scale (5 * sparks * f32.exp (-2.5 * age)) (vec 1 0.6 0.2)
-            in c +^ scale (fade * seen t behind r) (fire +^ ember)
+            in scale (fade * seen t behind r) (fire +^ ember)
           else if kind == spell_wind then
             -- a pale crescent across its path, curving back; each its own
             -- width, curve and tilt, rolling slowly one way or the other
@@ -125,11 +119,11 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
                                  in p +^ scale (width * f32.sin th) s -^ scale (bend * (1 - f32.cos th)) f
             let (dist, t, behind) = ray_polyline o d tmax 4 point
             let (core, halo) = glow_line 0.035 0.3 dist
-            in c +^ scale (fade * seen t behind 0.2) (scale (3 * core) (vec 0.75 1 0.95) +^ scale (0.35 * halo) (vec 0.45 0.85 0.8))
+            in scale (fade * seen t behind 0.2) (scale (3 * core) (vec 0.75 1 0.95) +^ scale (0.35 * halo) (vec 0.45 0.85 0.8))
           else if kind == spell_strike then
             -- a jagged bolt from the sky, re-forking several times a second,
             -- flashing as it fades, with a flash on the ground
-            let top = vec p.x (at i 5) p.z
+            let top = vec p.x q.y p.z
             let flash = i32.f32 (age * 14)
             let env = fade * f32.exp (-4 * age) * (0.55 + 0.45 * hash2 (seed + flash) 17)
             let point (k: i32) =
@@ -143,7 +137,17 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
             let ground = 3.5 * 3.5 / (gd * gd + 3.5 * 3.5)
             -- and a ring of light racing out over the ground where it hits
             let ring = let u = (gd - 7 * age) / (0.3 + 0.5 * age) in fade * f32.exp (-(u * u)) * f32.exp (-3 * age)
-            in c +^ scale env (scale (seen t behind 0.5) (scale (9 * core) (vec 0.85 0.9 1) +^ scale (0.8 * halo) (vec 0.55 0.6 1))
+            in scale env (scale (seen t behind 0.5) (scale (9 * core) (vec 0.85 0.9 1) +^ scale (0.8 * halo) (vec 0.55 0.6 1))
                                +^ scale (1.5 * ground * seen gt gb 2) (vec 0.6 0.65 1))
                  +^ scale (2 * ring * seen gt gb 3) (vec 0.7 0.8 1)
-          else c
+          else splat 0
+
+-- The light the spells add along the world-space ray o + t d, t in
+-- [0, tmax] (nearer than whatever the ray hits), dimmed by the fog.
+def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3) (tmax: f32) : vec3 =
+  let n = k / spell_stride
+  let at (i: i64) (j: i64) = #[unsafe] spells[i * spell_stride + j]
+  let tmax = f32.min tmax prm.view_distance
+  in loop c = splat 0 for i < n do
+       c +^ spell_light prm.fog prm.view_distance secs o d tmax i (i32.f32 (at i 0)) (vec (at i 1) (at i 2) (at i 3))
+                        (vec (at i 4) (at i 5) (at i 6)) (at i 7) (at i 8) (i32.f32 (at i 9))
