@@ -39,14 +39,14 @@ def staff_at (y: f32) : vec3 = staff_foot +^ scale (y / staff_dir.y) staff_dir
 def grip_height : f32 = 1.15
 -- The elbow's rest position; only used to place the fist and the wrist.
 def right_elbow_rest : vec3 = vec 0.36 1.07 0.14
--- The fist is a short capsule along the staff, offset towards the elbow so
--- the staff passes through its outer half and shows above and below it.
-def fist_centre : vec3 =
+-- The right palm's centre, on the elbow's side of the staff, and the cuff
+-- of the sleeve, set back from it so the hand sticks out (the arm's IK
+-- reaches for the cuff).
+def right_palm : vec3 =
   let g = staff_at grip_height
   let towards = right_elbow_rest -^ g
-  let off = towards -^ scale (dot towards staff_dir) staff_dir
-  in g +^ scale 0.02 (normalise off)
-def right_wrist : vec3 = fist_centre -^ scale 0.05 (normalise (fist_centre -^ right_elbow_rest))
+  in g +^ scale 0.045 (normalise (towards -^ scale (dot towards staff_dir) staff_dir))
+def right_wrist : vec3 = right_palm -^ scale 0.1 (normalise (right_palm -^ right_elbow_rest))
 
 -- Two-bone IK: for a shoulder s reaching for target t with bone lengths l1
 -- and l2, returns (elbow, hand). The elbow bends towards `pole`; an
@@ -162,9 +162,21 @@ def sd_robe (pose: pose) (p: vec3) : f32 =
   let shoulders = sd_ellipsoid (p -^ vec 0 (1.3 + 0.01 * b) (0.004 * b)) (vec (0.29 + 0.008 * b) 0.14 (0.2 + 0.01 * b))
   in smin 0.12 cone shoulders
 
--- An arm: upper arm and a forearm whose sleeve flares towards the cuff.
+-- An arm: upper arm and a forearm whose sleeve flares towards the cuff,
+-- left open: a narrower cone is cut out of its end, so the cuff is a tube
+-- the hand comes out of.
 def sd_arm (shoulder: vec3) (elbow: vec3) (wrist: vec3) (p: vec3) : f32 =
-  smin 0.04 (sd_capsule p shoulder elbow 0.075) (sd_round_cone_ab p elbow wrist 0.064 0.078)
+  let d = normalise (wrist -^ elbow)
+  let fore = sd_round_cone_ab p elbow wrist 0.064 0.078
+  -- (the opening lies within 0.13 of the cuff; beyond 0.2 it cannot affect
+  -- the sleeve, so it is only evaluated near the cuff)
+  let sleeve = if length (p -^ wrist) > 0.2 then fore
+               else smax 0.008 fore (-(sd_round_cone_ab p (wrist -^ scale 0.07 d) (wrist +^ scale 0.06 d) 0.05 0.062))
+  in smin 0.04 (sd_capsule p shoulder elbow 0.075) sleeve
+
+-- Where the left hand's palm is: out of the sleeve, along the forearm.
+def left_palm (pose: pose) : vec3 =
+  pose.l_wrist +^ scale 0.085 (normalise (pose.l_wrist -^ pose.l_elbow))
 
 def sd_arms (pose: pose) (p: vec3) : f32 =
   f32.min (sd_arm pose.r_shoulder pose.r_elbow pose.r_wrist p)
@@ -176,79 +188,75 @@ def left_hand (pose: pose) : vec3 =
 
 -- Cartoon hands: a thumb and three fingers.
 
--- A torus arc (round tube of radius rb on a circle of radius ra) spanning
--- half-angle `an` either side of the +y axis, in the xy plane; after
--- Inigo Quilez's capped torus.
-def sd_arc (p: vec3) (an: f32) (ra: f32) (rb: f32) : f32 =
-  let x = f32.abs p.x
-  let k = if f32.cos an * x > f32.sin an * p.y then x * f32.sin an + p.y * f32.cos an
-          else length2 (vec2 x p.y)
-  in f32.sqrt (f32.max 0 (x * x + p.y * p.y + p.z * p.z + ra * ra - 2 * ra * k)) - rb
+-- A wrist: skin from inside the sleeve's cuff out to the palm.
+def sd_wrist (cuff: vec3) (palm: vec3) (p: vec3) : f32 =
+  let d = normalise (palm -^ cuff)
+  in sd_capsule p (cuff -^ scale 0.03 d) (palm -^ scale 0.02 d) 0.03
 
--- The right hand closed round the staff: a palm on the elbow's side and
--- three fingers wrapping round the staff below the thumb, which wraps the
--- other way above them.
+-- The hand closed round the staff (the wizard's own left hand; the
+-- right_/left_ names in this file are as seen from the front). A palm on
+-- the elbow's side, and digits made of short straight segments with
+-- knuckles, like the pointing hand's: three fingers wrapping round the
+-- staff below the thumb, which wraps the other way above them.
 def sd_right_hand (p: vec3) : f32 =
   let g = staff_at grip_height
   let towards = right_elbow_rest -^ g
   let u = normalise (towards -^ scale (dot towards staff_dir) staff_dir) -- to the palm
-  let v = cross staff_dir u
+  let v = cross u staff_dir -- the way the fingers wrap
   let q = p -^ g
-  let a = dot q u
-  let b = dot q v
-  let h = dot q staff_dir
-  let palm = sd_ellipsoid (vec (a - 0.045) b h) (vec 0.026 0.036 0.05)
-  -- each finger: an arc round the staff from the palm's side, bisected at
-  -- `mid` (an angle in the u-v plane) with half-span `half`
-  let finger (y: f32) (mid: f32) (half: f32) (r: f32) =
-    let c = f32.cos mid
-    let s = f32.sin mid
-    -- rotate so the arc's bisector lies along +y of sd_arc's plane
-    let x' = a * s - b * c
-    let y' = a * c + b * s
-    in sd_arc (vec x' y' (h - y)) half 0.044 r
-  let fingers = finger (-0.03) 2.1 2.0 0.0145
-                |> f32.min (finger 0 2.1 2.05 0.015)
-                |> f32.min (finger 0.03 2.1 1.95 0.0145)
-  let thumb = finger 0.058 (-0.9) 0.95 0.015
-  in smin 0.012 palm (f32.min fingers thumb)
+  let palm = sd_ellipsoid (vec (dot q u - 0.045) (dot q v) (dot q staff_dir)) (vec 0.026 0.036 0.05)
+  -- a digit at height y along the staff: segments between points on a
+  -- circle of radius 0.048 round it, at the given angles from the palm
+  let around (y: f32) (phi: f32) =
+    g +^ scale y staff_dir +^ scale (0.048 * f32.cos phi) u +^ scale (0.048 * f32.sin phi) v
+  let digit (y0: f32) (y1: f32) (angles: [4]f32) (r: f32) =
+    let pt (i: i32) = around (mix1 y0 y1 (f32.i32 i / 3)) angles[i]
+    in loop d = 1e9f32 for i < 3 do
+         f32.min d (sd_capsule p (pt i) (pt (i + 1)) (r - 0.001 * f32.i32 i))
+  let fingers = digit (-0.03) (-0.03) [0.2, 1.3, 2.4, 3.35] 0.0155
+                |> f32.min (digit 0 0 [0.2, 1.35, 2.5, 3.45] 0.016)
+                |> f32.min (digit 0.03 0.03 [0.2, 1.3, 2.4, 3.3] 0.0155)
+  let thumb = digit 0.05 0.062 [0.4, -0.5, -1.35, -1.9] 0.016
+  in smin 0.012 (smin 0.02 palm (sd_wrist right_wrist right_palm p)) (f32.min fingers thumb)
 
--- The left hand, in a frame along the forearm. Fingers curl towards the
--- palm (its side facing -up); as he points, the index finger straightens
--- and the others close.
+-- The pointing hand (the wizard's own right hand): a palm in a frame along
+-- the forearm, three fingers of two straight segments side by side, and a
+-- thumb. At rest the fingers are nearly straight with a slight bend; as he
+-- points into a turn the index finger straightens and the others close.
 def sd_left_hand (pose: pose) (p: vec3) : f32 =
   let f = normalise (pose.l_wrist -^ pose.l_elbow) -- along the forearm
   let side = normalise (cross f (vec 0 1 0)) -- away from the thumb
   let up = cross side f -- the back of the hand
-  let centre = pose.l_wrist +^ scale 0.04 f
+  let centre = left_palm pose
   let q = p -^ centre
   let lq = vec (dot q side) (dot q up) (dot q f)
-  let palm = sd_ellipsoid lq (vec 0.04 0.022 0.038)
-  -- a finger from `base` (offset across the palm), two segments of lengths
-  -- l1, l2 curled by c1 and c1 + c2 radians towards the palm
+  let palm = sd_ellipsoid lq (vec 0.036 0.026 0.045)
+  -- a finger across the palm, two segments of lengths l1 and l2, bent by
+  -- c1 and c1 + c2 radians towards the palm
   let finger (across: f32) (c1: f32) (c2: f32) (l1: f32) (l2: f32) =
     let dir (c: f32) = scale (f32.cos c) f -^ scale (f32.sin c) up
-    let base = centre +^ scale 0.03 f +^ scale across side
+    let base = centre +^ scale 0.035 f +^ scale across side
     let knuckle = base +^ scale l1 (dir c1)
     let tip = knuckle +^ scale l2 (dir (c1 + c2))
-    in f32.min (sd_capsule p base knuckle 0.0135) (sd_capsule p knuckle tip 0.012)
+    in f32.min (sd_capsule p base knuckle 0.015) (sd_capsule p knuckle tip 0.0145)
   let pt = pose.point
-  let index = finger (-0.022) (mix1 0.5 0.0 pt) (mix1 0.6 0.05 pt) 0.032 0.03
-  let middle = finger 0 (mix1 0.6 1.4 pt) (mix1 0.7 1.5 pt) 0.032 0.027
-  let ring = finger 0.022 (mix1 0.7 1.4 pt) (mix1 0.8 1.5 pt) 0.028 0.024
-  -- the thumb: from the inner side of the palm, angled forward and in
-  let tb = centre -^ scale 0.035 side +^ scale 0.005 f
-  let tdir = normalise (scale 0.8 f -^ scale 0.5 side -^ scale (0.35 + 0.3 * pt) up)
-  let thumb = sd_capsule p tb (tb +^ scale 0.04 tdir) 0.014
-  in smin 0.012 palm (f32.min (f32.min index middle) (f32.min ring thumb))
+  let index = finger (-0.025) (mix1 0.15 0.0 pt) (mix1 0.2 0.0 pt) 0.032 0.028
+  let middle = finger 0 (mix1 0.2 1.1 pt) (mix1 0.25 1.3 pt) 0.034 0.028
+  let ring = finger 0.025 (mix1 0.25 1.1 pt) (mix1 0.3 1.3 pt) 0.03 0.025
+  -- the thumb: from the inner side of the palm, along the index finger
+  let tb = centre -^ scale 0.03 side +^ scale 0.005 f
+  let tdir = normalise (scale 0.85 f -^ scale 0.4 side -^ scale (0.2 + 0.25 * pt) up)
+  let thumb = sd_capsule p tb (tb +^ scale 0.042 tdir) 0.015
+  let wrist = sd_wrist pose.l_wrist centre p
+  in smin 0.012 (smin 0.02 palm wrist) (f32.min (f32.min index middle) (f32.min ring thumb))
 
 def sd_hands (pose: pose) (p: vec3) : f32 =
-  -- each hand fits in a sphere of radius 0.12; skip its detail beyond
+  -- each hand (with its wrist) fits in a sphere of radius 0.14; skip its
+  -- detail beyond
   let near (c: vec3) (f: vec3 -> f32) =
-    let b = length (p -^ c) - 0.12
+    let b = length (p -^ c) - 0.14
     in if b > 0.15 then b else f p
-  in f32.min (near (staff_at grip_height) sd_right_hand)
-             (near (pose.l_wrist +^ scale 0.04 (normalise (pose.l_wrist -^ pose.l_elbow))) (sd_left_hand pose))
+  in f32.min (near right_palm sd_right_hand) (near (left_palm pose) (sd_left_hand pose))
 
 -- The head, beard and hat move together: offset by the pose, and turned
 -- about the neck to look where he points.
