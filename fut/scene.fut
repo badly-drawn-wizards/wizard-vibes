@@ -3,6 +3,7 @@
 
 import "vec3"
 import "params"
+import "config"
 import "sdf"
 import "hash"
 import "anim"
@@ -767,7 +768,7 @@ def march_terrain (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
   let t0 = if wo.y > top then (wo.y - top) / -wd.y else 0
   let (t, _, hit) =
     loop (t, i, hit) = (f32.max 0.02 t0, 0i32, false)
-    while !hit && i < 300 && t < tmax do
+    while !hit && i < terrain_steps && t < tmax do
       let d = (terrain pose (ro +^ scale t rd)).0
       in if d < 0.0004 * t then (t, i + 1, true) else (t + d * 0.85, i + 1, false)
   in if hit then t else f32.inf

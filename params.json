@@ -325,6 +325,24 @@
           "compile": true
         },
         {
+          "id": "march_steps",
+          "label": "March steps",
+          "kind": "int",
+          "min": 32,
+          "max": 512,
+          "default": 300,
+          "compile": true
+        },
+        {
+          "id": "terrain_steps",
+          "label": "Terrain steps",
+          "kind": "int",
+          "min": 32,
+          "max": 512,
+          "default": 300,
+          "compile": true
+        },
+        {
           "id": "shadow_steps",
           "label": "Shadow steps",
           "kind": "int",

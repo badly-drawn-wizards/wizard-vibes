@@ -26,7 +26,7 @@ type^ dist_fn = f32 -> vec3 -> f32
 def march (scene: f32 -> vec3 -> hit) (media: vec3 -> media_sample) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32, vec3, f32) =
   let (t, _, m, acc, tr) =
     loop (t, i, m, acc, tr) = (0.02f32, 0i32, -1i32, splat 0, 1f32)
-    while i < 300 && m < 0 && t < tmax && tr > 0.01 do
+    while i < march_steps && m < 0 && t < tmax && tr > 0.01 do
       let p = ro +^ scale t rd
       let (d, mat) = scene 0.1 p
       in if d < 0.0004 * t then (t, i + 1, mat, acc, tr)
