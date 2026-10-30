@@ -104,6 +104,9 @@ type pose = { tm: f32, secs: f32, fl: flight
             , orb_boost: f32 -- its glow, flaring as a spell is cast
             , spell: i32 -- the spell in hand: what goes on in the orb (0 fire, 1 lightning, 2 wind)
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
+            -- the left hand's grip on the staff, the staff's axis there, and
+            -- the palm (on the side facing the elbow)
+            , l_grip: vec3, l_axis: vec3, l_palm: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
 -- Free flight, driven from the harness (web/flight.ts): with `free` set, the
@@ -167,8 +170,20 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
                     +^ vec 0 (0.08 * dr.staff) 0
   let (staff_cos, staff_sin) = (f32.cos angle, f32.sin angle)
   let held (q: vec3) = staff_pivot +^ rotate_about staff_axis staff_cos staff_sin (q -^ staff_pivot) +^ staff_shift
-  -- the left hand stays on the staff, so its elbow follows the body
-  let (l_elbow, l_wrist) = two_bone l_shoulder (held left_wrist) 0.34 0.29 (vec 0.5 (-1) (-0.5))
+  -- The left hand stays on the staff, closed round it with the palm facing
+  -- the elbow, wherever the staff and the elbow are: the arm reaches for the
+  -- staff, then the hand is built round the staff's grip facing the elbow
+  -- that gives, and the arm reaches again for its wrist.
+  let l_grip = held (staff_at grip_height)
+  let l_axis = rotate_about staff_axis staff_cos staff_sin staff_dir
+  let hand_at (elbow: vec3) =
+    let towards = elbow -^ l_grip
+    let palm = l_grip +^ scale 0.045 (normalise (towards -^ scale (dot towards l_axis) l_axis))
+    in (palm, palm -^ scale 0.1 (normalise (palm -^ elbow)))
+  let pole = vec 0.5 (-1) (-0.5)
+  let (e0, _) = two_bone l_shoulder (held left_wrist) 0.34 0.29 pole
+  let (l_elbow, l_wrist) = two_bone l_shoulder (hand_at e0).1 0.34 0.29 pole
+  let l_palm = (hand_at l_elbow).0
   -- the orb takes the colour of the spell in hand, and flares as it is cast
   let spell = i32.f32 (f32.round dr.spell)
   let orb_tint = if spell == 0 then vec 1 0.42 0.12 else if spell == 2 then vec 0.5 1 0.75 else prm.orb_glow_colour
@@ -197,7 +212,7 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
      , runes = if dr.free then clamp 0.1 3 (2 ** (dr.climb / 4)) else 1
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
-     , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist
+     , l_shoulder, l_elbow, l_wrist, l_grip, l_axis, l_palm, r_shoulder, r_elbow, r_wrist
      , staff_pivot, staff_axis, staff_cos, staff_sin, staff_shift, orb = held orb_pos, orb_tint, bolt_tint, orb_boost, spell }
 
 
@@ -287,10 +302,11 @@ def sd_wrist (cuff: vec3) (palm: vec3) (p: vec3) : f32 =
 -- the elbow's side, and digits made of short straight segments with
 -- knuckles, like the pointing hand's: three fingers wrapping round the
 -- staff below the thumb, which wraps the other way above them.
-def sd_left_hand (p: vec3) : f32 =
-  let g = staff_at grip_height
-  let towards = left_elbow_rest -^ g
-  let u = normalise (towards -^ scale (dot towards staff_dir) staff_dir) -- to the palm
+-- (built round the staff wherever it is held, see pose_at)
+def sd_left_hand (pose: pose) (p: vec3) : f32 =
+  let g = pose.l_grip
+  let staff_dir = pose.l_axis
+  let u = normalise (pose.l_palm -^ g) -- to the palm
   let v = cross u staff_dir -- the way the fingers wrap
   let q = p -^ g
   let palm = sd_ellipsoid (vec (dot q u - 0.045) (dot q v) (dot q staff_dir)) (vec 0.026 0.036 0.05)
@@ -311,7 +327,7 @@ def sd_left_hand (p: vec3) : f32 =
                 |> f32.min (digit 0 0 0.2 1.35 2.5 3.45 0.016)
                 |> f32.min (digit 0.03 0.03 0.2 1.3 2.4 3.3 0.0155)
   let thumb = digit 0.05 0.062 0.4 (-0.5) (-1.35) (-1.9) 0.016
-  in smin 0.012 (smin 0.02 palm (sd_wrist left_wrist left_palm p)) (f32.min fingers thumb)
+  in smin 0.012 (smin 0.02 palm (sd_wrist pose.l_wrist pose.l_palm p)) (f32.min fingers thumb)
 
 -- The right hand, which points: a palm in a frame along
 -- the forearm, three fingers of two straight segments side by side, and a
@@ -345,9 +361,9 @@ def sd_right_hand (pose: pose) (p: vec3) : f32 =
   in smin 0.012 (smin 0.02 palm wrist) (f32.min (f32.min index middle) (f32.min ring thumb))
 
 -- (each hand, with its wrist, fits in a sphere of radius 0.14)
--- (the left one is part of the staff's, see held_staff)
 def sd_hands (pose: pose) (p: vec3) : f32 =
-  sphere_bounded (right_palm pose) 0.14 0.15 (sd_right_hand pose) p
+  f32.min (sphere_bounded pose.l_palm 0.14 0.15 (sd_left_hand pose) p)
+          (sphere_bounded (right_palm pose) 0.14 0.15 (sd_right_hand pose) p)
 
 -- The head, beard and hat move together: offset by the pose, and turned
 -- about the neck to look where he points.
@@ -758,14 +774,11 @@ def wizard (mask: i32) (pose: pose) (p: vec3) : hit =
              else waist_gear pose.prm (body_space pose p) |> tag layers_gear
   in figure |> umin gear
 
--- The staff, its cradle and the hand holding it, which move together when
--- he holds the staff out (all at q, in the staff's rest frame).
+-- The staff and its cradle, which move together when he holds the staff
+-- out (at q, in the staff's rest frame).
 def held_staff (mask: i32) (q: vec3) : hit =
-  let staff = if !(has mask layers_staff) then nothing
-              else (sd_staff q, m_staff) |> umin (sd_cradle q, m_gold) |> tag layers_staff
-  let hand = if !(has mask layers_figure) then nothing
-             else (sphere_bounded left_palm 0.14 0.15 sd_left_hand q, m_skin) |> tag layers_figure
-  in staff |> umin hand
+  if !(has mask layers_staff) then nothing
+  else (sd_staff q, m_staff) |> umin (sd_cradle q, m_gold) |> tag layers_staff
 
 def staff_bound (q: vec3) : f32 = sd_capsule q staff_foot orb_pos 0.25
 
