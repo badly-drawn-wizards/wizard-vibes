@@ -206,16 +206,19 @@ def sd_left_hand (p: vec3) : f32 =
   -- circle of radius 0.048 round it, at the given angles from the palm
   let around (y: f32) (phi: f32) =
     g +^ scale y staff_dir +^ scale (0.048 * f32.cos phi) u +^ scale (0.048 * f32.sin phi) v
-  let digit (y0: f32) (y1: f32) (angles: [4]f32) (r: f32) =
-    -- (i is a loop counter in 0..3, so no bounds check; a check would make
-    -- Futhark emit f16 certificate variables, see web/wgsl-f32.ts)
-    let pt (i: i32) = around (mix1 y0 y1 (f32.i32 i / 3)) (#[unsafe] angles[i])
-    in loop d = 1e9f32 for i < 3 do
-         f32.min d (sd_capsule p (pt i) (pt (i + 1)) (r - 0.001 * f32.i32 i))
-  let fingers = digit (-0.03) (-0.03) [0.2, 1.3, 2.4, 3.35] 0.0155
-                |> f32.min (digit 0 0 [0.2, 1.35, 2.5, 3.45] 0.016)
-                |> f32.min (digit 0.03 0.03 [0.2, 1.3, 2.4, 3.3] 0.0155)
-  let thumb = digit 0.05 0.062 [0.4, -0.5, -1.35, -1.9] 0.016
+  -- (angles are scalars, not an array: the scene is a non-inlined GPU
+  -- function, which the WebGPU backend cannot generate with arrays)
+  let digit (y0: f32) (y1: f32) (a0: f32) (a1: f32) (a2: f32) (a3: f32) (r: f32) =
+    let pt (k: f32) (a: f32) = around (mix1 y0 y1 (k / 3)) a
+    let p0 = pt 0 a0
+    let p1 = pt 1 a1
+    let p2 = pt 2 a2
+    let p3 = pt 3 a3
+    in f32.min (sd_capsule p p0 p1 r) (f32.min (sd_capsule p p1 p2 (r - 0.001)) (sd_capsule p p2 p3 (r - 0.002)))
+  let fingers = digit (-0.03) (-0.03) 0.2 1.3 2.4 3.35 0.0155
+                |> f32.min (digit 0 0 0.2 1.35 2.5 3.45 0.016)
+                |> f32.min (digit 0.03 0.03 0.2 1.3 2.4 3.3 0.0155)
+  let thumb = digit 0.05 0.062 0.4 (-0.5) (-1.35) (-1.9) 0.016
   in smin 0.012 (smin 0.02 palm (sd_wrist left_wrist left_palm p)) (f32.min fingers thumb)
 
 -- The right hand, which points: a palm in a frame along
@@ -362,7 +365,6 @@ def staff_local (p: vec3) : vec3 =
 def staff_length : f32 = length (staff_top -^ staff_foot)
 
 -- Knots: swellings at a few heights, each on one side of the branch.
-def staff_knots : [3](f32, f32) = [(0.55, 0.6), (1.32, 2.6), (1.72, 4.4)] -- (height, angle)
 
 -- A branch rather than a pole: the radius swells and narrows along the
 -- length, thickening a little towards the foot, with a few knots. (The
@@ -372,9 +374,10 @@ def sd_staff (p: vec3) : f32 =
   let y = clamp 0 staff_length q.y
   let r = staff_radius * (1.12 - 0.12 * y / staff_length + 0.07 * f32.sin (y * 6.3 + 1) + 0.04 * f32.sin (y * 17.1))
   let shaft = length (q -^ vec 0 y 0) - r
-  let knots = loop d = 1e9f32 for (ky, ka) in staff_knots do
-                let c = vec (staff_radius * 0.75 * f32.cos ka) ky (staff_radius * 0.75 * f32.sin ka)
-                in f32.min d (sd_ellipsoid (q -^ c) (vec 0.022 0.035 0.022))
+  let knot (ky: f32) (ka: f32) =
+    let c = vec (staff_radius * 0.75 * f32.cos ka) ky (staff_radius * 0.75 * f32.sin ka)
+    in sd_ellipsoid (q -^ c) (vec 0.022 0.035 0.022)
+  let knots = f32.min (knot 0.55 0.6) (f32.min (knot 1.32 2.6) (knot 1.72 4.4))
   in smin 0.015 shaft knots
 
 ---------------------------------------------------------------------
@@ -592,6 +595,14 @@ def terrain (pose: pose) (p: vec3) : hit =
      let gap = w.y - terrain_upper w.x w.z
      in (if gap > 0.4 then 0.6 * gap else terrain_dist detail w, m_terrain)
 
+-- #[noinline]: Futhark inlines everything by default, and the scene is used
+-- by the march, normals, AO and both shadow loops, which made the shader
+-- several megabytes (Firefox's compiler and runtime suffered most). The
+-- scene, the occluders and the media are compiled once as real GPU
+-- functions instead. The WebGPU backend's limits here: such functions may
+-- not use arrays, and may not call one another (the callee is not emitted),
+-- so bounded_wizard stays inlined into both scene and occluder_dist.
+#[noinline]
 def scene (pose: pose) (tol: f32) (p: vec3) : hit =
   bounded_wizard pose tol p |> umin (rock p) |> umin (terrain pose p)
 
@@ -600,4 +611,5 @@ def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 -- What casts shadows: the wizard and his rock. The terrain is left out (it
 -- would only shadow itself, at grazing angles, with penumbra artefacts), and
 -- so is the orb, a light source itself.
+#[noinline] -- (see scene)
 def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_wizard pose tol p |> umin (rock p)).0

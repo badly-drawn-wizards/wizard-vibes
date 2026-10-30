@@ -30,6 +30,7 @@ def globe_haze : f32 = 0.3
 -- ambient; they scatter what they absorb.
 def cloud_colour (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (0.12 + 0.3 * h) (vec 0.42 0.46 0.62)
 
+#[noinline] -- compiled once (see scene in scene.fut)
 def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let tm = pose.tm
   let od = sd_orb p
