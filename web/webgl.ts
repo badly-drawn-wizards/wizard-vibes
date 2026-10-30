@@ -5,6 +5,15 @@
 // holds the drawer's uniforms, the drive record and the camera, each a
 // 4-byte scalar at 4 * its index (std140 for scalars). There are no spells
 // or collisions here: those need the compute side.
+//
+// The shader is large, and compiling it takes a while. Where the browser
+// compiles in the background (KHR_parallel_shader_compile), the scene keeps
+// drawing meanwhile. Where it does not, a compile blocks its context; so a
+// new shader is first compiled in a throwaway worker of its own, which only
+// blocks the worker (the scene keeps drawing, if slower: the GPU process
+// still runs every context's commands in turn), and that puts it in the
+// browser's shader cache, so compiling it here then takes milliseconds
+// (measured in Chromium: ~350 ms in the worker, then 26 ms).
 
 import type { Drive } from "./flight.ts";
 
@@ -29,6 +38,42 @@ export interface GlArgs {
   yaw: number;
   pitch: number;
   dst: number;
+}
+
+// Compiles and links a program in a throwaway worker's own context, for the
+// browser's shader cache. Resolves when done (or if it cannot be done there).
+let warmUrl: string | null = null;
+function warmInWorker(vertex: string, fragment: string): Promise<void> {
+  if (typeof OffscreenCanvas === "undefined" || typeof Worker === "undefined") return Promise.resolve();
+  warmUrl ??= URL.createObjectURL(
+    new Blob(
+      [
+        `onmessage = (e) => {
+  const gl = new OffscreenCanvas(1, 1).getContext("webgl2");
+  if (gl) {
+    const shader = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const p = gl.createProgram();
+    gl.attachShader(p, shader(gl.VERTEX_SHADER, e.data.vertex));
+    gl.attachShader(p, shader(gl.FRAGMENT_SHADER, e.data.fragment));
+    gl.linkProgram(p);
+    gl.getProgramParameter(p, gl.LINK_STATUS);
+  }
+  postMessage("done");
+};`,
+      ],
+      { type: "text/javascript" },
+    ),
+  );
+  return new Promise((done) => {
+    const w = new Worker(warmUrl!);
+    const end = () => {
+      w.terminate();
+      done();
+    };
+    w.onmessage = end;
+    w.onerror = end;
+    w.postMessage({ vertex, fragment });
+  });
 }
 
 const VERTEX = `#version 300 es
@@ -60,6 +105,8 @@ export class GlRenderer {
     if (!res.ok) throw new Error(`build ${version} has no WebGL shader (wizard.gl.json: ${res.status})`);
     const shader = (await res.json()) as GlShader;
     const gl = this.gl;
+    const parallel = gl.getExtension("KHR_parallel_shader_compile");
+    if (!parallel) await warmInWorker(VERTEX, shader.glsl);
     const compile = (type: number, src: string) => {
       const s = gl.createShader(type)!;
       gl.shaderSource(s, src);
@@ -72,7 +119,6 @@ export class GlRenderer {
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     gl.linkProgram(program);
-    const parallel = gl.getExtension("KHR_parallel_shader_compile");
     if (parallel) {
       while (!gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) await new Promise((r) => setTimeout(r, 50));
     }
