@@ -19,7 +19,7 @@ import "textures"
 -- The night sky in a world direction: a gradient, the moon, and stars.
 def sky (pose: pose) (rd: vec3) : vec3 =
   let up = saturate (rd.y * 0.5 + 0.5)
-  let base = mix (vec 0.06 0.04 0.14) (vec 0.004 0.006 0.03) (f32.sqrt up)
+  let base = mix pose.prm.sky_horizon pose.prm.sky_zenith (f32.sqrt up)
   -- The moon: a disc of angular radius moon_size, with darker maria and
   -- limb darkening, in a soft halo.
   let m = pose.moon_world
@@ -37,7 +37,7 @@ def sky (pose: pose) (rd: vec3) : vec3 =
     let craters = smoothstep 0.72 0.8 (vnoise2 (u * 9 + 11) (v * 9 - 7))
     let limb = f32.sqrt (f32.max 0 (1 - rr * rr)) ** 0.4
     in smoothstep 1 0.96 rr * (0.55 + 0.45 * limb) * (1 - 0.45 * maria) * (1 - 0.2 * craters)
-  let halo = 0.15 * f32.exp (-(1 - md) * 60) + 0.12 * f32.exp (-f32.max 0 (ang - r) / 0.06)
+  let halo = 0.15 * f32.exp (-(1 - md) * 60) + pose.prm.moon_halo * f32.exp (-f32.max 0 (ang - r) / 0.06)
   -- Stars: a few cells of a direction grid each hold a small round star at a
   -- random point (kept off the cell's edges), twinkling at its own rate.
   let q = scale 220 rd
@@ -45,13 +45,14 @@ def sky (pose: pose) (rd: vec3) : vec3 =
   let (ix, iy, iz) = (i32.f32 c.x, i32.f32 c.y, i32.f32 c.z)
   let s = hash3 ix iy iz
   let star =
-    if s <= 0.9975 || rd.y <= 0.02 then 0 else
+    let thr = 1 - pose.prm.star_density
+    in if s <= thr || rd.y <= 0.02 then 0 else
     let at = c +^ vec (0.2 + 0.6 * hash3 ix iy (iz + 71)) (0.2 + 0.6 * hash3 (ix + 13) iy iz) (0.2 + 0.6 * hash3 ix (iy + 29) iz)
     let d = length (q -^ at) / 0.22 -- in units of the star's size (~1.3 pixels at 1080p)
     let rate = 2 + 5 * hash3 (ix + 5) (iy + 3) iz
-    let twinkle = 0.55 + 0.45 * f32.sin (pose.secs * rate + 6.28 * hash3 ix (iy + 7) (iz + 3))
-    in (s - 0.9975) * 2500 * f32.exp (-(d * d)) * twinkle * saturate (rd.y * 4) * smoothstep 1.2 2 rr
-  in base +^ scale (moon * 0.9 + halo) (vec 0.85 0.9 1) +^ splat star
+    let twinkle = 1 - pose.prm.twinkle + pose.prm.twinkle * f32.sin (pose.secs * rate + 6.28 * hash3 ix (iy + 7) (iz + 3))
+    in (s - thr) / 0.0025 * pose.prm.star_brightness * 0.0025 * f32.exp (-(d * d)) * twinkle * saturate (rd.y * 4) * smoothstep 1.2 2 rr
+  in base +^ scale (moon * pose.prm.moon_brightness + halo) (vec 0.85 0.9 1) +^ splat star
 
 ---------------------------------------------------------------------
 -- Materials
@@ -65,48 +66,48 @@ def plain (albedo: vec3) : material =
 
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
-  if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = 0.9 with ks = 0.03
-  else if m == m_staff then plain (bark_albedo fp p) with ks = 0.05
-  else if m == m_skin then plain (vec 0.85 0.6 0.48) with ks = 0.15 with shininess = 16
+  if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = pose.prm.sheen with ks = 0.03
+  else if m == m_staff then plain (bark_albedo pose.prm fp p) with ks = 0.05
+  else if m == m_skin then plain pose.prm.skin_colour with ks = 0.15 with shininess = 16
   else if m == m_beard then plain (hair_albedo pose p) with ks = 0
   else if m == m_hat then
     let s = (hat_stars pose fp p).0
-    in plain (mix (vec 0.09 0.08 0.36) (vec 1 0.8 0.3) s) with emission = scale (0.6 * s) (vec 1 0.75 0.3)
-  else if m == m_gold then plain (vec 1 0.6 0.14) with ks = 1.6 with shininess = 48 with metal = true
+    in plain (mix pose.prm.hat_colour pose.prm.star_colour s) with emission = scale (pose.prm.star_glow * s) pose.prm.star_colour
+  else if m == m_gold then plain pose.prm.gold_colour with ks = 1.6 with shininess = 48 with metal = true
   else if m == m_band then plain pose.prm.band_colour with ks = 1.6 with shininess = 48 with metal = true
   else if m == m_eye then plain (eye_albedo pose p) with ks = 1 with shininess = 150 with rim = false
-  else if m == m_brow then plain (vec 0.82 0.82 0.86)
+  else if m == m_brow then plain pose.prm.brow_colour
   else if m == m_wood then
     plain (scale (0.75 + 0.25 * f32.sin (p.y * 45 + 3 * f32.sin (p.x * 40))) (vec 0.36 0.21 0.1))
   else if m == m_rock then
     -- red-orange sandstone, banded and mottled (strongly saturated, since
     -- the blue moonlight mutes warm colours)
     let band = 0.5 + 0.5 * f32.sin (p.y * 9 + 2 * vnoise3 (scale 1.5 p))
-    let c = mix (vec 0.55 0.15 0.05) (vec 0.72 0.33 0.1) band
+    let c = mix pose.prm.rock_dark pose.prm.rock_light band
     in plain (scale (0.6 + 0.7 * vnoise3 (scale 4 p)) c) with ks = 0.1
   else if m == m_terrain then
     -- moss in the valleys, bare rock on steep slopes, snow on high flats
     let w = to_world pose.fl p
     let up = (to_world_dir pose.fl n).y
     let grain = 0.75 + 0.5 * vnoise2 (w.x * 1.7) (w.z * 1.7)
-    let moss = vec 0.09 0.14 0.08
-    let stone = vec 0.2 0.18 0.17
-    let snow = vec 0.75 0.8 0.88
+    let moss = pose.prm.moss_colour
+    let stone = pose.prm.stone_colour
+    let snow = pose.prm.snow_colour
     let c = mix stone moss (smoothstep 0.7 0.85 up)
-    let c = mix c snow (smoothstep 7 8.5 w.y * smoothstep 0.6 0.8 up)
+    let c = mix c snow (smoothstep pose.prm.snow_line (pose.prm.snow_line + 1.5) w.y * smoothstep 0.6 0.8 up)
     in plain (scale grain c) with rim = false
   else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28
   else if m == m_cork then plain (cork_albedo fp p) with ks = 0.05
-  else if m == m_tome then plain (vec 0.32 0.05 0.06) with ks = 0.15 with shininess = 16
+  else if m == m_tome then plain pose.prm.tome_colour with ks = 0.15 with shininess = 16
   else if m == m_pages then plain (vec 0.85 0.8 0.66)
   else if m >= m_potion && m < m_potion + 3 then
     -- the glowing liquid (its glass is drawn by `glass`)
-    let c = glow_colour m
+    let c = glow_colour pose.prm m
     in plain (scale 0.3 c) with emission = scale 0.8 c with ks = 0.6 with shininess = 60
   else if m == m_ground then
     let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
-    in plain (scale (0.8 + 0.4 * tile) (vec 0.3 0.14 0.08))
-       with emission = scale (0.9 * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) rune_glow_colour
+    in plain (scale (0.8 + 0.4 * tile) pose.prm.rock_top)
+       with emission = scale (0.9 * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) pose.prm.rune_colour
        with ks = 0.3 with shininess = 40 with rim = false
   else plain (splat 0.5)
 
@@ -165,7 +166,7 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     -- (whole multiples of the loop).
     let i = k - 2
     let flicker = 1 + 0.12 * f32.sin (f32.i32 (7 + 3 * i) * pose.tm + f32.i32 i * 2.1)
-    let c = scale (pose.prm.potion_light * flicker) (glow_colour (m_potion + i))
+    let c = scale (pose.prm.potion_light * flicker) (glow_colour pose.prm (m_potion + i))
     in { pos = from_body_space pose (potion_centre pose.prm i), directional = false, diffuse = c, specular = scale 0.3 c
        , falloff = 1 / (0.12 * 0.12), range = 0.5, radius = 0.04
        , casters = 0, receivers = figure_layers, shadowed_receivers = 0 }
@@ -220,8 +221,8 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   let to_orb = orb_pos -^ p
   let od = length to_orb
   let ol = scale (1 / od) to_orb
-  let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
-  let rim = if mat.rim then scale (occ * pow (1 - saturate (-(dot n rd))) 3 * 0.25) (vec 0.35 0.3 0.8)
+  let fill = scale (occ * (0.5 + 0.5 * n.y) * pose.prm.fill) (mat.albedo *^ vec 0.2 0.22 0.45)
+  let rim = if mat.rim then scale (occ * pow (1 - saturate (-(dot n rd))) 3 * pose.prm.rim) (vec 0.35 0.3 0.8)
             else splat 0
   -- Metals mirror their surroundings: the sky, and the glowing orb where
   -- the reflected ray points at it (it is right next to the gold cradle).

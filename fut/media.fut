@@ -11,8 +11,6 @@ import "scene"
 import "lightning"
 import "world"
 
-def orb_glow_colour : vec3 = vec 0.35 0.55 1
-def rune_glow_colour : vec3 = vec 0.25 0.5 1
 
 -- A cloud around the orb whose density falls off exponentially with
 -- distance from the orb's surface, flickering with the lightning. It is
@@ -30,16 +28,16 @@ def globe_haze : f32 = 0.3
 
 -- Clouds are lit by the moon, more brightly towards their tops, over a dim
 -- ambient; they scatter what they absorb.
-def cloud_colour (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (0.12 + 0.3 * h) (vec 0.42 0.46 0.62)
+def cloud_colour (prm: params) (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (0.12 + 0.3 * h) prm.cloud_colour
 
 #[noinline] -- compiled once (see scene in scene.fut)
 -- The colour a glowing material gives off, used both for its surface and
 -- for the glow around it, so the two always match. 0 for materials that do
 -- not glow.
-def glow_colour (m: i32) : vec3 =
-  if m == m_potion then vec 1 0.12 0.2
-  else if m == m_potion + 1 then vec 0.2 1 0.35
-  else if m == m_potion + 2 then vec 0.65 0.25 1
+def glow_colour (prm: params) (m: i32) : vec3 =
+  if m == m_potion then prm.potion_colour_1
+  else if m == m_potion + 1 then prm.potion_colour_2
+  else if m == m_potion + 2 then prm.potion_colour_3
   else splat 0
 
 -- The potions' liquids glow in a thin halo, coloured by whichever liquid is
@@ -59,11 +57,11 @@ def media (pose: pose) (g: glow) (p: vec3) : media_sample =
   let (ld, lm) = if glow then nearest_liquid pose p else (1e9, m_potion)
   in { cap = f32.min bolts.cap (f32.min (0.3 * f32.abs od + 0.015) (0.3 * gd + 0.01))
              |> f32.min (0.3 * f32.abs ld + 0.004)
-     , radiance = scale (if glow then orb_glow_density pose.prm g od else 0) orb_glow_colour
-                  +^ scale (rune_glow_density pose.prm tm gd) rune_glow_colour
-                  +^ scale haze orb_glow_colour
-                  +^ bolts.radiance
-                  +^ scale (potion_glow_density pose.prm ld) (glow_colour lm)
+     , radiance = scale (if glow then orb_glow_density pose.prm g od else 0) pose.prm.orb_glow_colour
+                  +^ scale (rune_glow_density pose.prm tm gd) pose.prm.rune_colour
+                  +^ scale haze pose.prm.orb_glow_colour
+                  +^ scale pose.prm.lightning bolts.radiance
+                  +^ scale (potion_glow_density pose.prm ld) (glow_colour pose.prm lm)
      , extinction = 0 }
 
 -- The clouds are integrated separately from the march (see `clouds`): their
@@ -92,5 +90,5 @@ def clouds (pose: pose) (ro: vec3) (rd: vec3) (tend: f32) : (vec3, f32) =
       let (dens, clear) = cloud_sample pose.prm.cloud_cover pose.prm.cloud_density pose.secs w
       in if dens <= 0 then (t + f32.max dt clear, i + 1, rad, tr)
          else let ch = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
-              in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour ch), tr * f32.exp (-dens * dt))
+              in (t + dt, i + 1, rad +^ scale (dens * dt * tr) (cloud_colour pose.prm ch), tr * f32.exp (-dens * dt))
   in (rad, tr)

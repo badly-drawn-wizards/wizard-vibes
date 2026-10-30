@@ -21,11 +21,11 @@ def path_ddx (s: f32) : f32 = -14 * 0.0144 * f32.sin (0.12 * s) - 6 * 0.0729 * f
 -- about 0.2; bank: roll about the direction of travel, into the turn.
 type flight = {pos: vec3, heading: f32, turn: f32, bank: f32}
 
-def flight_at (s: f32) : flight =
+def flight_at (bank_gain: f32) (s: f32) : flight =
   let dx = path_dx s
   let heading = f32.atan2 dx forward_speed
   let turn = forward_speed * path_ddx s / (dx * dx + forward_speed * forward_speed)
-  in {pos = vec (path_x s) altitude (forward_speed * s), heading, turn, bank = clamp (-0.35) 0.35 (1.6 * turn)}
+  in {pos = vec (path_x s) altitude (forward_speed * s), heading, turn, bank = clamp (-0.35) 0.35 (bank_gain * turn)}
 
 def yaw (a: f32) (v: vec3) : vec3 =
   {x = v.x * f32.cos a + v.z * f32.sin a, y = v.y, z = v.z * f32.cos a - v.x * f32.sin a}

@@ -87,7 +87,7 @@ type pose = { tm: f32, secs: f32, fl: flight
 
 def pose_at (secs: f32) (prm: params) : pose =
   let tm = loop_angle secs
-  let fl = flight_at secs
+  let fl = flight_at prm.bank secs
   let b = breath tm
   -- Turning towards local +x makes fl.turn positive. He leans into the turn,
   -- and in sharper turns points the way with his right hand and looks there.
@@ -96,8 +96,9 @@ def pose_at (secs: f32) (prm: params) : pose =
   let lean = clamp (-0.15) 0.15 (prm.lean * fl.turn)
   let shift (y: f32) = vec (lean * f32.max 0 (y - 0.45)) 0 0
   -- inhaling lifts the shoulders; the head rises and nods forward a little
-  let lift = vec 0 (0.012 * b) (0.004 * b) +^ shift 1.33
-  let head = vec 0 (0.012 * b) (0.007 * b) +^ shift 1.6
+  let bd = b * prm.breath
+  let lift = vec 0 (0.012 * bd) (0.004 * bd) +^ shift 1.33
+  let head = vec 0 (0.012 * bd) (0.007 * bd) +^ shift 1.6
   let l_shoulder = vec 0.2 1.33 0 +^ lift
   let r_shoulder = vec (-0.2) 1.33 0 +^ lift
   -- the left hand stays on the staff, so its elbow follows the body

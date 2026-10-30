@@ -53,6 +53,58 @@
       ]
     },
     {
+      "name": "Sky",
+      "params": [
+        {
+          "id": "sky_horizon",
+          "label": "Horizon",
+          "kind": "color",
+          "default": [
+            0.06,
+            0.04,
+            0.14
+          ]
+        },
+        {
+          "id": "sky_zenith",
+          "label": "Zenith",
+          "kind": "color",
+          "default": [
+            0.004,
+            0.006,
+            0.03
+          ]
+        },
+        {
+          "id": "star_density",
+          "label": "Star density",
+          "kind": "slider",
+          "min": 0,
+          "max": 0.01,
+          "step": 0.0001,
+          "default": 0.0025
+        },
+        {
+          "id": "star_brightness",
+          "label": "Star brightness",
+          "kind": "slider",
+          "min": 0,
+          "max": 8000,
+          "step": 50,
+          "default": 2500
+        },
+        {
+          "id": "twinkle",
+          "label": "Twinkle",
+          "kind": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.45
+        }
+      ]
+    },
+    {
       "name": "Moon",
       "params": [
         {
@@ -100,6 +152,24 @@
           "max": 0.15,
           "step": 0.002,
           "default": 0.05
+        },
+        {
+          "id": "moon_brightness",
+          "label": "Disc brightness",
+          "kind": "slider",
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "default": 0.9
+        },
+        {
+          "id": "moon_halo",
+          "label": "Halo",
+          "kind": "slider",
+          "min": 0,
+          "max": 0.5,
+          "step": 0.005,
+          "default": 0.12
         }
       ]
     },
@@ -147,6 +217,25 @@
           "label": "Reflections",
           "kind": "checkbox",
           "default": true
+        },
+        {
+          "id": "orb_glow_colour",
+          "label": "Glow colour",
+          "kind": "color",
+          "default": [
+            0.35,
+            0.55,
+            1
+          ]
+        },
+        {
+          "id": "lightning",
+          "label": "Lightning brightness",
+          "kind": "slider",
+          "min": 0,
+          "max": 3,
+          "step": 0.01,
+          "default": 1
         }
       ]
     },
@@ -170,6 +259,16 @@
           "max": 0.5,
           "step": 0.01,
           "default": 0.08
+        },
+        {
+          "id": "rune_colour",
+          "label": "Colour",
+          "kind": "color",
+          "default": [
+            0.25,
+            0.5,
+            1
+          ]
         }
       ]
     },
@@ -193,6 +292,36 @@
           "max": 5,
           "step": 0.05,
           "default": 1.6
+        },
+        {
+          "id": "potion_colour_1",
+          "label": "Left",
+          "kind": "color",
+          "default": [
+            1,
+            0.12,
+            0.2
+          ]
+        },
+        {
+          "id": "potion_colour_2",
+          "label": "Middle",
+          "kind": "color",
+          "default": [
+            0.2,
+            1,
+            0.35
+          ]
+        },
+        {
+          "id": "potion_colour_3",
+          "label": "Right",
+          "kind": "color",
+          "default": [
+            0.65,
+            0.25,
+            1
+          ]
         }
       ]
     },
@@ -273,6 +402,230 @@
           "max": 0.8,
           "step": 0.01,
           "default": 0.55
+        },
+        {
+          "id": "breath",
+          "label": "Breathing",
+          "kind": "slider",
+          "min": 0,
+          "max": 3,
+          "step": 0.05,
+          "default": 1
+        }
+      ]
+    },
+    {
+      "name": "Materials",
+      "params": [
+        {
+          "id": "skin_colour",
+          "label": "Skin",
+          "kind": "color",
+          "default": [
+            0.85,
+            0.6,
+            0.48
+          ]
+        },
+        {
+          "id": "beard_tint",
+          "label": "Beard tint",
+          "kind": "color",
+          "default": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "brow_colour",
+          "label": "Eyebrows",
+          "kind": "color",
+          "default": [
+            0.82,
+            0.82,
+            0.86
+          ]
+        },
+        {
+          "id": "hat_colour",
+          "label": "Hat",
+          "kind": "color",
+          "default": [
+            0.09,
+            0.08,
+            0.36
+          ]
+        },
+        {
+          "id": "star_colour",
+          "label": "Hat stars",
+          "kind": "color",
+          "default": [
+            1,
+            0.8,
+            0.3
+          ]
+        },
+        {
+          "id": "star_glow",
+          "label": "Hat star glow",
+          "kind": "slider",
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "default": 0.6
+        },
+        {
+          "id": "gold_colour",
+          "label": "Gold (cradle, buckle)",
+          "kind": "color",
+          "default": [
+            1,
+            0.6,
+            0.14
+          ]
+        },
+        {
+          "id": "leather_colour",
+          "label": "Leather",
+          "kind": "color",
+          "default": [
+            0.17,
+            0.095,
+            0.05
+          ]
+        },
+        {
+          "id": "tome_colour",
+          "label": "Tome",
+          "kind": "color",
+          "default": [
+            0.32,
+            0.05,
+            0.06
+          ]
+        },
+        {
+          "id": "wood_colour",
+          "label": "Staff wood",
+          "kind": "color",
+          "default": [
+            0.4,
+            0.28,
+            0.16
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Rock",
+      "params": [
+        {
+          "id": "rock_dark",
+          "label": "Dark bands",
+          "kind": "color",
+          "default": [
+            0.55,
+            0.15,
+            0.05
+          ]
+        },
+        {
+          "id": "rock_light",
+          "label": "Light bands",
+          "kind": "color",
+          "default": [
+            0.72,
+            0.33,
+            0.1
+          ]
+        },
+        {
+          "id": "rock_top",
+          "label": "Top",
+          "kind": "color",
+          "default": [
+            0.3,
+            0.14,
+            0.08
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Terrain",
+      "params": [
+        {
+          "id": "moss_colour",
+          "label": "Moss",
+          "kind": "color",
+          "default": [
+            0.09,
+            0.14,
+            0.08
+          ]
+        },
+        {
+          "id": "stone_colour",
+          "label": "Stone",
+          "kind": "color",
+          "default": [
+            0.2,
+            0.18,
+            0.17
+          ]
+        },
+        {
+          "id": "snow_colour",
+          "label": "Snow",
+          "kind": "color",
+          "default": [
+            0.75,
+            0.8,
+            0.88
+          ]
+        },
+        {
+          "id": "snow_line",
+          "label": "Snow line",
+          "kind": "slider",
+          "min": 3,
+          "max": 11,
+          "step": 0.1,
+          "default": 7
+        }
+      ]
+    },
+    {
+      "name": "Lighting",
+      "params": [
+        {
+          "id": "fill",
+          "label": "Sky fill",
+          "kind": "slider",
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01,
+          "default": 0.35
+        },
+        {
+          "id": "rim",
+          "label": "Rim",
+          "kind": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.25
+        },
+        {
+          "id": "sheen",
+          "label": "Cloth sheen",
+          "kind": "slider",
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "default": 0.9
         }
       ]
     },
@@ -305,6 +658,30 @@
           "max": 4,
           "step": 0.05,
           "default": 1.2
+        },
+        {
+          "id": "cloud_colour",
+          "label": "Cloud colour",
+          "kind": "color",
+          "default": [
+            0.42,
+            0.46,
+            0.62
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Flight",
+      "params": [
+        {
+          "id": "bank",
+          "label": "Bank into turns",
+          "kind": "slider",
+          "min": 0,
+          "max": 4,
+          "step": 0.05,
+          "default": 1.6
         }
       ]
     },

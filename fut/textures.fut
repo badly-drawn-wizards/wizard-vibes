@@ -8,6 +8,7 @@
 
 import "vec3"
 import "hash"
+import "params"
 import "sdf"
 import "world"
 import "scene"
@@ -49,13 +50,13 @@ def bark (fp: f32) (p: vec3) : (f32, f32, f32, f32) =
   let cracks = vnoise3 (vec (q.x * 200) (q.y * 30) (q.z * 200)) * keep fp 0.003
   in (0.0008 * fine + 0.002 * broad + 0.0002 * cracks, fine, broad, tone)
 
-def bark_albedo (fp: f32) (p: vec3) : vec3 =
+def bark_albedo (prm: params) (fp: f32) (p: vec3) : vec3 =
   let (_, fine, broad, tone) = bark fp p
   let q = staff_local p
   -- Bark reads as narrow dark crevices between lighter plates: darken only
   -- near each plate's edge (plate values under ~0.2), at both scales.
   let crevice (v: f32) = smoothstep 0.2 0.0 v
-  let wood = vec 0.4 0.28 0.16
+  let wood = prm.wood_colour
   let base = scale ((1 - 0.85 * crevice broad) * (1 - 0.6 * crevice fine)) wood
   -- lighter and darker stretches along the length
   let base = scale (0.7 + 0.6 * tone) base
@@ -122,7 +123,7 @@ def leather (pose: pose) (fp: f32) (p: vec3) : f32 =
 def leather_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
   let (u, dy, on_belt) = belt_coords pose p
   let g = vnoise3 (scale 85 p)
-  let base = scale (0.75 + 0.35 * mix1 0.6 g (keep fp 0.012)) (vec 0.17 0.095 0.05)
+  let base = scale (0.75 + 0.35 * mix1 0.6 g (keep fp 0.012)) pose.prm.leather_colour
   in if !on_belt then base
      else let worn = mix1 1 0.6 (smoothstep 0.018 0.03 (f32.abs dy))
           let s = stitch u dy * keep fp 0.011
@@ -140,7 +141,7 @@ def hair (pose: pose) (fp: f32) (p: vec3) : f32 =
 
 def hair_albedo (pose: pose) (p: vec3) : vec3 =
   let l = beard_lock (beard_space pose p)
-  let tint = mix (vec 0.93 0.92 0.88) (vec 0.78 0.79 0.82) l.rnd
+  let tint = pose.prm.beard_tint *^ mix (vec 0.93 0.92 0.88) (vec 0.78 0.79 0.82) l.rnd
   in scale (0.62 + 0.38 * l.crown) tint
 
 -- Direction the hair runs (down the beard), in the wizard's local space.
