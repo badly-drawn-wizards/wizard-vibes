@@ -49,6 +49,10 @@ def staff_dir : vec3 = normalise (staff_top -^ staff_foot)
 def staff_radius : f32 = 0.028
 def staff_at (y: f32) : vec3 = staff_foot +^ scale (y / staff_dir.y) staff_dir
 
+-- The orb on its tip.
+def orb_radius : f32 = 0.11
+def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
+
 def grip_height : f32 = 1.15
 -- The elbow's rest position; only used to place the fist and the wrist.
 def left_elbow_rest : vec3 = vec 0.36 1.07 0.14
@@ -89,6 +93,15 @@ type pose = { tm: f32, secs: f32, fl: flight
             , pix: f32 -- angle one pixel spans (for texture filtering)
             , blink: f32 -- 0 eyes open .. 1 closed
             , runes: f32 -- the runes' brightness, relative to their glow parameters
+            -- The staff, held out to cast: its rest frame (where the staff,
+            -- orb, cradle and the hand holding it are modelled) turns by
+            -- (staff_cos, staff_sin) about staff_axis through staff_pivot,
+            -- then shifts by staff_shift (see staff_world and staff_rest).
+            , staff_pivot: vec3, staff_axis: vec3, staff_cos: f32, staff_sin: f32, staff_shift: vec3
+            , orb: vec3 -- the orb's centre, where the staff holds it
+            , orb_tint: vec3 -- the orb's glow colour, by spell
+            , bolt_tint: vec3 -- tints its arcs and its light, by spell
+            , orb_boost: f32 -- its glow, flaring as a spell is cast
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3 }
 
@@ -97,13 +110,30 @@ type pose = { tm: f32, secs: f32, fl: flight
 -- way he accelerates in his own frame, as long as how hard (0..1): he points
 -- that way, the more the harder. climb is his (smoothed) vertical speed: the
 -- runes brighten as he rises and dim as he sinks.
-type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32, climb: f32}
+--
+-- Casting (on the path too): staff (0..1) is how far he holds the staff out
+-- towards (sx, sy, sz), the way he casts in his own frame; flash is the time
+-- since the last cast (for the thrust and the orb's flare); spell is the
+-- spell in hand (0 fire, 1 lightning, 2 wind), which colours the orb.
+type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32, climb: f32,
+              staff: f32, sx: f32, sy: f32, sz: f32, flash: f32, spell: f32}
 
-def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0, climb = 0}
+def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0, climb = 0,
+                       staff = 0, sx = 0, sy = 0, sz = 1, flash = 10, spell = 1}
 
 def flight_of (prm: params) (dr: drive) (secs: f32) : flight =
   if !dr.free then flight_at prm.bank secs
   else {pos = vec dr.x dr.y dr.z, heading = dr.heading, turn = dr.turn, bank = clamp (-0.35) 0.35 (prm.bank * dr.turn)}
+
+-- Rotation of v by angle (cos c, sin s) about the unit axis k.
+def rotate_about (k: vec3) (c: f32) (s: f32) (v: vec3) : vec3 =
+  scale c v +^ scale s (cross k v) +^ scale ((1 - c) * dot k v) k
+
+-- The staff's rest frame to his, and back.
+def staff_world (pose: pose) (q: vec3) : vec3 =
+  pose.staff_pivot +^ rotate_about pose.staff_axis pose.staff_cos pose.staff_sin (q -^ pose.staff_pivot) +^ pose.staff_shift
+def staff_rest (pose: pose) (p: vec3) : vec3 =
+  pose.staff_pivot +^ rotate_about pose.staff_axis pose.staff_cos (-pose.staff_sin) (p -^ pose.staff_shift -^ pose.staff_pivot)
 
 def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   let tm = loop_angle secs
@@ -123,8 +153,26 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
   let head = vec 0 (0.012 * bd) (0.007 * bd) +^ shift 1.6
   let l_shoulder = vec 0.2 1.33 0 +^ lift
   let r_shoulder = vec (-0.2) 1.33 0 +^ lift
+  -- Casting: the staff turns about his grip to lead with the orb (raised a
+  -- little above the aim) and is pushed forward, with a thrust on each cast.
+  let aim = normalise (vec dr.sx dr.sy dr.sz +^ vec 0 0 1e-4)
+  let want = normalise (aim +^ vec 0 0.9 0)
+  let k = cross staff_dir want
+  let staff_axis = if length k > 1e-4 then normalise k else vec 1 0 0
+  let angle = 0.85 * dr.staff * f32.acos (clamp (-1) 1 (dot staff_dir want))
+  let kick = dr.staff * f32.exp (-12 * dr.flash)
+  let staff_pivot = staff_at grip_height
+  let staff_shift = scale (0.16 * dr.staff + 0.07 * kick) (normalise (vec aim.x 0 aim.z +^ vec 0 0 1e-4))
+                    +^ vec 0 (0.08 * dr.staff) 0
+  let (staff_cos, staff_sin) = (f32.cos angle, f32.sin angle)
+  let held (q: vec3) = staff_pivot +^ rotate_about staff_axis staff_cos staff_sin (q -^ staff_pivot) +^ staff_shift
   -- the left hand stays on the staff, so its elbow follows the body
-  let (l_elbow, l_wrist) = two_bone l_shoulder left_wrist 0.34 0.29 (vec 0.5 (-1) (-0.5))
+  let (l_elbow, l_wrist) = two_bone l_shoulder (held left_wrist) 0.34 0.29 (vec 0.5 (-1) (-0.5))
+  -- the orb takes the colour of the spell in hand, and flares as it is cast
+  let spell = i32.f32 (f32.round dr.spell)
+  let orb_tint = if spell == 0 then vec 1 0.42 0.12 else if spell == 2 then vec 0.5 1 0.75 else prm.orb_glow_colour
+  let bolt_tint = if spell == 0 then vec 1.5 0.65 0.25 else if spell == 2 then vec 0.75 1.25 0.95 else splat 1
+  let orb_boost = 1 + 2 * f32.exp (-6 * dr.flash)
   -- the right hand drifts idly in front of the belly, or points into the turn
   let idle = vec (0.025 * f32.sin tm) (0.018 * f32.sin (2 * tm) + 0.01 * b) (0.02 * f32.cos tm)
   let rest = vec (-0.25) 1.02 0.27 +^ idle +^ shift 1.02
@@ -148,10 +196,9 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
      , runes = if dr.free then clamp 0.1 3 (2 ** (dr.climb / 4)) else 1
      -- three quick blinks per loop (every 4 s), each about 0.2 s long
      , blink = let d = (fract (3 * tm / (2 * f32.pi) + 0.15) - 0.5) * 28 in f32.exp (-(d * d))
-     , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist }
+     , l_shoulder, l_elbow, l_wrist, r_shoulder, r_elbow, r_wrist
+     , staff_pivot, staff_axis, staff_cos, staff_sin, staff_shift, orb = held orb_pos, orb_tint, bolt_tint, orb_boost }
 
-def orb_radius : f32 = 0.11
-def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
 
 def sd_orb (p: vec3) : f32 = sd_sphere (p -^ orb_pos) orb_radius
 
@@ -297,9 +344,9 @@ def sd_right_hand (pose: pose) (p: vec3) : f32 =
   in smin 0.012 (smin 0.02 palm wrist) (f32.min (f32.min index middle) (f32.min ring thumb))
 
 -- (each hand, with its wrist, fits in a sphere of radius 0.14)
+-- (the left one is part of the staff's, see held_staff)
 def sd_hands (pose: pose) (p: vec3) : f32 =
-  f32.min (sphere_bounded left_palm 0.14 0.15 sd_left_hand p)
-          (sphere_bounded (right_palm pose) 0.14 0.15 (sd_right_hand pose) p)
+  sphere_bounded (right_palm pose) 0.14 0.15 (sd_right_hand pose) p
 
 -- The head, beard and hat move together: offset by the pose, and turned
 -- about the neck to look where he points.
@@ -706,21 +753,34 @@ def wizard (mask: i32) (pose: pose) (p: vec3) : hit =
          |> umin (sd_hat pose p, m_hat)
          |> umin (sd_band pose p, m_band)
          |> tag layers_figure
-  let staff = if !(has mask layers_staff) then nothing
-              else (sd_staff p, m_staff) |> umin (sd_cradle p, m_gold) |> tag layers_staff
   let gear = if !(has mask layers_gear) then nothing
              else waist_gear pose.prm (body_space pose p) |> tag layers_gear
-  in figure |> umin staff |> umin gear
+  in figure |> umin gear
 
-def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.95
+-- The staff, its cradle and the hand holding it, which move together when
+-- he holds the staff out (all at q, in the staff's rest frame).
+def held_staff (mask: i32) (q: vec3) : hit =
+  let staff = if !(has mask layers_staff) then nothing
+              else (sd_staff q, m_staff) |> umin (sd_cradle q, m_gold) |> tag layers_staff
+  let hand = if !(has mask layers_figure) then nothing
+             else (sphere_bounded left_palm 0.14 0.15 sd_left_hand q, m_skin) |> tag layers_figure
+  in staff |> umin hand
+
+def staff_bound (q: vec3) : f32 = sd_capsule q staff_foot orb_pos 0.25
+
+-- (with room for the left arm reaching out with the staff)
+def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 1.1
 
 def figure_layers : i32 = layers_figure | layers_staff | layers_gear
 
 #[noinline] -- (see scene; no 'z' in the name)
 def bounded_figure (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
+  let q = staff_rest pose p
+  let sb = staff_bound q
   in if !(has mask figure_layers) then nothing
-     else if b > tol then (b, m_robe) else wizard mask pose p
+     else (if b > tol then (b, m_robe) else wizard mask pose p)
+          |> umin (if sb > tol then (sb, m_staff) else held_staff mask q)
 
 -- The orb is glass, refracted analytically by the shading (see shading.fut),
 -- so it is not part of the marched scene; what is inside it is drawn by the

@@ -17,7 +17,7 @@ const WIND = 2;
 const BURST = 3;
 const STRIDE = 8;
 
-const LIFE = [3, 0.7, 1.5, 0.5]; // seconds, by kind
+const LIFE = [3, 0.9, 1.5, 1.4]; // seconds, by kind
 const SPEED = [30, 0, 24]; // units/s
 const COOLDOWN = [0.25, 0.5, 0.3]; // seconds before the next cast
 const STRIKE_RANGE = 45; // furthest a strike lands
@@ -35,8 +35,10 @@ interface Spell {
 }
 
 export class Spells {
-  selected = 0;
+  selected = 1; // lightning: the orb's own colours
   limit = 6;
+  staff = 0; // how far the staff is held out (0..1)
+  sinceCast = 10; // seconds
   private items: Spell[] = [];
   private cooldown = 0;
   private nextId = 1;
@@ -66,11 +68,17 @@ export class Spells {
     }
     this.items.push(s);
     this.cooldown = COOLDOWN[kind];
+    this.sinceCast = 0;
     return true;
   }
 
-  update(dt: number): void {
+  // `holding`: the cast button is down. The staff comes out quickly while
+  // casting and stays out between repeated casts, then lowers slowly.
+  update(dt: number, holding = false): void {
     this.cooldown = Math.max(0, this.cooldown - dt);
+    this.sinceCast += dt;
+    const out = holding || this.sinceCast < 0.7;
+    this.staff += ((out ? 1 : 0) - this.staff) * (1 - Math.exp(-dt * (out ? 12 : 2.5)));
     for (const s of this.items) {
       s.age += dt;
       for (let i = 0; i < 3; i++) s.pos[i] += s.vel[i] * dt;

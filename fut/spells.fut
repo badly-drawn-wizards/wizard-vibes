@@ -17,6 +17,7 @@ import "vec3"
 import "hash"
 import "params"
 import "shading"
+import "world"
 
 def spell_stride : i64 = 8
 def spell_fire : i32 = 0
@@ -62,18 +63,38 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
             -- a ball with a short trail behind it, flickering
             let tail = p -^ scale 0.06 q
             let (dist, t, behind) = ray_segment o d tmax tail p
-            let (core, halo) = glow_line 0.09 0.6 dist
+            let (core, halo) = glow_line 0.12 0.8 dist
             let flick = 0.85 + 0.15 * f32.sin (secs * 43 + f32.i64 i * 1.7)
             let hot = f32.exp (-(dist * dist) / 0.0016)
             in c +^ scale (flick * seen t behind 0.3) (scale (5 * core) (mix (vec 1 0.42 0.08) (vec 1 0.9 0.6) hot)
                                            +^ scale (0.5 * halo) (vec 1 0.35 0.05))
           else if kind == spell_burst then
-            -- an expanding, fading ball of fire
-            let r = 0.3 + 3.5 * age
+            -- An explosion: a billowing fireball that swells fast and cools
+            -- from yellow-white through orange to a dull red, a shockwave
+            -- ring racing out from it, and sparks thrown out and falling.
+            let r = 3.2 * (1 - f32.exp (-5 * age)) + 0.2
             let (dist, t, behind) = ray_segment o d tmax p p
-            let k = f32.exp (-6 * age)
-            let (core, halo) = glow_line r (2 * r) dist
-            in c +^ scale (k * seen t behind r) (scale (4 * core) (vec 1 0.5 0.12) +^ scale (0.6 * halo) (vec 1 0.3 0.05))
+            let x = o +^ scale t d -- where the ray passes closest
+            let turb = vnoise2 ((x.x - p.x) * 1.4 + (x.z - p.z) * 0.7 + 7 * f32.i64 i) ((x.y - p.y) * 1.4 - 3 * age)
+            let heat = f32.exp (-2.2 * age)
+            let body = smoothstep r (0.25 * r) (dist * (0.8 + 0.45 * turb))
+            let colour = mix (vec 0.9 0.12 0.02) (mix (vec 1 0.45 0.08) (vec 1 0.9 0.6) (saturate (2 * heat - 0.6))) (saturate (1.5 * heat * (1 - dist / r)))
+            let halo = (1.6 * r) * (1.6 * r) / (dist * dist + (1.6 * r) * (1.6 * r))
+            let ring_r = 9 * age
+            -- (squared by hand: WGSL's pow is undefined for negative bases)
+            let ring = let u = (dist - ring_r) / (0.25 + 0.4 * age) in f32.exp (-(u * u)) * f32.exp (-4 * age)
+            let fire = scale (7 * heat * body) colour +^ scale (0.55 * heat * halo) (vec 1 0.35 0.06)
+                       +^ scale (1.6 * ring) (vec 1 0.75 0.45)
+            -- sparks: hashed directions, mostly upwards, falling under gravity
+            let sparks = loop acc = 0f32 for j < 8 do
+              let h (n: i32) = hash2 (i32.i64 i * 31 + j * 7 + n) 91
+              let dir = normalise (vec (h 1 - 0.5) (0.4 + h 2) (h 3 - 0.5))
+              let speed = 7 + 6 * h 4
+              let at_t (a: f32) = p +^ scale (speed * a) dir -^ vec 0 (4.9 * a * a) 0
+              let (sd, _, _) = ray_segment o d tmax (at_t (f32.max 0 (age - 0.05))) (at_t age)
+              in acc + f32.exp (-(sd * sd) / 0.0025)
+            let ember = scale (5 * sparks * f32.exp (-2.5 * age)) (vec 1 0.6 0.2)
+            in c +^ scale (seen t behind r) (fire +^ ember)
           else if kind == spell_wind then
             -- a pale crescent across its path, curving back
             let f = normalise q
@@ -107,7 +128,10 @@ def spell_glow [k] (prm: params) (spells: [k]f32) (secs: f32) (o: vec3) (d: vec3
                                       in if dd < best then (dd, tt, b) else (best, bt, bb)
             let (core, halo) = glow_line 0.06 0.9 dist
             let (gd, gt, gb) = ray_segment o d tmax p p
-            let ground = 2.5 * 2.5 / (gd * gd + 2.5 * 2.5)
+            let ground = 3.5 * 3.5 / (gd * gd + 3.5 * 3.5)
+            -- and a ring of light racing out over the ground where it hits
+            let ring = let u = (gd - 7 * age) / (0.3 + 0.5 * age) in f32.exp (-(u * u)) * f32.exp (-3 * age)
             in c +^ scale env (scale (seen t behind 0.5) (scale (9 * core) (vec 0.85 0.9 1) +^ scale (0.8 * halo) (vec 0.55 0.6 1))
-                               +^ scale (1.2 * ground * seen gt gb 1.5) (vec 0.6 0.65 1))
+                               +^ scale (1.5 * ground * seen gt gb 2) (vec 0.6 0.65 1))
+                 +^ scale (2 * ring * seen gt gb 3) (vec 0.7 0.8 1)
           else c

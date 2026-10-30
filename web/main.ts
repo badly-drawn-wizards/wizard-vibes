@@ -182,7 +182,7 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
     const { origin, dir } = castFrom();
     spells.cast(origin, dir);
   }
-  spells.update(paused ? 0 : dt);
+  spells.update(paused ? 0 : dt, casting || !!pad?.cast);
   help.update(device, spells.selected);
   // right stick: look right turns the view right (the camera's yaw is its
   // azimuth round him, so it decreases), up raises the view
@@ -196,7 +196,13 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   flight.update(paused ? 0 : dt, time, heading + cam.yaw + Math.PI, stick);
   if (flight.active) cam.yaw -= flight.heading - heading;
 
-  const d = flight.drive();
+  // casting, in his frame: the camera looks along -(cos p sin y, sin p, cos p cos y)
+  const cp = Math.cos(cam.pitch);
+  const d: Drive = {
+    ...flight.drive(),
+    staff: spells.staff, sx: -cp * Math.sin(cam.yaw), sy: -Math.sin(cam.pitch), sz: -cp * Math.cos(cam.yaw),
+    flash: spells.sinceCast, spell: spells.selected,
+  };
   const points = takes(i, "probe", "pts") ? spells.probePoints() : { ids: [], pts: new Float32Array(0) };
   const probeBytes = (SPHERES + points.pts.length / 3) * 16;
   const reader = probeReader(i.device, probeBytes);

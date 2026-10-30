@@ -167,7 +167,7 @@ def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
   if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = pose.prm.sheen with ks = 0.03
-  else if m == m_staff then plain (bark_albedo pose.prm fp p) with ks = 0.05
+  else if m == m_staff then plain (bark_albedo pose.prm fp (staff_rest pose p)) with ks = 0.05
   else if m == m_skin then plain pose.prm.skin_colour with ks = 0.15 with shininess = 16
   else if m == m_beard then plain (hair_albedo pose p) with ks = 0
   else if m == m_hat then
@@ -257,8 +257,8 @@ def light_at (pose: pose) (g: glow) (k: i32) : light =
     -- orb run along its own surface and graze every swelling and knot; a
     -- branch cannot really shadow a light at its own tip, so the staff
     -- layer takes no shadows from it.
-    let c = scale (pose.prm.orb_light * g.level) (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
-    in { pos = orb_pos, directional = false, diffuse = c, specular = c
+    let c = scale (pose.prm.orb_light * g.level) (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash) *^ pose.bolt_tint)
+    in { pos = pose.orb, directional = false, diffuse = c, specular = c
        , falloff = 1.5, range = f32.inf, radius = orb_radius
        , casters = local_layers, receivers = layers_all, shadowed_receivers = layers_all & !layers_staff }
   else
@@ -324,7 +324,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
                else shadow L.casters l (if L.directional then 12 else d - L.radius - 0.15)
       let c = light mat n rd l sh (scale atten L.diffuse) (scale atten L.specular)
       in (lit +^ c, if k == 0 then sh else moon_shadow)
-  let to_orb = orb_pos -^ p
+  let to_orb = pose.orb -^ p
   let od = length to_orb
   let ol = scale (1 / od) to_orb
   let fill = scale (occ * (0.5 + 0.5 * n.y) * pose.prm.fill) (mat.albedo *^ vec 0.2 0.22 0.45)
@@ -369,7 +369,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
 def glass_tint : vec3 = vec 0.93 0.97 1
 
 -- Distances (entry, exit) where the ray meets the orb; entry > exit on a miss.
-def orb_hit (ro: vec3) (rd: vec3) : (f32, f32) = ray_sphere orb_pos orb_radius ro rd
+def orb_hit (pose: pose) (ro: vec3) (rd: vec3) : (f32, f32) = ray_sphere pose.orb orb_radius ro rd
 
 -- Refraction of i at a surface with normal n facing against i, for the ratio
 -- eta of refractive indices (from / to). Reflects on total internal reflection.
@@ -408,7 +408,7 @@ def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec
   let cosi = saturate (-(dot n rd))
   let f = 0.04 + 0.96 * pow (1 - cosi) 5
   let rr = reflect rd n
-  let to_orb = normalise (orb_pos -^ p)
+  let to_orb = normalise (pose.orb -^ p)
   let highlights = scale (2 * pow (saturate (dot rr pose.moon)) 300) (vec 0.8 0.85 1)
                    +^ scale (2.5 * g.level * pow (saturate (dot rr to_orb)) 120) (vec 0.7 0.85 1)
   let added = scale f (sky pose (to_world_dir pose.fl rr)) +^ highlights +^ scale (0.08 * pow (1 - cosi) 2) (vec 0.6 0.7 0.9)
@@ -430,7 +430,7 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       if done then (ro, rd, w, acc, inside, done, refl, first) else
       let vis = pose.prm.layers
       -- (a hidden orb is no glass at all)
-      let (t_in, t_out) = if has vis layers_orb then orb_hit ro rd else (f32.inf, -f32.inf)
+      let (t_in, t_out) = if has vis layers_orb then orb_hit pose ro rd else (f32.inf, -f32.inf)
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else pose.prm.view_distance
       -- Two passes: the terrain alone over the whole segment, then the scene
@@ -459,14 +459,14 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
          else if enters && t >= t_in then
            -- into the glass
            let p = ro +^ scale t_in rd
-           let n = normalise (p -^ orb_pos)
+           let n = normalise (p -^ pose.orb)
            let f = fresnel pose.prm.orb_ior (-(dot n rd))
            let refl = if refl.0 then refl else (true, p, reflect rd n, w.x * f)
            in (p, refract rd n (1 / pose.prm.orb_ior), scale (1 - f) (w *^ glass_tint), acc, true, false, refl, first)
          else if inside && t >= t_out then
            -- out of the glass
            let p = ro +^ scale t_out rd
-           let n = normalise (p -^ orb_pos)
+           let n = normalise (p -^ pose.orb)
            in (p, refract rd (scale (-1) n) pose.prm.orb_ior, w *^ glass_tint, acc, false, false, refl, first)
          else (ro, rd, w, acc +^ (w *^ sky pose (to_world_dir pose.fl rd)), inside, true, refl, first)
   in (acc, refl, first)

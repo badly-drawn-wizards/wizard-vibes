@@ -25,6 +25,10 @@ reads them back without waiting, to push him out of anything he hits
 
 Spells (web/spells.ts, fut/spells.fut): 1 / 2 / 3 choose a fire bolt,
 lightning strike or wind blade, Space casts it from the orb along the view.
+He thrusts the staff out to cast and keeps it out while casting; the orb
+takes the spell's colour and flares with each cast. The staff, orb, cradle
+and the hand holding them are modelled in the staff's own frame, which the
+pose turns and shifts (staff_world / staff_rest in fut/scene.fut).
 Their state lives in the harness and goes to `render` as an array each
 frame; they are drawn as glows along each camera ray, and the probe tells
 the harness where they meet the land (a fire bolt bursts, a strike finds the

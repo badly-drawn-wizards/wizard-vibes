@@ -236,7 +236,7 @@ def cork_albedo (fp: f32) (p: vec3) : vec3 =
 
 -- Height field of material m, or 0 where it has none.
 def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
-  if m == m_staff then (bark fp p).0
+  if m == m_staff then (bark fp (staff_rest pose p)).0
   else if m == m_robe then cloth pose fp p
   else if m == m_leather then leather pose fp p
   else if m == m_cork then cork fp p
