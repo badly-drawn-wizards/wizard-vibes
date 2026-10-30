@@ -78,15 +78,15 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`v${current.version}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }
 
-async function swapTo(version: number): Promise<void> {
+async function swapTo(version: string): Promise<void> {
   const started = performance.now();
   const next = await loadFuthark(version);
-  console.info(`loaded v${version} in ${Math.round(performance.now() - started)} ms`);
+  console.info(`loaded ${version} in ${Math.round(performance.now() - started)} ms`);
   // Stop the loop on the old instance and let its last frame finish.
   const old = inst;
   inst = null;
@@ -101,16 +101,17 @@ async function swapTo(version: number): Promise<void> {
   });
   configure(next.device);
   next.shaders.onError = (report) => showError(`WGSL compilation error:\n\n${report}`);
-  if (next.shaders.warnings) console.info(`v${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
+  if (next.shaders.warnings) console.info(`${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
   inst = next;
   clearError();
 }
 
 let loading = Promise.resolve();
-function reload(version: number): void {
+function reload(version: string): Promise<void> {
   loading = loading.then(() =>
-    swapTo(version).catch((e) => showError(`failed to load build v${version}:\n${e?.message ?? e}`)),
+    swapTo(version).catch((e) => showError(`failed to load build ${version}:\n${e?.message ?? e}`)),
   );
+  return loading;
 }
 
 if (!navigator.gpu) showError("WebGPU is not available in this browser.");
@@ -131,6 +132,13 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
     } finally {
       inst = i;
     }
+  },
+  // Load another build into the running page (for the benchmark daemon);
+  // resolves to the loaded version, or rejects with the load error.
+  async swap(version: string) {
+    await reload(version);
+    if (inst?.version !== version) throw new Error(document.getElementById("error")?.textContent ?? "load failed");
+    return version;
   },
   // Average GPU time per frame in ms, without presenting or vsync.
   async bench(frames: number, vw: number, h: number) {
@@ -160,7 +168,7 @@ events.addEventListener("error", (e) => {
 });
 // ?build=N pins a specific build (for benchmarking variants); otherwise follow the server.
 const pinned = new URLSearchParams(location.search).get("build");
-if (pinned) reload(Number(pinned));
+if (pinned) reload(pinned);
 else events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
 events.addEventListener("web-reload", () => location.reload());
 

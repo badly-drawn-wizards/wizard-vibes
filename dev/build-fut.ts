@@ -1,14 +1,28 @@
-// Compiles fut/wizard.fut with the Futhark WebGPU backend into a fresh,
-// versioned directory so the browser never sees a half-written build.
+// Compiles a Futhark program with the WebGPU backend into a content-addressed
+// directory, build/fut/<id>, where <id> hashes every input that can change
+// the output. Identical inputs reuse the existing build, so reverting an edit
+// or rebuilding a benchmark variant is instant. Builds are written to a
+// temporary directory and renamed into place, so the browser never sees a
+// half-written one.
+//
+// usage (CLI, prints the id): node dev/build-fut.ts [source-dir]   (default fut)
 
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
+import { delimiter, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const FUT_ROOT = "build/fut";
-const ENTRY = "fut/wizard.fut";
+const ENTRY = "wizard.fut";
+const SHIM = "fut/expose.js"; // --post-js exposing WebGPU objects to the harness
+const KEEP = 30; // builds kept, most recently used first
+// Bump when the build recipe below changes in a way the inputs don't show.
+const SCHEMA = 1;
 
-export type BuildResult = { ok: true; version: number; ms: number } | { ok: false; message: string };
+export type BuildResult =
+  | { ok: true; version: string; ms: number; cached: boolean }
+  | { ok: false; message: string };
 
 function run(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; output: string }> {
   return new Promise((done) => {
@@ -21,44 +35,109 @@ function run(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env):
   });
 }
 
-// Continue numbering from earlier runs so versions only grow (pruning and
-// cache-busting rely on that).
-let counter = existsSync(FUT_ROOT)
-  ? Math.max(0, ...readdirSync(FUT_ROOT).map((n) => Number(n.slice(1)) || 0))
-  : 0;
-
-export async function buildFuthark(): Promise<BuildResult> {
-  const start = Date.now();
-
-  // Fast typecheck first so errors show up in about a second.
-  const check = await run("futhark", ["check", ENTRY]);
-  if (check.code !== 0) return { ok: false, message: check.output };
-
-  const version = ++counter;
-  const dir = join(FUT_ROOT, `v${version}`);
-  mkdirSync(dir, { recursive: true });
-  const env = {
-    ...process.env,
-    CFLAGS: process.env.CFLAGS ?? "-O1",
-    EMCFLAGS: [
-      `--post-js ${resolve("fut/expose.js")}`,
-      "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$WebGPU",
-      process.env.EMCFLAGS ?? "",
-    ].join(" "),
-  };
-  const build = await run("futhark", ["webgpu", "--library", "-o", join(dir, "wizard"), ENTRY], env);
-  if (build.code !== 0) {
-    rmSync(dir, { recursive: true, force: true });
-    return { ok: false, message: build.output };
+function which(cmd: string): string {
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    const p = join(dir, cmd);
+    if (existsSync(p)) return realpathSync(p);
   }
-  prune(version);
-  return { ok: true, version, ms: Date.now() - start };
+  throw new Error(`${cmd} not found on PATH`);
 }
 
-// Keep the three newest builds; an open page may still be fetching the previous one.
-function prune(latest: number): void {
-  for (const name of readdirSync(FUT_ROOT)) {
-    const v = Number(name.slice(1));
-    if (name.startsWith("v") && v < latest - 2) rmSync(join(FUT_ROOT, name), { recursive: true, force: true });
+const sha = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
+
+// The toolchain, worked out once: the resolved Nix store paths of futhark and
+// emcc pin their exact builds (the futhark path also covers its runtime
+// system), futhark's version names its git commit, and the emscripten ports in
+// EM_CACHE (emdawnwebgpu) are fetched outside Nix, so they are listed too.
+let toolchain: Promise<object> | undefined;
+function getToolchain(): Promise<object> {
+  toolchain ??= (async () => {
+    const cache = process.env.EM_CACHE ?? "";
+    const ports = cache && existsSync(join(cache, "ports")) ? readdirSync(join(cache, "ports")).sort() : [];
+    return {
+      futhark: which("futhark"),
+      futharkVersion: (await run("futhark", ["--version"])).output.trim(),
+      emcc: which("emcc"),
+      ports,
+    };
+  })();
+  return toolchain;
+}
+
+function buildEnv(): { CFLAGS: string; EMCFLAGS: string } {
+  return {
+    CFLAGS: process.env.CFLAGS ?? "-O1",
+    EMCFLAGS: [`--post-js ${resolve(SHIM)}`, "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$WebGPU", process.env.EMCFLAGS ?? ""].join(" "),
+  };
+}
+
+// The id of the build of the program in `src`.
+export async function buildId(src: string): Promise<string> {
+  const files = readdirSync(src)
+    .filter((f) => f.endsWith(".fut"))
+    .sort()
+    .map((f) => [f, sha(readFileSync(join(src, f)))]);
+  const { CFLAGS } = buildEnv();
+  const inputs = {
+    schema: SCHEMA,
+    entry: ENTRY,
+    files,
+    shim: sha(readFileSync(SHIM)), // by content: the flag carries its path
+    cflags: CFLAGS,
+    emcflags: process.env.EMCFLAGS ?? "",
+    toolchain: await getToolchain(),
+  };
+  return sha(JSON.stringify(inputs)).slice(0, 16);
+}
+
+export async function buildFuthark(src = "fut"): Promise<BuildResult> {
+  const start = Date.now();
+  const id = await buildId(src);
+  const dir = join(FUT_ROOT, id);
+  if (existsSync(join(dir, "wizard.js"))) {
+    const now = new Date();
+    utimesSync(dir, now, now); // mark as recently used
+    return { ok: true, version: id, ms: Date.now() - start, cached: true };
   }
+
+  // Fast typecheck first so errors show up in about a second.
+  const check = await run("futhark", ["check", join(src, ENTRY)]);
+  if (check.code !== 0) return { ok: false, message: check.output };
+
+  const tmp = `${dir}.tmp${process.pid}`;
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  const build = await run("futhark", ["webgpu", "--library", "-o", join(tmp, "wizard"), join(src, ENTRY)], {
+    ...process.env,
+    ...buildEnv(),
+  });
+  if (build.code !== 0) {
+    rmSync(tmp, { recursive: true, force: true });
+    return { ok: false, message: build.output };
+  }
+  rmSync(dir, { recursive: true, force: true });
+  renameSync(tmp, dir);
+  prune();
+  return { ok: true, version: id, ms: Date.now() - start, cached: false };
+}
+
+// Keep the KEEP most recently used builds; an open page may still be using
+// an older one, so a few are always kept.
+function prune(): void {
+  const builds = readdirSync(FUT_ROOT)
+    .filter((n) => !n.includes(".tmp"))
+    .map((n) => ({ n, t: statSync(join(FUT_ROOT, n)).mtimeMs }))
+    .sort((a, b) => b.t - a.t);
+  for (const { n } of builds.slice(KEEP)) rmSync(join(FUT_ROOT, n), { recursive: true, force: true });
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const r = await buildFuthark(process.argv[2] ?? "fut");
+  if (!r.ok) {
+    console.error(r.message.split("\n").filter((l) => !l.startsWith("Generating copy")).join("\n"));
+    process.exit(1);
+  }
+  const size = statSync(join(FUT_ROOT, r.version, "wizard.c")).size;
+  console.error(`${r.cached ? "cached" : "built"} in ${(r.ms / 1000).toFixed(1)} s, shader ${Math.round(size / 1024)} KiB`);
+  console.log(r.version);
 }

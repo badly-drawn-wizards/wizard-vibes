@@ -11,7 +11,7 @@ import { buildFuthark, FUT_ROOT } from "./build-fut.ts";
 const PORT = Number(process.env.PORT ?? 8080);
 
 const clients = new Set<ServerResponse>();
-let current: number | null = null; // latest good Futhark build
+let current: string | null = null; // id of the latest good Futhark build
 let lastError: string | null = null;
 
 function send(res: ServerResponse, type: string, data: unknown): void {
@@ -36,7 +36,7 @@ async function rebuild(): Promise<void> {
   if (r.ok) {
     current = r.version;
     lastError = null;
-    console.log(`[fut] v${r.version} built in ${r.ms} ms`);
+    console.log(`[fut] ${r.version} ${r.cached ? "cached" : `built in ${r.ms} ms`}`);
     broadcast("fut-reload", { version: r.version });
   } else {
     lastError = r.message;

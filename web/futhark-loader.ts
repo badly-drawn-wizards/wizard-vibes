@@ -12,7 +12,7 @@ export interface FutharkArray {
 }
 
 export interface FutInstance {
-  version: number;
+  version: string; // build id (content hash, see dev/build-fut.ts)
   m: any; // emscripten module
   fut: any; // FutharkModule
   device: GPUDevice;
@@ -53,8 +53,8 @@ async function captureDevice<T>(
   }
 }
 
-export async function loadFuthark(version: number): Promise<FutInstance> {
-  const base = `/fut/v${version}`;
+export async function loadFuthark(version: string): Promise<FutInstance> {
+  const base = `/fut/${version}`;
   const src = await (await fetch(`${base}/wizard.js`)).text();
   // The generated script declares `var Module` and `class FutharkModule` at
   // top level; evaluating it in a function scope lets us load it repeatedly.
