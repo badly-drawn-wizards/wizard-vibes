@@ -34,11 +34,14 @@ const storedBackend = (() => {
     return null;
   }
 })();
-const useGl = !navigator.gpu || new URLSearchParams(location.search).has("webgl") || storedBackend === "webgl";
+// (a browser can have navigator.gpu and still no adapter to give: then it
+// has no WebGPU either)
+const hasWebGpu = !!(await navigator.gpu?.requestAdapter().catch(() => null));
+const useGl = !hasWebGpu || new URLSearchParams(location.search).has("webgl") || storedBackend === "webgl";
 for (const b of document.querySelectorAll<HTMLButtonElement>("#backend button")) {
   const gl = b.dataset.backend === "webgl";
   b.setAttribute("aria-pressed", String(gl === useGl));
-  if (!gl && !navigator.gpu) {
+  if (!gl && !hasWebGpu) {
     b.disabled = true;
     b.title = "WebGPU is not available in this browser";
   }
@@ -239,7 +242,7 @@ function tick(now: number): void {
     last = now;
     fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
     frameGl(glr, dt);
-    setStatus(`${glr.version!.slice(0, 8)} · ${navigator.gpu ? "WebGL" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
+    setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
     return;
   }
   if (!inst || inFlight) return;
