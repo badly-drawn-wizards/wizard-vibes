@@ -34,21 +34,38 @@ const storedBackend = (() => {
     return null;
   }
 })();
-// (a browser can have navigator.gpu and still no adapter to give: then it
-// has no WebGPU either)
-const hasWebGpu = !!(await navigator.gpu?.requestAdapter().catch(() => null));
+// Whether WebGPU works here: a browser can have navigator.gpu with no
+// adapter behind it, or an adapter that never answers, or one that then
+// fails when the module creates its device (recorded below when the first
+// build fails to load, so the page reloads into WebGL with the reason).
+const FAILED = "wizard-webgpu-failed";
+const failure = (() => {
+  try {
+    return sessionStorage.getItem(FAILED);
+  } catch {
+    return null;
+  }
+})();
+const adapter = failure ? null : await Promise.race([
+  navigator.gpu?.requestAdapter().catch(() => null) ?? null,
+  new Promise<null>((r) => setTimeout(() => r(null), 3000)),
+]);
+const hasWebGpu = !!adapter;
+const noWebGpu = failure ? `WebGPU failed here: ${failure}` : "WebGPU is not available in this browser";
 const useGl = !hasWebGpu || new URLSearchParams(location.search).has("webgl") || storedBackend === "webgl";
 for (const b of document.querySelectorAll<HTMLButtonElement>("#backend button")) {
   const gl = b.dataset.backend === "webgl";
   b.setAttribute("aria-pressed", String(gl === useGl));
   if (!gl && !hasWebGpu) {
-    b.disabled = true;
-    b.title = "WebGPU is not available in this browser";
+    // (after a failure it can still be tried again)
+    b.disabled = !failure;
+    b.title = noWebGpu;
   }
   b.onclick = () => {
-    if (gl === useGl) return;
+    if (gl === useGl && !(failure && !gl)) return;
     try {
       localStorage.setItem(BACKEND, gl ? "webgl" : "webgpu");
+      if (!gl) sessionStorage.removeItem(FAILED);
     } catch {
       // storage unavailable: ?webgl still chooses for this page
     }
@@ -242,7 +259,7 @@ function tick(now: number): void {
     last = now;
     fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
     frameGl(glr, dt);
-    setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
+    setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : failure ? "WebGL fallback (WebGPU failed)" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
     return;
   }
   if (!inst || inFlight) return;
@@ -303,7 +320,24 @@ function reload(version: string): Promise<void> {
     await glr.load(version);
     clearError();
   };
-  loading = loading.then(() => load().catch((e) => showError(`failed to load build ${version}:\n${e?.message ?? e}`)));
+  loading = loading.then(() =>
+    load().catch((e) => {
+      const message = String(e?.message ?? e);
+      // WebGPU failing before any build has run here (not a shader error,
+      // which a later build fixes): fall back to WebGL, saying why
+      if (!glr && !inst && loaded.size === 0 && !message.startsWith("WGSL compilation failed")) {
+        console.warn(`WebGPU failed; reloading with WebGL: ${message}`);
+        try {
+          sessionStorage.setItem(FAILED, message.split("\n")[0].slice(0, 200));
+          location.reload();
+          return;
+        } catch {
+          // no storage: show the error instead
+        }
+      }
+      showError(`failed to load build ${version}:\n${message}`);
+    }),
+  );
   return loading;
 }
 
