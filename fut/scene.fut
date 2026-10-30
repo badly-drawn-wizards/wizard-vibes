@@ -468,7 +468,7 @@ def potion_parts (i: i32) (p: vec3) : (f32, f32, f32) =
   in (glass, cork, level)
 
 -- The leather that holds potion i: a band round its neck, and a strap from
--- the band up and over the belt.
+-- the band up under the belt.
 def potion_strap (i: i32) (p: vec3) : f32 =
   let neck_top = potion_neck_top i
   let nr = potion_neck_radius i
@@ -478,12 +478,13 @@ def potion_strap (i: i32) (p: vec3) : f32 =
   let band = length2 (vec2 (f32.max (f32.abs rq.x - 0.0015) 0) (f32.max (f32.abs rq.y - 0.0045) 0)) - 0.001
   let a = potion_angle i
   let out = around a
-  -- from the band's side facing the body, up the robe and over the belt
+  -- from the band's side facing the body, up against the robe and on up
+  -- underneath the belt (the belt's band spans robe_radius - 0.006 to
+  -- + 0.022, so a strap at + 0.006 is hidden inside it)
   let start = vec neck_top.x band_y neck_top.z -^ scale (nr + 0.004) out
-  let under = scale (robe_radius (belt_y - 0.035) + 0.012) out +^ vec 0 (belt_y - 0.035) 0
-  let front = scale (robe_radius belt_y + 0.019) out +^ vec 0 (belt_y + 0.016) 0
-  let top = scale (robe_radius belt_y + 0.002) out +^ vec 0 (belt_y + 0.027) 0
-  let strap = sd_strap p start under out |> f32.min (sd_strap p under front out) |> f32.min (sd_strap p front top out)
+  let below = scale (robe_radius (belt_y - 0.04) + 0.006) out +^ vec 0 (belt_y - 0.04) 0
+  let tucked = scale (robe_radius belt_y + 0.006) out +^ vec 0 belt_y 0
+  let strap = sd_strap p start below out |> f32.min (sd_strap p below tucked out)
   in f32.min band strap
 
 -- The liquid fills the inside of the glass (0.004 thick) up to its level.
