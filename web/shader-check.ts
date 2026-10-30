@@ -1,8 +1,14 @@
-// Wraps a device's createShaderModule to (optionally) strip f16 from
-// Futhark's WGSL and to report compiler diagnostics from
-// getCompilationInfo(), with the offending source line and a caret.
+// Wraps a device's createShaderModule to (optionally) rewrite Futhark's WGSL
+// (strip f16, make it portable to naga) and to report compiler diagnostics
+// from getCompilationInfo(), with the offending source line and a caret.
 
 import { stripF16 } from "./wgsl-f32.ts";
+import { makePortable } from "./wgsl-portable.ts";
+
+export interface ShaderOptions {
+  f32: boolean; // strip f16 (see wgsl-f32.ts)
+  portable: boolean; // no unrestricted_pointer_parameters (see wgsl-portable.ts)
+}
 
 export interface ShaderLog {
   errors: string[]; // formatted error reports, in arrival order
@@ -19,16 +25,19 @@ function kernelName(code: string): string {
   return /@compute[\s\S]*?\bfn\s+(\w+)/.exec(code)?.[1] ?? "shader";
 }
 
-// Name of the last function declared before `offset`, i.e. the one the
-// message points into (Futhark labels every module "Futhark program").
-function enclosingFn(code: string, offset: number): string | null {
+// Name of the last function declared before the message position, i.e. the
+// one it points into (Futhark labels every module "Futhark program").
+// Computed from line/column: browsers disagree on `offset`.
+function enclosingFn(code: string, lineNum: number, linePos: number): string | null {
+  const lines = code.split("\n");
+  const before = lines.slice(0, lineNum - 1).join("\n") + "\n" + (lines[lineNum - 1] ?? "").slice(0, linePos - 1);
   let name: string | null = null;
-  for (const m of code.slice(0, offset).matchAll(/\bfn\s+(\w+)/g)) name = m[1];
+  for (const m of before.matchAll(/\bfn\s+(\w+)/g)) name = m[1];
   return name;
 }
 
 function formatMessage(label: string, code: string, msg: GPUCompilationMessage): string {
-  const fn = msg.lineNum > 0 ? enclosingFn(code, msg.offset) : null;
+  const fn = msg.lineNum > 0 ? enclosingFn(code, msg.lineNum, msg.linePos) : null;
   const where = `${label}${fn ? ` (fn ${fn})` : ""}:${msg.lineNum}:${msg.linePos}`;
   const head = `${where}: ${msg.type}: ${msg.message}`;
   const line = code.split("\n")[msg.lineNum - 1];
@@ -43,7 +52,7 @@ function formatMessage(label: string, code: string, msg: GPUCompilationMessage):
   return `${head}\n  ${prefix}${shown}\n  ${" ".repeat(prefix.length)}${caret}`;
 }
 
-export function instrumentShaders(device: GPUDevice, f32: boolean): ShaderLog {
+export function instrumentShaders(device: GPUDevice, opts: ShaderOptions): ShaderLog {
   const pending: Promise<void>[] = [];
   const log: ShaderLog = {
     errors: [],
@@ -53,7 +62,8 @@ export function instrumentShaders(device: GPUDevice, f32: boolean): ShaderLog {
   const create = device.createShaderModule.bind(device);
 
   device.createShaderModule = (desc: GPUShaderModuleDescriptor) => {
-    const code = f32 ? stripF16(desc.code) : desc.code;
+    let code = opts.f32 ? stripF16(desc.code) : desc.code;
+    if (opts.portable) code = makePortable(code);
     const module = create({ ...desc, code });
     const label = desc.label || kernelName(code);
     pending.push(

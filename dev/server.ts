@@ -51,7 +51,9 @@ async function rebuild(): Promise<void> {
 }
 
 let debounce: NodeJS.Timeout | undefined;
-watch("fut", { recursive: true }, (_event, file) => {
+// Watch the directory, not the files: editors that save by rename (vim,
+// sed -i) replace the inode, which silently ends a per-file watch.
+watch("fut", (_event, file) => {
   if (!file || !/\.(fut|js)$/.test(file)) return;
   clearTimeout(debounce);
   debounce = setTimeout(() => void rebuild(), 150);

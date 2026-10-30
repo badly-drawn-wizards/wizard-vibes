@@ -17,6 +17,7 @@ export interface FutInstance {
   fut: any; // FutharkModule
   device: GPUDevice;
   f32: boolean; // running with f16 stripped from the shaders
+  portable: boolean; // WGSL rewritten for implementations like naga
   shaders: ShaderLog; // WGSL compiler diagnostics
 }
 
@@ -63,7 +64,11 @@ export async function loadFuthark(version: number): Promise<FutInstance> {
   // it (or with ?f32 in the URL), run with f16 stripped from the shaders.
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter) throw new Error("No WebGPU adapter available.");
-  const f32 = !adapter.features.has("shader-f16") || new URLSearchParams(location.search).has("f32");
+  const params = new URLSearchParams(location.search);
+  const f32 = !adapter.features.has("shader-f16") || params.has("f32");
+  // Futhark's helpers take storage pointers as parameters, which needs this
+  // WGSL language feature (missing in Firefox); otherwise rewrite them away.
+  const portable = !navigator.gpu.wgslLanguageFeatures?.has("unrestricted_pointer_parameters") || params.has("portable");
 
   // If the runtime exits (e.g. device creation fails) its promises never
   // settle, so turn the exit message into a rejection.
@@ -76,7 +81,7 @@ export async function loadFuthark(version: number): Promise<FutInstance> {
   const failed = new Promise<Error>((resolve) => (compileFailed = () => resolve(new Error("WGSL compilation failed"))));
   const setup = (d: GPUDevice) => {
     captured = d;
-    shaders = instrumentShaders(d, f32);
+    shaders = instrumentShaders(d, { f32, portable });
     shaders.onError = () => compileFailed();
   };
   const loading = captureDevice(f32, setup, async () => {
@@ -107,7 +112,7 @@ export async function loadFuthark(version: number): Promise<FutInstance> {
   }
   if (result instanceof Error) throw result;
   const [{ m, fut }, device] = result;
-  return { version, m, fut, device, f32, shaders: shaders! };
+  return { version, m, fut, device, f32, portable, shaders: shaders! };
 }
 
 export function unloadFuthark(inst: FutInstance): void {

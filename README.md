@@ -24,7 +24,8 @@ render scale.
     and configures the canvas with it.
   - `fut/expose.js` maps the output array's `WGPUBuffer` handle
     (`futhark_values_raw_u32_1d`) to its JS `GPUBuffer`.
-  - Each frame is then a single `copyBufferToTexture` into the canvas texture.
+  - Each frame is then a single `copyBufferToTexture` into the canvas texture
+    (`bgra8unorm`; Futhark packs pixels as BGRA).
   - Rows are padded to 64 pixels so `bytesPerRow` is 256-byte aligned.
 - `dev/server.ts` watches `fut/` and runs `futhark check`, then
   `futhark webgpu --library`, writing to a new `build/fut/v<N>/` directory.
@@ -46,7 +47,8 @@ render scale.
 |---|---|
 | `npm run ref -- [w h t yaw pitch dist]` | CPU reference frame, `build/ref.png` (`futhark multicore`) |
 | `npm run gif -- [w h fps yaw pitch dist]` | one loop as `build/wizard.gif` |
-| `CHROME=$(which chromium) node dev/screenshot.ts [url] [out] [ms]` | headless screenshot of the live page |
+| `CHROME=$(which chromium) node dev/screenshot.ts [url] [out] [ms]` | headless Chromium screenshot of the live page |
+| `FIREFOX=$(which firefox) node dev/firefox.ts [probe \| url] [out] [ms]` | the same in Firefox, via WebDriver BiDi (`DUMPIO=1` for its stderr) |
 
 ## f16
 
@@ -67,3 +69,29 @@ Chrome on Linux needs Vulkan for hardware WebGPU; see `dev/chrome-args.ts` for
 the headless flags. The SwiftShader fallback adapter can compile the shaders
 but Futhark's kernels don't run correctly on it (read-backs are aborted), so a
 real GPU is needed.
+
+## Firefox
+
+Tested with Firefox 158 on Linux, which has hardware WebGPU. It renders
+pixel-identical frames to Chrome, with hot reload working. Two things needed
+handling:
+
+- **Pointer parameters.** Futhark's WGSL helpers take `ptr<storage, …>`
+  parameters, which need the `unrestricted_pointer_parameters` language
+  feature. Firefox's naga lacks it, and also rejects Futhark's f16 helpers.
+  When `navigator.gpu.wgslLanguageFeatures` lacks the feature, or the URL has
+  `?portable`, `web/wgsl-portable.ts` rewrites each shader:
+  - it drops functions no entry point reaches (about 270 of the prelude's
+    ~290 per shader);
+  - it specialises the remaining storage-pointer helpers per buffer, so
+    `write_i8((&buf), i, v)` becomes `write_i8__buf(i, v)`.
+
+  The HUD shows `portable` when this is active. On Chrome, `?portable` gives
+  bit-identical frames.
+- **Canvas format.** Firefox crashes when copying a buffer into an
+  `rgba8unorm` canvas texture, so the canvas is `bgra8unorm` and Futhark packs
+  pixels as BGRA.
+
+Firefox may log that it can't create a shared-texture swapchain and falls
+back to a slower presentation path. That's internal to Firefox and doesn't
+affect correctness.

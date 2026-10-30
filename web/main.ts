@@ -37,7 +37,7 @@ function configure(device: GPUDevice): void {
   ctx.unconfigure();
   ctx.configure({
     device,
-    format: "rgba8unorm", // matches Futhark's packed RGBA8 u32 pixels
+    format: "bgra8unorm", // matches Futhark's packed BGRA8 u32 pixels
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
     alphaMode: "opaque",
   });
@@ -76,7 +76,7 @@ function tick(now: number): void {
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   const current = inst;
   inFlight = frame(current, dt)
-    .then(() => setStatus(`v${current.version}${current.f32 ? " · f32" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
+    .then(() => setStatus(`v${current.version}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }
@@ -125,7 +125,7 @@ if (!navigator.gpu) showError("WebGPU is not available in this browser.");
       const out = await i.fut.entry.render(w, vw, h, t, yaw, pitch, dist);
       const pixels: Uint32Array = await out.values();
       out.free();
-      return { f32: i.f32, pixels: Array.from(pixels) };
+      return { f32: i.f32, portable: i.portable, pixels: Array.from(pixels) };
     } finally {
       inst = i;
     }

@@ -4,15 +4,15 @@
 // drops the feature request and shader-check.ts strips those declarations
 // before shader compilation.
 
-const F16_TYPE = /\bf16\b|\bvec[234]h\b|\bmat[234]x[234]h\b/;
+export const F16_TYPE = /\bf16\b|\bvec[234]h\b|\bmat[234]x[234]h\b/;
 
-function stripComments(src: string): string {
+export function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
 // Splits WGSL into top-level declarations: each ends at a `;` or a closing
 // `}` at brace depth 0. Attributes stay attached to the declaration they precede.
-function topLevelItems(src: string): string[] {
+export function topLevelItems(src: string): string[] {
   const items: string[] = [];
   let depth = 0;
   let start = 0;

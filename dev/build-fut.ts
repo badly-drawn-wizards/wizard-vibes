@@ -2,7 +2,7 @@
 // versioned directory so the browser never sees a half-written build.
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const FUT_ROOT = "build/fut";
@@ -21,7 +21,11 @@ function run(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env):
   });
 }
 
-let counter = Date.now() % 100000;
+// Continue numbering from earlier runs so versions only grow (pruning and
+// cache-busting rely on that).
+let counter = existsSync(FUT_ROOT)
+  ? Math.max(0, ...readdirSync(FUT_ROOT).map((n) => Number(n.slice(1)) || 0))
+  : 0;
 
 export async function buildFuthark(): Promise<BuildResult> {
   const start = Date.now();

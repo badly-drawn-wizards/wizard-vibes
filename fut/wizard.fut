@@ -306,14 +306,16 @@ def pixel (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) (x: i3
 def to_u8 (v: f32) : u32 = u32.f32 (saturate v * 255 + 0.5)
 
 -- w is the padded row length (multiple of 64 so rows are 256-byte aligned);
--- columns x >= vw are padding. Pixels are packed RGBA8, little-endian.
+-- columns x >= vw are padding. Pixels are packed BGRA8, little-endian, to
+-- match a bgra8unorm canvas (the format every WebGPU implementation supports
+-- for canvases; Firefox crashes copying buffers into rgba8unorm ones).
 entry render (w: i32) (vw: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) : []u32 =
   tabulate (i64.i32 w * i64.i32 h) (\i ->
     let x = i32.i64 (i % i64.i32 w)
     let y = i32.i64 (i / i64.i32 w)
     in if x >= vw then 0xff000000
        else let c = pixel vw h tm yaw pitch dst x y
-            in to_u8 c.x | (to_u8 c.y << 8) | (to_u8 c.z << 16) | 0xff000000)
+            in to_u8 c.z | (to_u8 c.y << 8) | (to_u8 c.x << 16) | 0xff000000)
 
 -- CPU reference image.
 entry render_rgb (w: i32) (h: i32) (tm: f32) (yaw: f32) (pitch: f32) (dst: f32) : [][][3]u8 =
