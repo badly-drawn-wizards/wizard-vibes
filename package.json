@@ -1,0 +1,17 @@
+{
+  "name": "futhark-wizard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node dev/server.ts",
+    "ref": "node dev/ref-render.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@webgpu/types": "^0.1.60",
+    "esbuild": "^0.25.0",
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Futhark Wizard</title>
+<style>
+  :root { color-scheme: dark; --fg: #d8d4ff; --dim: #8a86b8; --bg: #05040d; --err: #ff8a9a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
+           cursor: grab; touch-action: none; image-rendering: auto; }
+  canvas:active { cursor: grabbing; }
+  #hud { position: fixed; top: 12px; left: 12px; display: flex; gap: 12px; align-items: center;
+         background: rgb(5 4 13 / 0.6); padding: 6px 10px; border-radius: 6px; backdrop-filter: blur(4px); }
+  #hud button { font: inherit; color: var(--dim); background: none; border: 1px solid #2c2950;
+                border-radius: 4px; padding: 2px 6px; cursor: pointer; }
+  #hud button[aria-pressed="true"] { color: var(--fg); border-color: var(--fg); }
+  #error { position: fixed; left: 12px; right: 12px; bottom: 12px; max-height: 50vh; overflow: auto;
+           margin: 0; padding: 12px; background: rgb(20 4 10 / 0.9); color: var(--err);
+           border: 1px solid var(--err); border-radius: 6px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="hud">
+  <span id="status">loading…</span>
+  <span id="scale">
+    <button data-scale="0.25">¼</button><button data-scale="0.5">½</button><button data-scale="1">1×</button>
+  </span>
+</div>
+<pre id="error" hidden></pre>
+<script type="module" src="/web/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": ["node", "@webgpu/types"],
+    "skipLibCheck": true
+  },
+  "include": ["web", "dev"]
+}
