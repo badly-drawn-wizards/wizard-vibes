@@ -11,27 +11,29 @@ import "vec3"
 import "sdf"
 
 -- At a point, media report a step cap (steps are kept below it, so the
--- integral is sampled finely where densities change fast) and the radiance
--- they emit per unit length.
-type media_sample = {cap: f32, radiance: vec3}
+-- integral is sampled finely where densities change fast), the radiance
+-- they emit per unit length, and how much they absorb (extinction per unit
+-- length, e.g. clouds; glows have none).
+type media_sample = {cap: f32, radiance: vec3, extinction: f32}
 
 type^ dist_fn = f32 -> vec3 -> f32
 
 -- Marches up to distance tmax. Returns (distance, material or -1, emission
--- integrated up to the hit). With no hit, the distance is >= tmax unless the
--- step budget ran out. Stepping only needs exact distances near surfaces.
-def march (scene: f32 -> vec3 -> hit) (media: vec3 -> media_sample) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32, vec3) =
-  let (t, _, m, acc) =
-    loop (t, i, m, acc) = (0.02f32, 0i32, -1i32, splat 0)
-    while i < 300 && m < 0 && t < tmax do
+-- integrated up to the hit, transmittance to the hit). With no hit, the
+-- distance is >= tmax unless the step budget ran out. Stepping only needs
+-- exact distances near surfaces.
+def march (scene: f32 -> vec3 -> hit) (media: vec3 -> media_sample) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32, vec3, f32) =
+  let (t, _, m, acc, tr) =
+    loop (t, i, m, acc, tr) = (0.02f32, 0i32, -1i32, splat 0, 1f32)
+    while i < 300 && m < 0 && t < tmax && tr > 0.01 do
       let p = ro +^ scale t rd
       let (d, mat) = scene 0.1 p
-      in if d < 0.0004 * t then (t, i + 1, mat, acc)
+      in if d < 0.0004 * t then (t, i + 1, mat, acc, tr)
          else
            let s = media p
            let dt = f32.min (f32.min (d * 0.85) s.cap) (tmax - t + 1e-4)
-           in (t + dt, i + 1, -1, acc +^ scale dt s.radiance)
-  in (t, m, acc)
+           in (t + dt, i + 1, -1, acc +^ scale (dt * tr) s.radiance, tr * f32.exp (-s.extinction * dt))
+  in (t, m, acc, tr)
 
 -- Tetrahedral gradient, written as a loop so the scene is only inlined once.
 def normal (dist: dist_fn) (p: vec3) : vec3 =

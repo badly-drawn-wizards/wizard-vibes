@@ -200,8 +200,10 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       let (t_in, t_out) = orb_hit ro rd
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else 60
-      let (t, m, emitted) = march (scene pose) (media pose.tm g) ro rd tmax
+      let (t, m, emitted, tr) = march (scene pose) (media pose g) ro rd tmax
       let acc = acc +^ (w *^ emitted)
+      -- whatever lies beyond this segment is seen through its media
+      let w = scale tr w
       in if m >= 0 then
            (ro, rd, w, acc +^ (w *^ surface pose g m (ro +^ scale t rd) rd t), inside, true, refl)
          else if enters && t >= t_in then

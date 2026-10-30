@@ -102,9 +102,9 @@ def bolt_halo_colour : vec3 = vec 0.3 0.75 1
 -- bolt. Only evaluated near the orb.
 def lightning_media (tm: f32) (p: vec3) : media_sample =
   let reach = orb_radius + arc_reach + 0.15
-  in if length (p -^ orb_pos) > reach then {cap = length (p -^ orb_pos) - reach + 0.02, radiance = splat 0}
+  in if length (p -^ orb_pos) > reach then {cap = length (p -^ orb_pos) - reach + 0.02, radiance = splat 0, extinction = 0}
      else
-       loop acc = {cap = 1e9f32, radiance = splat 0} for kind < 2 do
+       loop acc = {cap = 1e9f32, radiance = splat 0, extinction = 0f32} for kind < 2 do
             if !(kind_enabled kind) then acc else
             loop acc for b < bolts_per_kind do
               let id = kind * 100 + b
@@ -120,8 +120,8 @@ def lightning_media (tm: f32) (p: vec3) : media_sample =
                    let k = envelope id l
                    let core = 220 * f32.exp (-d / 0.003)
                    let halo = 1.4 * f32.exp (-d / 0.025)
-                   in { cap = f32.min acc.cap (0.3 * d + 0.002)
-                      , radiance = acc.radiance +^ scale k (scale core bolt_core_colour +^ scale halo bolt_halo_colour) }
+                   in acc with cap = f32.min acc.cap (0.3 * d + 0.002)
+                          with radiance = acc.radiance +^ scale k (scale core bolt_core_colour +^ scale halo bolt_halo_colour)
 
 -- Overall brightness of the bolts right now, in [0, 1]: drives the flicker
 -- of the orb's light on the scene.

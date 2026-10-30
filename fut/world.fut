@@ -76,6 +76,35 @@ def fbm2 (octaves: i32) (x: f32) (z: f32) : f32 =
       , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3 )
   in sum / norm
 
+-- Fractal 3D value noise, roughly in [0, 1].
+def fbm3 (octaves: i32) (p: vec3) : f32 =
+  let (sum, norm, _, _) =
+    loop (sum, norm, amp, q) = (0f32, 0f32, 0.5f32, p) for _i < octaves do
+      (sum + amp * vnoise3 q, norm + amp, amp * 0.5,
+       {x = 1.6 * q.x - 1.2 * q.z + 7.1, y = 2 * q.y + 3.3, z = 1.2 * q.x + 1.6 * q.z - 4.9})
+  in sum / norm
+
+---------------------------------------------------------------------
+-- Clouds: sparse wisps in a slab of world heights just below the rock,
+-- drifting on the wind.
+
+def cloud_bottom : f32 = 7.5
+def cloud_top : f32 = 10
+def wind : vec3 = vec 0.6 0 (-0.9)
+
+-- Density (extinction per unit length) at a world point.
+def cloud_density (secs: f32) (w: vec3) : f32 =
+  let h = (w.y - cloud_bottom) / (cloud_top - cloud_bottom)
+  in if h <= 0 || h >= 1 then 0 else
+  let q = scale 0.11 (w -^ scale secs wind)
+  let n = fbm3 4 q
+  -- thinner towards the slab's top and bottom; mostly clear sky
+  let cover = n - 0.66 + 0.14 * (4 * h * (1 - h))
+  in 1.2 * f32.max 0 cover
+
+-- Vertical distance from a world height to the slab (0 inside).
+def cloud_gap (y: f32) : f32 = f32.max (cloud_bottom - y) (y - cloud_top) |> f32.max 0
+
 ---------------------------------------------------------------------
 -- Terrain: rolling hills with ridged mountains, in world coordinates.
 
