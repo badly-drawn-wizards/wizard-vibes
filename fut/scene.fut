@@ -33,14 +33,51 @@ def staff_radius : f32 = 0.028
 def staff_at (y: f32) : vec3 = staff_foot +^ scale (y / staff_dir.y) staff_dir
 
 def grip_height : f32 = 1.15
-def right_elbow : vec3 = vec 0.36 1.07 0.14
+-- The elbow's rest position; only used to place the fist and the wrist.
+def right_elbow_rest : vec3 = vec 0.36 1.07 0.14
 -- The fist is a short capsule along the staff, offset towards the elbow so
 -- the staff passes through its outer half and shows above and below it.
 def fist_centre : vec3 =
   let g = staff_at grip_height
-  let towards = right_elbow -^ g
+  let towards = right_elbow_rest -^ g
   let off = towards -^ scale (dot towards staff_dir) staff_dir
   in g +^ scale 0.02 (normalise off)
+def right_wrist : vec3 = fist_centre -^ scale 0.05 (normalise (fist_centre -^ right_elbow_rest))
+
+-- Two-bone IK: for a shoulder s reaching for target t with bone lengths l1
+-- and l2, returns (elbow, hand). The elbow bends towards `pole`; an
+-- unreachable target is approached as far as the arm allows.
+def two_bone (s: vec3) (t: vec3) (l1: f32) (l2: f32) (pole: vec3) : (vec3, vec3) =
+  let d = t -^ s
+  let dir = normalise d
+  let reach = clamp (f32.abs (l1 - l2) + 1e-3) (l1 + l2 - 1e-3) (length d)
+  let a = (l1 * l1 - l2 * l2 + reach * reach) / (2 * reach) -- along dir to the elbow
+  let h = f32.sqrt (f32.max 0 (l1 * l1 - a * a)) -- out from dir to the elbow
+  let side = normalise (pole -^ scale (dot pole dir) dir)
+  in (s +^ scale a dir +^ scale h side, s +^ scale reach dir)
+
+-- Breathing: three breaths per loop (4 s each); 0 exhaled, 1 inhaled.
+def breath (tm: f32) : f32 = 0.5 - 0.5 * f32.cos (3 * tm)
+
+-- Everything about the wizard that moves, worked out once per pixel.
+type pose = { tm: f32, breath: f32
+            , head: vec3 -- offset of the head, beard and hat
+            , r_shoulder: vec3, r_elbow: vec3, r_wrist: vec3
+            , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3 }
+
+def pose_at (tm: f32) : pose =
+  let b = breath tm
+  -- inhaling lifts the shoulders; the head rises and nods forward a little
+  let lift = vec 0 (0.012 * b) (0.004 * b)
+  let head = vec 0 (0.012 * b) (0.007 * b)
+  let r_shoulder = vec 0.2 1.33 0 +^ lift
+  let l_shoulder = vec (-0.2) 1.33 0 +^ lift
+  -- the right hand stays on the staff, so its elbow follows the breathing
+  let (r_elbow, r_wrist) = two_bone r_shoulder right_wrist 0.34 0.29 (vec 0.5 (-1) (-0.5))
+  -- the left hand drifts idly in front of the belly
+  let idle = vec (0.025 * f32.sin tm) (0.018 * f32.sin (2 * tm) + 0.01 * b) (0.02 * f32.cos tm)
+  let (l_elbow, l_wrist) = two_bone l_shoulder (vec (-0.25) 1.02 0.27 +^ idle) 0.31 0.27 (vec (-0.6) (-1) (-0.5))
+  in {tm, breath = b, head, r_shoulder, r_elbow, r_wrist, l_shoulder, l_elbow, l_wrist}
 
 def orb_radius : f32 = 0.11
 def orb_pos : vec3 = staff_top +^ scale 0.1 staff_dir
@@ -91,29 +128,42 @@ def sd_cradle (p: vec3) : f32 =
   let cup = sd_round_cone_ab p (staff_top -^ scale 0.05 ax) ring_centre staff_radius (0.85 * ring_r)
   in f32.min (smin 0.02 ring cup) (smin 0.01 prong tip)
 
-def sd_robe (tm: f32) (p: vec3) : f32 =
+def sd_robe (pose: pose) (p: vec3) : f32 =
   let a = f32.atan2 p.z p.x
-  let hem = 0.02 * f32.sin (9 * a + 2 * tm) * saturate (1 - p.y / 0.8)
+  let hem = 0.02 * f32.sin (9 * a + 2 * pose.tm) * saturate (1 - p.y / 0.8)
   let cone = sd_capped_cone p 1.35 0.55 0.17 - 0.03 + hem
-  let shoulders = sd_ellipsoid (p -^ vec 0 1.3 0) (vec 0.29 0.14 0.2)
+  -- the chest fills out with each breath
+  let b = pose.breath
+  let shoulders = sd_ellipsoid (p -^ vec 0 (1.3 + 0.01 * b) (0.004 * b)) (vec (0.29 + 0.008 * b) 0.14 (0.2 + 0.01 * b))
   in smin 0.12 cone shoulders
 
-def sd_arms (p: vec3) : f32 =
-  let upper = sd_capsule p (vec 0.2 1.33 0) right_elbow 0.075
-  let fore = sd_capsule p right_elbow (fist_centre -^ scale 0.05 (normalise (fist_centre -^ right_elbow))) 0.068
-  let left = sd_capsule p (vec (-0.2) 1.33 0) (vec (-0.27) 1.02 0.24) 0.075
-  in f32.min (smin 0.04 upper fore) left
+-- An arm: upper arm and a forearm whose sleeve flares towards the cuff.
+def sd_arm (shoulder: vec3) (elbow: vec3) (wrist: vec3) (p: vec3) : f32 =
+  smin 0.04 (sd_capsule p shoulder elbow 0.075) (sd_round_cone_ab p elbow wrist 0.064 0.078)
 
-def sd_hands (p: vec3) : f32 =
+def sd_arms (pose: pose) (p: vec3) : f32 =
+  f32.min (sd_arm pose.r_shoulder pose.r_elbow pose.r_wrist p)
+          (sd_arm pose.l_shoulder pose.l_elbow pose.l_wrist p)
+
+-- The left hand pokes out of its sleeve, along the forearm.
+def left_hand (pose: pose) : vec3 =
+  pose.l_wrist +^ scale 0.045 (normalise (pose.l_wrist -^ pose.l_elbow))
+
+def sd_hands (pose: pose) (p: vec3) : f32 =
   let fist = sd_capsule p (fist_centre -^ scale 0.04 staff_dir) (fist_centre +^ scale 0.04 staff_dir) 0.05
-  in f32.min fist (sd_sphere (p -^ vec (-0.27) 0.97 0.29) 0.055)
+  in f32.min fist (sd_sphere (p -^ left_hand pose) 0.052)
 
-def sd_head (p: vec3) : f32 =
+-- The head, beard and hat move together with the pose's head offset.
+def head_space (pose: pose) (p: vec3) : vec3 = p -^ pose.head
+
+def sd_head (pose: pose) (p: vec3) : f32 =
+  let p = head_space pose p
   let head = sd_sphere (p -^ vec 0 1.6 0.02) 0.17
   let nose = sd_ellipsoid (p -^ vec 0 1.58 0.19) (vec 0.035 0.05 0.05)
   in smin 0.03 head nose
 
-def sd_eyes (p: vec3) : f32 =
+def sd_eyes (pose: pose) (p: vec3) : f32 =
+  let p = head_space pose p
   let q = {x = f32.abs p.x, y = p.y, z = p.z}
   in sd_sphere (q -^ vec 0.065 1.64 0.155) 0.022
 
@@ -123,7 +173,9 @@ def beard_tip : vec3 = vec 0 0.98 0.27
 
 -- Beard space: swaying with the loop, and squashed sideways so the beard is
 -- wider than deep (dividing x only contracts space, so distances stay safe).
-def beard_space (tm: f32) (p: vec3) : vec3 =
+def beard_space (pose: pose) (p: vec3) : vec3 =
+  let p = head_space pose p
+  let tm = pose.tm
   let sway = 0.03 * f32.sin (2 * tm) * saturate ((1.5 - p.y) / 0.5)
   in {x = (p.x - sway) / 1.45, y = p.y, z = p.z}
 
@@ -136,8 +188,9 @@ def beard_strands (q: vec3) : f32 =
   let phi = f32.atan2 rv.x rv.z
   in f32.abs (f32.sin (10 * phi + 5 * h + 0.6 * f32.sin (9 * h)))
 
-def sd_beard (tm: f32) (p: vec3) : f32 =
-  let q = beard_space tm p
+def sd_beard (pose: pose) (p: vec3) : f32 =
+  let q = beard_space pose p
+  let p = head_space pose p
   -- fork the lower half into two points
   let fork = 0.035 * smoothstep 1.3 0.98 q.y
   let fq = {x = f32.abs q.x - fork, y = q.y, z = q.z}
@@ -157,14 +210,14 @@ def hat_bend (tm: f32) : f32 = 0.9 + 0.15 * f32.sin tm
 def hat_height : f32 = 0.72
 def hat_radius (y: f32) : f32 = 0.2 - (0.2 - 0.012) * saturate (y / hat_height)
 
-def sd_hat (tm: f32) (p: vec3) : f32 =
-  let hp = p -^ hat_base
-  let bp = bend (hat_bend tm) hp
+def sd_hat (pose: pose) (p: vec3) : f32 =
+  let hp = head_space pose p -^ hat_base
+  let bp = bend (hat_bend pose.tm) hp
   let cone = sd_capped_cone bp hat_height (hat_radius 0) (hat_radius hat_height)
   let brim = f32.min (sd_torus hp 0.3 0.022) (sd_cylinder hp 0.31 0.01)
   in smin 0.04 cone brim
 
-def sd_band (p: vec3) : f32 = sd_torus (p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0.025
+def sd_band (pose: pose) (p: vec3) : f32 = sd_torus (head_space pose p -^ (hat_base +^ vec 0 0.05 0)) 0.186 0.025
 
 def sd_staff (p: vec3) : f32 = sd_capsule p staff_foot staff_top staff_radius
 
@@ -224,6 +277,16 @@ def potion (i: i32) (p: vec3) : hit =
   let cork = sd_capsule p (neck_top -^ vec 0 0.008 0) (neck_top +^ vec 0 0.01 0) 0.015
   in umin (glass, m_potion + i) (cork, m_wood)
 
+-- A flat strap (0.022 wide, 0.005 thick) from a to b, its face along n.
+def sd_strap (p: vec3) (a: vec3) (b: vec3) (n: vec3) : f32 =
+  let ab = b -^ a
+  let len = length ab
+  let d = scale (1 / len) ab
+  let w = normalise (cross d n)
+  let nn = cross w d
+  let v = p -^ mix a b 0.5
+  in sd_box (vec (dot v d) (dot v w) (dot v nn)) (vec (0.5 * len + 0.002) 0.01 0.0015) - 0.001
+
 -- A tome hanging on the left hip, lying against the robe's slope.
 def tome (p: vec3) : hit =
   let a = deg (-100)
@@ -239,8 +302,13 @@ def tome (p: vec3) : hit =
   let spine = box (-0.077) 0 (vec 0.008 0.1 0.03) 0.006
   let pages = box 0.004 0 (vec 0.074 0.094 0.022) 0.002
   let clasp = box 0.08 0 (vec 0.006 0.016 0.031) 0.003
-  -- a strap from the belt down over the front cover
-  let strap = sd_box (q -^ vec 0 0.07 0.035) (vec 0.011 0.074 0.0025) - 0.0015
+  -- a strap from low on the front cover, up and over the top of the belt
+  let on_cover (u: f32) = c +^ scale u up +^ scale 0.035 out
+  let belt_front = scale (robe_radius belt_y + 0.019) (around a) +^ vec 0 (belt_y + 0.016) 0
+  let belt_top = scale (robe_radius belt_y + 0.002) (around a) +^ vec 0 (belt_y + 0.027) 0
+  let strap = sd_strap p (on_cover (-0.04)) (on_cover 0.1) out
+              |> f32.min (sd_strap p (on_cover 0.1) belt_front out)
+              |> f32.min (sd_strap p belt_front belt_top out)
   in (f32.min covers spine, m_tome) |> umin (pages, m_pages) |> umin (clasp, m_gold) |> umin (strap, m_leather)
 
 -- Evaluates f only within 0.15 of a bounding sphere around it; beyond, the
@@ -257,14 +325,14 @@ def waist_gear (p: vec3) : hit =
      |> umin (bounded potions_at 0.26 (\q -> potion 0 q |> umin (potion 1 q) |> umin (potion 2 q)) p)
      |> umin (bounded tome_at 0.19 tome p)
 
-def wizard (tm: f32) (p: vec3) : hit =
-  (smin 0.06 (sd_robe tm p) (sd_arms p), m_robe)
-  |> umin (sd_hands p, m_skin)
-  |> umin (sd_head p, m_skin)
-  |> umin (sd_eyes p, m_eye)
-  |> umin (sd_beard tm p, m_beard)
-  |> umin (sd_hat tm p, m_hat)
-  |> umin (sd_band p, m_gold)
+def wizard (pose: pose) (p: vec3) : hit =
+  (smin 0.06 (sd_robe pose p) (sd_arms pose p), m_robe)
+  |> umin (sd_hands pose p, m_skin)
+  |> umin (sd_head pose p, m_skin)
+  |> umin (sd_eyes pose p, m_eye)
+  |> umin (sd_beard pose p, m_beard)
+  |> umin (sd_hat pose p, m_hat)
+  |> umin (sd_band pose p, m_gold)
   |> umin (sd_staff p, m_wood)
   |> umin (sd_cradle p, m_gold)
   |> umin (waist_gear p)
@@ -320,19 +388,19 @@ def rune_paint (tm: f32) (p: vec3) : f32 =
 -- skip evaluating the parts (see the distance contract in march.fut).
 def wizard_bound (p: vec3) : f32 = sd_capsule p (vec 0 0.3 0) (vec 0 2.3 0) 0.95
 
-def bounded_wizard (tm: f32) (tol: f32) (p: vec3) : hit =
+def bounded_wizard (pose: pose) (tol: f32) (p: vec3) : hit =
   let b = wizard_bound p
-  in if b > tol then (b, m_robe) else wizard tm p
+  in if b > tol then (b, m_robe) else wizard pose p
 
 -- The orb is glass, refracted analytically by the shading (see shading.fut),
 -- so it is not part of the marched scene; what is inside it is drawn by the
 -- media (see media.fut and lightning.fut).
-def scene (tm: f32) (tol: f32) (p: vec3) : hit = bounded_wizard tm tol p |> umin (p.y, m_ground)
+def scene (pose: pose) (tol: f32) (p: vec3) : hit = bounded_wizard pose tol p |> umin (p.y, m_ground)
 
-def dist (tm: f32) (tol: f32) (p: vec3) : f32 = (scene tm tol p).0
+def dist (pose: pose) (tol: f32) (p: vec3) : f32 = (scene pose tol p).0
 
 -- What casts shadows: only the wizard. Both lights are above the ground,
 -- which therefore cannot block them (as an occluder it would only add
 -- penumbra artefacts at grazing angles), and the orb is a light source
 -- itself, which would otherwise darken everything it lights.
-def occluder_dist (tm: f32) (tol: f32) (p: vec3) : f32 = (bounded_wizard tm tol p).0
+def occluder_dist (pose: pose) (tol: f32) (p: vec3) : f32 = (bounded_wizard pose tol p).0

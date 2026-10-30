@@ -26,8 +26,8 @@ def star_mask (x: f32) (y: f32) (size: f32) : f32 =
 -- cells run up the cone, each row with as many cells as fit around it, and
 -- the star is measured in arc length, so stars keep their shape as the cone
 -- narrows.
-def hat_stars (tm: f32) (p: vec3) : f32 =
-  let bp = bend (hat_bend tm) (p -^ hat_base)
+def hat_stars (pose: pose) (p: vec3) : f32 =
+  let bp = bend (hat_bend pose.tm) (head_space pose p -^ hat_base)
   let cell = 0.085
   let y0 = 0.08 -- start above the band, keeping the brim clear
   let v = (bp.y - y0) / cell
@@ -65,12 +65,13 @@ type material = {albedo: vec3, emission: vec3, ks: f32, shininess: f32, rim: boo
 def plain (albedo: vec3) : material =
   {albedo, emission = splat 0, ks = 0.08, shininess = 8, rim = true, metal = false}
 
-def material (tm: f32) (g: glow) (m: i32) (p: vec3) : material =
+def material (pose: pose) (g: glow) (m: i32) (p: vec3) : material =
+  let tm = pose.tm in
   if m == m_robe then plain (vec 0.07 0.05 0.33)
   else if m == m_skin then plain (vec 0.85 0.6 0.48) with ks = 0.15 with shininess = 16
-  else if m == m_beard then plain (scale (0.75 + 0.25 * beard_strands (beard_space tm p)) (vec 0.88 0.88 0.92))
+  else if m == m_beard then plain (scale (0.75 + 0.25 * beard_strands (beard_space pose p)) (vec 0.88 0.88 0.92))
   else if m == m_hat then
-    let s = hat_stars tm p
+    let s = hat_stars pose p
     in plain (mix (vec 0.09 0.08 0.36) (vec 1 0.8 0.3) s) with emission = scale (0.6 * s) (vec 1 0.75 0.3)
   else if m == m_gold then plain (vec 1 0.6 0.14) with ks = 1.6 with shininess = 48 with metal = true
   else if m == m_eye then plain (splat 0.02) with ks = 0.8 with shininess = 120
@@ -104,12 +105,12 @@ def light (mat: material) (n: vec3) (rd: vec3) (l: vec3) (shadow: f32) (diffuse:
      else scale lit (mat.albedo *^ diffuse) +^ scale spec specular
 
 -- The lit colour of a surface hit at distance t along rd (fog included).
-def surface (tm: f32) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
-  let n = normal (dist tm) p
-  let mat = material tm g m p
-  let occ = ambient_occlusion (dist tm) p n
+def surface (pose: pose) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
+  let n = normal (dist pose) p
+  let mat = material pose g m p
+  let occ = ambient_occlusion (dist pose) p n
   let po = p +^ scale 0.002 n
-  let moon_shadow = soft_shadow (occluder_dist tm) po moon_dir 12
+  let moon_shadow = soft_shadow (occluder_dist pose) po moon_dir 12
   let moon = light mat n rd moon_dir moon_shadow (vec 0.375 0.45 0.75) (vec 0.7 0.75 1)
   let to_orb = orb_pos -^ p
   let od = length to_orb
@@ -118,7 +119,7 @@ def surface (tm: f32) (g: glow) (m: i32) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   let atten = 2.4 * g.level / (1 + 1.5 * od * od)
   -- Stop short of the orb: the staff pokes into its underside, and a
   -- penumbra estimate taken right next to the light bands badly.
-  let orb_shadow = if od < orb_radius then 1 else soft_shadow (occluder_dist tm) po ol (od - orb_radius - 0.15)
+  let orb_shadow = if od < orb_radius then 1 else soft_shadow (occluder_dist pose) po ol (od - orb_radius - 0.15)
   let orb_colour = scale atten (mix (vec 0.6 0.5 1) (vec 0.9 0.95 1) (0.6 * g.flash))
   let orb = light mat n rd ol orb_shadow orb_colour orb_colour
   let fill = scale (occ * (0.5 + 0.5 * n.y) * 0.35) (mat.albedo *^ vec 0.2 0.22 0.45)
@@ -173,7 +174,7 @@ type reflection = (bool, vec3, vec3, f32)
 -- the orb, outside again - refracting at the glass, and returns the colour
 -- it gathers, weighted by w. Also returns the reflection spawned where the
 -- ray first enters the orb.
-def follow (tm: f32) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
+def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflection) =
   let (_, _, _, acc, _, _, refl) =
     loop (ro, rd, w, acc, inside, done, refl) =
       (ro0, rd0, splat w0, splat 0, false, false, (false, ro0, rd0, 0f32))
@@ -182,10 +183,10 @@ def follow (tm: f32) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflec
       let (t_in, t_out) = orb_hit ro rd
       let enters = !inside && t_in > 1e-3 && t_in < t_out
       let tmax = if inside then t_out else if enters then t_in else 40
-      let (t, m, emitted) = march (scene tm) (media tm g) ro rd tmax
+      let (t, m, emitted) = march (scene pose) (media pose.tm g) ro rd tmax
       let acc = acc +^ (w *^ emitted)
       in if m >= 0 then
-           (ro, rd, w, acc +^ (w *^ surface tm g m (ro +^ scale t rd) rd t), inside, true, refl)
+           (ro, rd, w, acc +^ (w *^ surface pose g m (ro +^ scale t rd) rd t), inside, true, refl)
          else if enters && t >= t_in then
            -- into the glass
            let p = ro +^ scale t_in rd
@@ -202,7 +203,9 @@ def follow (tm: f32) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, reflec
   in (acc, refl)
 
 def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
-  let g = glow_now tm -- once per pixel, not per march step
+  -- worked out once per pixel, not per march step
+  let g = glow_now tm
+  let pose = pose_at tm
   -- Path 0 is the camera ray; path 1 its reflection off the orb, if any.
   -- A loop, so that follow (and all the shading) is compiled only once.
   let paths = if orb_reflections then 2 else 1
@@ -210,6 +213,6 @@ def shade (tm: f32) (ro: vec3) (rd: vec3) : vec3 =
     loop (c, refl) = (splat 0, (false, ro, rd, 0f32)) for k < paths do
       if k == 1 && !refl.0 then (c, refl) else
       let (o, d, w) = if k == 0 then (ro, rd, 1) else (refl.1, refl.2, refl.3)
-      let (col, r) = follow tm g o d w
+      let (col, r) = follow pose g o d w
       in (c +^ col, if k == 0 then r else refl)
   in c
