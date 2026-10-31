@@ -52,9 +52,19 @@
 #let node(x, y, w, h, body, col: glow) = at(x, y, rect(width: w * 1cm, height: h * 1cm, radius: 5pt, fill: panel, stroke: 1.2pt + col, align(center + horizon, text(size: 14pt, body))))
 #let canvas(w, h, body) = box(width: w * 1cm, height: h * 1cm, clip: true, body)
 
-// A horizontal bar chart: rows of (label, value), scaled to `max`.
+// A horizontal bar chart: rows of (label, value), scaled to `max`. The value
+// goes inside a bar wide enough for it, otherwise after it, in white.
 #let bars(rows, max: 12, width: 12, col: glow, unit: "ms") = grid(columns: (auto, width * 1cm), gutter: 8pt, align: (right + horizon, left + horizon),
-  ..rows.map(((l, v)) => (text(size: 14pt, l), box(width: v / max * width * 1cm, height: 0.55cm, fill: col, radius: 2pt, align(right + horizon, pad(right: 4pt, text(size: 12pt, fill: bg, weight: "bold", str(v) + " " + unit)))))).flatten())
+  ..rows.map(((l, v)) => {
+    let w = v / max * width * 1cm
+    let value = str(v) + " " + unit
+    let bar = box(width: w, height: 0.55cm, fill: col, radius: 2pt)
+    (text(size: 14pt, l), context {
+      let fits = measure(text(size: 12pt, weight: "bold", value)).width + 8pt <= w
+      if fits { box(width: w, height: 0.55cm, fill: col, radius: 2pt, align(right + horizon, pad(right: 4pt, text(size: 12pt, fill: bg, weight: "bold", value)))) }
+      else { stack(dir: ltr, spacing: 5pt, bar, box(height: 0.55cm, align(horizon, text(size: 12pt, fill: white, weight: "bold", value)))) }
+    })
+  }).flatten())
 
 // ---------------------------------------------------------------------
 
