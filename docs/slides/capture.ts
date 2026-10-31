@@ -60,7 +60,6 @@ const shots: Shot[] = [
   { name: "ao", size: [640, 640], time: 3, cam: [0.4, 0.1, 2.8], target: [0, 1.2, 0], params: { view: "3i32" } },
   { name: "shaded", size: [640, 640], time: 3, cam: [0.4, 0.1, 2.8], target: [0, 1.2, 0] },
   { name: "cottage", size: [960, 540], time: 20, cam: [2.2, 0.15, 6], target: [9.82, -10.4, 9.19], edits: [LOW], params: { structure_density: "1.0f32" } },
-  { name: "aerial", size: [960, 540], time: 20, cam: [2.4, 0.5, 30], target: [0, -8, 0], params: { structure_density: "1.0f32", layers: "895i32" } },
   { name: "terrain", size: [960, 540], time: 20, cam: [2.4, 0.02, 9], target: [0, -6, 0], edits: [LOW] },
   { name: "terrain-normals", size: [960, 540], time: 20, cam: [2.4, 0.02, 9], target: [0, -6, 0], edits: [LOW], params: { view: "1i32" } },
   { name: "eps-tight", size: [640, 360], time: 20, cam: [2.4, 0.02, 9], target: [0, -6, 0], edits: [LOW, terrainEps("0.0004")] },
