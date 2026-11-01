@@ -154,6 +154,7 @@ function configFut(s: Schema, local: boolean, overrides: Record<string, Value>):
   const vals = compileValues(s, local, overrides);
   const ps = allParams(s).filter((p) => p.compile);
   return `${HEADER}-- Compile-time constants (changing one rebuilds the shader).
+import "vec3"
 ${ps.map((p) => `\n-- ${p.label}\ndef ${p.id} : ${futType(p)} = ${lit(p, vals[p.id])}`).join("\n")}
 `;
 }

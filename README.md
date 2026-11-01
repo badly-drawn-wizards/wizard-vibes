@@ -32,6 +32,19 @@ while the current one keeps drawing (its pipelines are created
 asynchronously: dev/emcc/async-pipeline.c), and Auto steps down below 40 fps
 and up while frames keep near the display's rate.
 
+The land has three biomes, sorted by one broad field of crossing waves
+(fut/world.fut): desert dunes with pyramids, meadow hills with cottages, and
+steeper alpine mountains with towers, blended with exact gradients so the
+analytic normals and the march's bounds stay right across the borders.
+Trees grow in groves below the tree line (broadleaf in the meadows, pines
+in the mountains). A broadleaf tree is an L-system evaluated as a distance
+in time linear in its depth: each level mirrors, turns and moves space to
+a branch's end, so one capsule stands for all of that level's branches.
+They are drawn near the wizard only (farther off, forests are shading on
+the ground), and only at the High quality preset (`draw_trees`): they cost
+2 to 6 ms a frame at 1080p, as rays crossing the canopy take many short
+steps.
+
 Music (off until you press ♪ or M) is computed in Futhark the way Shadertoy
 does sound: each stereo sample is a pure function of time (fut/music.fut),
 and the `sound` entry point makes a chunk of samples at a time, read back

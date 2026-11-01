@@ -479,3 +479,135 @@ def structures (l: land) (density: f32) (w: vec3) : (f32, i32) =
   in if !dry then (f32.max above far, part_wall) else
   let (d, part) = sd_structure kind (yaw_inv yaw (w -^ vec px ground pz))
   in (f32.min d far, part)
+
+---------------------------------------------------------------------
+-- Trees: one cell of a tree_cell grid in every few holds a tree, in groves
+-- with clearings between; broadleaf trees in the meadows and pines in the
+-- mountains, none in the desert, and none above the tree line or on the
+-- shore. Bounded like the structures: each tree stays within tree_reach of
+-- its centre, which stays tree_inset cells inside its cell.
+--
+-- A broadleaf tree is an L-system (each branch ends in two shorter,
+-- thinner branches) evaluated as a distance in time linear in its depth,
+-- not in its 2^depth branches: at each level space is mirrored (|x|),
+-- turned and moved to the branch's end, so one capsule per level stands for
+-- every branch of that level. Mirrors and turns keep distances, so the
+-- result is still (nearly) a distance; it can overestimate only where a
+-- branch reaches across its mirror plane, and the branches lean away from it.
+
+def tree_cell : f32 = 12
+def tree_reach : f32 = 2.2 -- every tree fits within this of its centre (in xz)
+def tree_inset : f32 = 0.38 -- (so trees in other cells are 2.36 further than the border)
+def tree_height_max : f32 = 4.6
+def tree_size_max : f32 = 1.1
+def tree_tall : f32 = 3.82 * tree_size_max -- (measured: the tallest point of either kind, at size 1)
+
+def tree_line : f32 = 4.5 -- no trees on ground higher than this (so they pass under the rock)
+def tree_top : f32 = tree_line + tree_height_max -- under terrain_max
+
+def kind_broadleaf : i32 = 0
+def kind_pine : i32 = 1
+
+-- Groves and clearings: 0 to 1.
+def grove (x: f32) (z: f32) : f32 =
+  smoothstep 0.3 0.55 (0.5 + 0.25 * (f32.sin (0.05 * x + 1.3 * f32.sin (0.031 * z)) + f32.sin (0.043 * z - 0.9 * f32.sin (0.037 * x) + 2)))
+
+-- The candidate tree of the cell holding (x, z): (present, kind, centre x,
+-- z, size, seed in [0, 1)).
+def tree_candidate (density: f32) (x: f32) (z: f32) : (bool, i32, f32, f32, f32, f32) =
+  let cx = i32.f32 (f32.floor (x / tree_cell))
+  let cz = i32.f32 (f32.floor (z / tree_cell))
+  let seed = hash2 (cx * 19 + 7) (cz * 23 + 1)
+  let px = (f32.i32 cx + tree_inset + (1 - 2 * tree_inset) * hash2 (cx + 13) (cz - 29)) * tree_cell
+  let pz = (f32.i32 cz + tree_inset + (1 - 2 * tree_inset) * hash2 (cx - 31) (cz + 37)) * tree_cell
+  -- (most cells fail the hash, without the biome and grove fields)
+  let h = hash2 (cx * 3 + 101) (cz * 5 - 7)
+  let (present, kind) =
+    if h >= density then (false, kind_broadleaf) else
+    let (wd, wa) = biome px pz
+    in ( h < density * (1 - wd) * grove px pz
+       , if wa > 0.25 + 0.5 * seed then kind_pine else kind_broadleaf )
+  in (present, kind, px, pz, 0.8 + (tree_size_max - 0.8) * hash2 (cx + 3) (cz + 9), seed)
+
+-- Tree parts.
+def part_trunk : i32 = 0
+def part_leaves : i32 = 1
+def part_needles : i32 = 2
+
+-- A broadleaf tree, ground at y = 0, at most tree_reach / 1.2 across and
+-- tree_height_max / 1.2 tall: (distance, part).
+def sd_broadleaf (seed: f32) (q: vec3) : (f32, i32) =
+  let trunk = sd_round_cone_ab q (vec 0 (-0.3) 0) (vec 0 1.3 0) 0.15 0.09
+  let (wood, tip, _, _) =
+    loop (d, p, len, rad) = (trunk, q -^ vec 0 1.3 0, 0.85f32, 0.085f32) for i < 3 do
+      -- turn the branching plane (about 100 degrees a level, varied per tree),
+      -- mirror, then lean the branch out from the mirror plane
+      let p = yaw (1.75 + 0.6 * seed + f32.i32 i) p
+      let p = p with x = f32.abs p.x
+      let lean = 0.42 + 0.1 * f32.i32 i
+      let r = rot2 lean (vec2 p.x p.y)
+      let p = p with x = r.x with y = r.y
+      in (f32.min d (sd_capsule p (vec 0 0 0) (vec 0 len 0) rad), p -^ vec 0 len 0, 0.78 * len, 0.62 * rad)
+  -- a clump of leaves at each tip (lumpy: the bumps have slope under 0.45,
+  -- so the 0.7 keeps it a bound), and one over the crown's middle
+  let bumps = 0.04 * f32.sin (6 * q.x + 7 * seed) * f32.sin (6 * q.y) * f32.sin (6 * q.z + 3 * seed)
+  let clump = sd_sphere (tip -^ vec 0 0.1 0) 0.55
+  let middle = sd_ellipsoid (q -^ vec 0 2.55 0) (vec 0.95 0.75 0.95)
+  let leaves = 0.7 * (smin 0.3 clump middle + bumps)
+  in if wood < leaves then (wood, part_trunk) else (leaves, part_leaves)
+
+-- A pine: a trunk and three tiers of needles, narrowing upwards.
+def sd_pine (seed: f32) (q: vec3) : (f32, i32) =
+  let trunk = sd_capsule q (vec 0 (-0.3) 0) (vec 0 3.4 0) 0.09
+  let tier (y: f32) (r: f32) (h: f32) = sd_capped_cone (q -^ vec 0 y 0) h r 0.02
+  let s = 0.1 * seed
+  let needles = f32.min (tier 0.7 (1.25 + s) 1.6) (f32.min (tier 1.6 (0.95 + s) 1.4) (tier 2.4 0.65 1.4))
+  -- (a ragged edge: needles in drooping bunches round each tier)
+  let a = f32.atan2 q.z q.x
+  let needles = needles + 0.05 * f32.sin (11 * a + 5 * q.y + 6 * seed) * saturate (length2 (vec2 q.x q.z) * 2)
+  in if trunk < 0.8 * needles then (trunk, part_trunk) else (0.8 * needles, part_needles)
+
+#[noinline]
+def sd_tree (kind: i32) (seed: f32) (q: vec3) : (f32, i32) =
+  if kind == kind_pine then sd_pine seed q else sd_broadleaf seed q
+
+-- The tree of the cell holding a world point: (present, kind, origin on the
+-- ground, size, seed). Evaluates the ground there.
+def tree_at (l: land) (density: f32) (w: vec3) : (bool, i32, vec3, f32, f32) =
+  let (present, kind, px, pz, size, seed) = tree_candidate density w.x w.z
+  let ground = if present then terrain_height l px pz else 0
+  let ok = present && ground > l.sea + 0.4 && ground < tree_line
+  in (ok, kind, vec px ground pz, size, seed)
+
+-- Distance from (x, z) to the edge of its tree cell.
+def tree_cell_border (x: f32) (z: f32) : f32 =
+  let fx = x - tree_cell * f32.floor (x / tree_cell)
+  let fz = z - tree_cell * f32.floor (z / tree_cell)
+  in f32.min (f32.min fx (tree_cell - fx)) (f32.min fz (tree_cell - fz))
+
+-- The trees' distance at a world point: (distance, part), with the same
+-- kinds of bounds as the structures', and one more: a tree is no taller
+-- than its ground's cheap upper bound (capped by the tree line) plus its
+-- height, so the ground under it (8 noise lookups) is only needed close by.
+-- `grown` in [0, 1] scales every tree (towards the edge of where they are
+-- drawn at all: see land_built); shrinking only shortens distances. Where
+-- none are drawn, `outside` is the distance to where they are.
+#[noinline]
+def trees (l: land) (density: f32) (grown: f32) (outside: f32) (w: vec3) : (f32, i32) =
+  let above = f32.max (w.y - tree_top) outside
+  in if above > 0.3 then (above, part_trunk) else
+  let far = tree_cell_border w.x w.z + (tree_inset * tree_cell - tree_reach)
+  in if density <= 0 || grown <= 0 then (f32.max above far, part_trunk) else
+  let (present, kind, px, pz, size, seed) = tree_candidate density w.x w.z
+  in if !present then (f32.max above far, part_trunk) else
+  let size = size * grown
+  let own = length2 (vec2 (w.x - px) (w.z - pz)) - tree_reach * size / tree_size_max
+  let b = f32.max above (f32.min far own)
+  in if b > 0.3 then (b, part_trunk) else
+  let (wd, wa) = biome px pz
+  let tall = w.y - (f32.min (terrain_upper wd wa px pz) tree_line + tree_tall * size / tree_size_max)
+  in if tall > 0.3 then (f32.max tall (f32.min far own), part_trunk) else
+  let ground = terrain_height l px pz
+  in if ground <= l.sea + 0.4 || ground >= tree_line then (f32.max above far, part_trunk) else
+  let (d, part) = sd_tree kind seed (scale (1 / size) (yaw (6.28 * seed) (w -^ vec px ground pz)))
+  in (f32.min (d * size) far, part)

@@ -2,6 +2,7 @@
 
 import "vec3"
 import "params"
+import "config"
 import "sdf"
 import "hash"
 import "anim"
@@ -170,8 +171,8 @@ def structure_shade (si: structure_in) (fp: f32) (m: i32) (p: vec3) : material =
 def structure_material (pose: pose) (fp: f32) (m: i32) (p: vec3) : material =
   let prm = pose.prm
   in structure_shade { fl = pose.fl, land = land_of prm, density = prm.structure_density, brick_size = prm.brick_size
-                     , wall = prm.wall_colour, thatch = prm.thatch_colour, tower = prm.tower_colour, slate = prm.slate_colour
-                     , sandstone = prm.sandstone_colour, window = prm.window_colour, window_glow = prm.window_glow }
+                     , wall = wall_colour, thatch = thatch_colour, tower = tower_colour, slate = slate_colour
+                     , sandstone = sandstone_colour, window = prm.window_colour, window_glow = prm.window_glow }
                      fp m p
 
 -- What the water depends on, projected out of the pose (see sky_in).
@@ -201,7 +202,8 @@ def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   water_shade { sky = sky_in_of pose, fl = pose.fl, moon = pose.moon, pix = pose.pix, colour = pose.prm.water_colour
               , fog = pose.prm.fog, view_distance = pose.prm.view_distance } p rd t
 
-#[noinline] -- (few call sites: the whole pose is passed)
+-- (inlined into its one caller, surface: as a GPU function of its own, the
+-- whole pose it takes came to more than WGSL's 255 parameters)
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let tm = pose.tm in
   if m == m_robe then plain (cloth_albedo pose p) with rim = false with sheen = pose.prm.sheen with ks = 0.03
@@ -226,14 +228,26 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m == m_terrain then
     -- moss in the valleys, bare rock on steep slopes, snow on high flats;
     -- sand in the desert, and in the mountains more rock and snow lower down
+    -- (moss: broad drier and lusher patches, and up close the grass's
+    -- blades; stone: strata, warped; far off, where trees would stand, the
+    -- forest's canopy as clumps of leaves)
     let w = to_world pose.fl p
     let up = (to_world_dir pose.fl n).y
     let (wd, wa) = biome w.x w.z
     let grain = 0.75 + 0.5 * vnoise2 (w.x * 1.7) (w.z * 1.7)
-    let moss = pose.prm.moss_colour
-    let stone = pose.prm.stone_colour
+    let dry = smoothstep 0.45 0.85 (vnoise2 (w.x * 0.11 + 3.1) (w.z * 0.11 - 7.7))
+    let moss = mix pose.prm.moss_colour (pose.prm.moss_colour *^ vec 1.7 1.4 0.75) dry
+    let moss = if fp < 0.014 then scale (0.75 + 0.6 * grass_blades fp w) moss else scale 1.05 moss
+    let strata = 0.5 + 0.5 * f32.sin (w.y * 5 + 3 * vnoise2 (w.x * 0.3) (w.z * 0.3))
+    let stone = scale (0.7 + 0.45 * strata * keep fp 0.4) pose.prm.stone_colour
     let snow = pose.prm.snow_colour
     let c = mix stone moss (smoothstep (0.7 + 0.12 * wa) (0.85 + 0.08 * wa) up)
+    let canopy = (if draw_trees then smoothstep tree_near tree_far (length p) else 1)
+                 * pose.prm.tree_density * (1 - wd) * grove w.x w.z
+                 * smoothstep (tree_line + 0.5) (tree_line - 0.5) w.y * smoothstep (pose.prm.sea_level + 0.4) (pose.prm.sea_level + 0.9) w.y
+    let clumps = vnoise2 (w.x * 0.45) (w.z * 0.45)
+    let leaves = if canopy > 0 then scale (0.6 + 0.8 * vnoise2 (w.x * 1.9) (w.z * 1.9)) leaf_colour else leaf_colour
+    let c = mix c leaves (canopy * smoothstep 0.3 0.55 clumps * smoothstep 0.6 0.8 up)
     let c = mix c pose.prm.sand_colour (wd * smoothstep 0.5 0.75 up)
     let snow_line = pose.prm.snow_line - 0.5 * wa
     let c = mix c snow (smoothstep snow_line (snow_line + 1.5) w.y * smoothstep (0.6 + 0.12 * wa) (0.8 + 0.1 * wa) up)
@@ -248,11 +262,23 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let c = glow_colour pose.prm m
     in plain (scale 0.3 c) with emission = scale 0.8 c with ks = 0.6 with shininess = 60
   else if m == m_ground then
-    let tile = hash2 (i32.f32 (f32.floor (p.x * 2))) (i32.f32 (f32.floor (p.z * 2)))
-    in plain (scale (0.8 + 0.4 * tile) pose.prm.rock_top)
+    plain (flagstone_albedo pose fp p)
        with emission = scale (0.9 * pose.runes * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) pose.prm.rune_colour
        with ks = 0.3 with shininess = 40 with rim = false
   else plain (splat 0.5)
+
+-- The trees' materials, at world point w. (Apart from `material`, whose
+-- GPU function would otherwise pass more than WGSL's 255 parameters.)
+def is_tree (m: i32) : bool = m == m_trunk || m == m_leaves || m == m_needles
+
+#[noinline]
+def tree_material (trunk: vec3) (leaf: vec3) (needle: vec3) (m: i32) (w: vec3) : material =
+  if m == m_trunk
+  then plain (scale (0.7 + 0.6 * vnoise2 (w.y * 9) (f32.atan2 w.z w.x * 3)) trunk) with ks = 0.02
+  else
+    -- clumps of lighter and darker leaves, a little sheen on the lit side
+    let v = 0.6 * vnoise3 (scale 3 w) + 0.4 * vnoise3 (scale 11 w)
+    in plain (scale (0.55 + 0.9 * v) (if m == m_leaves then leaf else needle)) with ks = 0.12 with shininess = 12 with rim = false
 
 ---------------------------------------------------------------------
 -- Lighting
@@ -339,7 +365,9 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
           then let (kind, o, yaw) = structure_frame pose p
                in bumped (brick_height pose fp kind o yaw) p ng
           else ng
-  let mat = material pose g fp m p n
+  let mat = if is_tree m
+            then tree_material trunk_colour leaf_colour needle_colour m (to_world pose.fl p)
+            else material pose g fp m p n
   let occ = if m == m_terrain then 1 else ambient_occlusion (dist vis pose) p ng
   let po = p +^ scale 0.002 ng
   -- (shadow rays that pass well clear of the figure and rock are fully lit)

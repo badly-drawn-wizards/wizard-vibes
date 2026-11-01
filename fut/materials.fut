@@ -30,6 +30,9 @@ def m_tower : i32 = 26
 def m_slate : i32 = 27
 def m_sandstone : i32 = 28
 def m_water : i32 = 29
+def m_trunk : i32 = 30
+def m_leaves : i32 = 31
+def m_needles : i32 = 32
 
 ---------------------------------------------------------------------
 -- Layers. Every part of the scene belongs to one of the layers_* (generated

@@ -253,6 +253,54 @@ def cork_albedo (fp: f32) (p: vec3) : vec3 =
   in scale (mottle * (1 - 0.45 * cork_pores fp p)) (vec 0.62 0.4 0.2)
 
 ---------------------------------------------------------------------
+-- The rock's top: flagstones laid in rings round the centre, each a little
+-- different in shade, with mossy grooves between them.
+
+-- (distance to the stone's edge, the stone's hash) at a point of the top
+def flagstone (p: vec3) : (f32, f32) =
+  let ring = 0.32
+  let r = length2 (vec2 p.x p.z)
+  let ri = f32.floor (r / ring)
+  let n = f32.max 2 (f32.floor (2 * f32.pi * (ri + 0.5) * ring / 0.42))
+  let a = (f32.atan2 p.z p.x / (2 * f32.pi) + 0.5) * n + 0.7 * hash2 (i32.f32 ri) 5
+  let ai = f32.floor a
+  let (fr, fa) = (r / ring - ri, a - ai)
+  let edge = f32.min (f32.min fr (1 - fr) * ring) (f32.min fa (1 - fa) * 2 * f32.pi * f32.max r 0.05 / n)
+  in (edge, hash2 (i32.f32 ri * 7 + 3) (i32.f32 (ai - n * f32.floor (ai / n))))
+
+def flagstone_height (fp: f32) (p: vec3) : f32 =
+  let (edge, _) = flagstone p
+  in (-0.008 * smoothstep 0.025 0.004 edge + 0.0015 * vnoise3 (scale 25 p)) * keep fp 0.03
+
+-- (albedo, how much of it is moss) of the top
+def flagstone_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
+  let (edge, id) = flagstone p
+  let grain = 0.8 + 0.35 * vnoise3 (scale 9 p) * keep fp 0.1
+  let stone = scale ((0.72 + 0.45 * id) * grain) pose.prm.rock_top
+  let moss = smoothstep 0.03 0.006 edge * keep fp 0.06 * (0.4 + 0.6 * vnoise3 (scale 5 p))
+  in mix stone (scale 0.8 pose.prm.moss_colour) moss
+
+---------------------------------------------------------------------
+-- The terrain up close: rough rock, and grass in tufts of blades. The
+-- normal of the land itself comes from its height (see surface); this
+-- tilts it by detail too fine for that, fading as the footprint grows.
+
+-- (in world coordinates)
+def grass_blades (fp: f32) (w: vec3) : f32 =
+  -- tufts, and the blades in them: narrow ridges across a warped field
+  let tuft = vnoise2 (w.x * 3.1) (w.z * 3.1)
+  let warp = 2.5 * vnoise2 (w.x * 9) (w.z * 9)
+  let blade = 1 - f32.abs (2 * fract (w.x * 41 + w.z * 13 + warp) - 1)
+  let cross = 1 - f32.abs (2 * fract (w.z * 37 - w.x * 11 + 1.7 * warp) - 1)
+  in tuft * (blade * blade * keep fp 0.024 + cross * cross * keep fp 0.027)
+
+-- (2D noise, cheap enough for nearly every pixel of the frame, four times
+-- over; the grass only where it shows)
+def terrain_bump (fp: f32) (w: vec3) : f32 =
+  0.03 * vnoise2 (w.x * 4 + 0.4 * w.y) (w.z * 4 - 0.4 * w.y) * keep fp 0.25
+  + (if fp < 0.014 then 0.006 * grass_blades fp w else 0)
+
+---------------------------------------------------------------------
 
 -- Height field of material m, or 0 where it has none.
 def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
@@ -262,9 +310,12 @@ def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
   else if m == m_cork then cork fp p
   else if m == m_hat then (hat_stars pose fp p).1
   else if m == m_beard then hair pose fp p
+  else if m == m_ground then flagstone_height fp p
+  else if m == m_terrain then terrain_bump fp (to_world pose.fl p)
   else 0
 
-def has_bump (m: i32) : bool = m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork || m == m_hat
+def has_bump (m: i32) : bool =
+  m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork || m == m_hat || m == m_ground || m == m_terrain
 
 -- Tilts normal n by the gradient of the height field h across the surface.
 -- The gradient comes from four taps on a tetrahedron, small enough for the

@@ -68,9 +68,10 @@
             "Glow",
             "Clouds",
             "Structures",
-            "Water"
+            "Water",
+            "Trees"
           ],
-          "default": 1023
+          "default": 2047
         }
       ]
     },
@@ -742,6 +743,53 @@
           ]
         },
         {
+          "name": "Trees",
+          "params": [
+            {
+              "id": "tree_density",
+              "label": "Trees",
+              "kind": "slider",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.8
+            },
+            {
+              "id": "leaf_colour",
+              "label": "Leaves",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.08,
+                0.17,
+                0.06
+              ]
+            },
+            {
+              "id": "needle_colour",
+              "label": "Pine needles",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.03,
+                0.08,
+                0.05
+              ]
+            },
+            {
+              "id": "trunk_colour",
+              "label": "Bark",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.12,
+                0.08,
+                0.05
+              ]
+            }
+          ]
+        },
+        {
           "name": "Buildings",
           "params": [
             {
@@ -765,6 +813,7 @@
             {
               "id": "wall_colour",
               "label": "Cottage walls",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.62,
@@ -775,6 +824,7 @@
             {
               "id": "thatch_colour",
               "label": "Cottage roofs",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.3,
@@ -785,6 +835,7 @@
             {
               "id": "tower_colour",
               "label": "Tower stone",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.35,
@@ -795,6 +846,7 @@
             {
               "id": "slate_colour",
               "label": "Tower roofs",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.12,
@@ -805,6 +857,7 @@
             {
               "id": "sandstone_colour",
               "label": "Pyramids",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.62,
@@ -921,6 +974,13 @@
           "compile": true
         },
         {
+          "id": "draw_trees",
+          "label": "Trees (2-6 ms at 1080p)",
+          "kind": "checkbox",
+          "default": true,
+          "compile": true
+        },
+        {
           "id": "orb_tendrils",
           "label": "Lightning inside the orb",
           "kind": "checkbox",
@@ -960,19 +1020,22 @@
       "march_steps": 120,
       "terrain_steps": 96,
       "shadow_steps": 12,
-      "cloud_samples": 8
+      "cloud_samples": 8,
+      "draw_trees": false
     },
     "med": {
       "march_steps": 200,
       "terrain_steps": 160,
       "shadow_steps": 20,
-      "cloud_samples": 12
+      "cloud_samples": 12,
+      "draw_trees": false
     },
     "high": {
       "march_steps": 300,
       "terrain_steps": 256,
       "shadow_steps": 32,
-      "cloud_samples": 16
+      "cloud_samples": 16,
+      "draw_trees": true
     }
   }
 }

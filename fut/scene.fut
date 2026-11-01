@@ -99,7 +99,7 @@ def land_of (prm: params) : land = {sea = prm.sea_level, river = prm.river_width
 
 -- The world below, in the layers of `mask`: the ground, the water (sea and
 -- rivers, a plane at sea level) and the structures.
-def land_layers : i32 = layers_terrain | layers_water | layers_structures
+def land_layers : i32 = layers_terrain | layers_water | layers_structures | layers_trees
 
 -- The ground and the water (a real GPU function taking just the flight and
 -- the land, not the whole pose).
@@ -122,11 +122,28 @@ def ground_at (mask: i32) (fl: flight) (l: land) (p: vec3) : hit =
 
 def land_ground (mask: i32) (pose: pose) (p: vec3) : hit = ground_at mask pose.fl (land_of pose.prm) p
 
+def tree_near : f32 = 50
+def tree_far : f32 = 75
+
 -- The structures.
-def land_built (mask: i32) (pose: pose) (p: vec3) : hit =
+def land_structures (mask: i32) (pose: pose) (p: vec3) : hit =
   if !(has mask layers_structures) then nothing
   else let (d, part) = structures (land_of pose.prm) pose.prm.structure_density (to_world pose.fl p)
        in (d, m_wall + part) |> tag layers_structures
+
+-- The trees. They are drawn near the wizard only, where the camera always
+-- is: they shrink away between tree_near and tree_far from him; farther
+-- off, forests are a shade of the ground (see shading.fut).
+-- (at the High quality preset only: draw_trees)
+def land_trees (mask: i32) (pose: pose) (p: vec3) : hit =
+  if !draw_trees || !(has mask layers_trees) then nothing
+  else let r = length p
+       let (d, part) = trees (land_of pose.prm) pose.prm.tree_density
+                             (smoothstep tree_far tree_near r) (r - tree_far) (to_world pose.fl p)
+       in (d, m_trunk + part) |> tag layers_trees
+
+def land_built (mask: i32) (pose: pose) (p: vec3) : hit =
+  land_structures mask pose p |> umin (land_trees mask pose p)
 
 def terrain (mask: i32) (pose: pose) (p: vec3) : hit =
   land_ground mask pose p |> umin (land_built mask pose p)
@@ -210,21 +227,30 @@ def march_terrain (mask: i32) (pose: pose) (ro: vec3) (rd: vec3) (tmax: f32) : (
   in if wd.y >= 0 && wo.y > land_max then (f32.inf, 0) else
   let t0 = if wo.y > top then (wo.y - top) / -wd.y else 0
   -- (prev: the safe step from the last point; step: the step taken from it)
-  let (t, _, hit, m, _, _) =
-    loop (t, i, hit, m, (sd, st, sm), (omega, prev, step)) =
-      (f32.max 0.02 t0, 0i32, false, 0i32, (-1f32, 0f32, 0i32), (terrain_relax, 0f32, 0f32))
+  let (t, _, hit, m, _, _, _) =
+    loop (t, i, hit, m, (sd, st, sm), (td, tt, tm), (omega, prev, step)) =
+      (f32.max 0.02 t0, 0i32, false, 0i32, (-1f32, 0f32, 0i32), (-1f32, 0f32, 0i32), (terrain_relax, 0f32, 0f32))
     while !hit && i < terrain_steps && t < tmax do
       let p = ro +^ scale t rd
       let ground = land_ground mask pose p
-      -- the structures: still bounded by what was found at st, or again
+      -- the structures and the trees, each still bounded by what was found
+      -- for it at st (tt), or again
       let (sd, st, sm) = if sd - (t - st) < ground.0
-                         then let (d, part) = land_built mask pose p in (d, t, part)
+                         then let (d, part) = land_structures mask pose p in (d, t, part)
                          else (sd, st, sm)
-      let (d, mat) = ground |> umin (sd - (t - st), sm)
-      let safe = 0.85 * d
+      let (td, tt, tm) = if td - (t - tt) < ground.0
+                         then let (d, part) = land_trees mask pose p in (d, t, part)
+                         else (td, tt, tm)
+      let (built, bm) = (sd - (t - st), sm) |> umin (td - (t - tt), tm)
+      let (d, mat) = ground |> umin (built, bm)
+      -- (the relaxation follows the ground alone; the structures and trees,
+      -- whose bounds jump from cell to cell, would keep cutting it short,
+      -- so they only cap each step at their own safe distance)
+      let safe = 0.85 * ground.0
+      let next = f32.min (omega * safe) (0.85 * built)
       in if omega > 1 && safe + prev < step
          -- overshot: back to where the last safe step would have ended
-         then (t - step + prev, i + 1, false, m, (sd, st, sm), (1, 0, 0))
-         else if d < 0.0015 * t then (t, i + 1, true, mat, (sd, st, sm), (omega, safe, 0))
-         else (t + omega * safe, i + 1, false, m, (sd, st, sm), (omega, safe, omega * safe))
+         then (t - step + prev, i + 1, false, m, (sd, st, sm), (td, tt, tm), (1, 0, 0))
+         else if d < 0.0015 * t then (t, i + 1, true, mat, (sd, st, sm), (td, tt, tm), (omega, safe, 0))
+         else (t + next, i + 1, false, m, (sd, st, sm), (td, tt, tm), (omega, safe, next))
   in if hit then (t, m) else (f32.inf, 0)
