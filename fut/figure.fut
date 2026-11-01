@@ -66,6 +66,18 @@ def sd_robe (pose: pose) (p: vec3) : f32 =
   let shoulders = sd_ellipsoid (p -^ vec 0 (1.3 + 0.01 * b) (0.004 * b)) (vec (0.29 + 0.008 * b) 0.14 (0.2 + 0.01 * b))
   in smin 0.12 cone shoulders
 
+-- A collar standing up behind his neck and flaring outwards: a thin cone
+-- round the neck, kept inside an ellipsoid behind it, so it is tallest at
+-- the back, curves down to nothing at the sides and leaves the front open.
+def sd_collar (p: vec3) : f32 =
+  let q = p -^ vec 0 1.36 (-0.01)
+  let r = f32.sqrt (q.x * q.x + q.z * q.z)
+  -- (radius 0.17 + 0.35 h at height h; the distance to that cone, rescaled
+  -- by its slope)
+  let shell = f32.abs ((r - (0.17 + 0.3 * q.y)) / f32.sqrt (1 + 0.3 * 0.3)) - 0.01
+  let keep = sd_ellipsoid (q -^ vec 0 0 (-0.24)) (vec 0.32 0.24 0.36)
+  in f32.max shell (f32.max keep (-q.y))
+
 -- An arm: upper arm and a forearm whose sleeve flares towards the cuff,
 -- left open: a narrower cone is cut out of its end, so the cuff is a tube
 -- the hand comes out of.
@@ -172,20 +184,39 @@ def head_space (pose: pose) (p: vec3) : vec3 =
 def body_space (pose: pose) (p: vec3) : vec3 =
   p -^ vec (pose.lean * f32.max 0 (p.y - 0.45)) 0 0
 
+-- head space, mirrored onto the left side
+def mirror_x (p: vec3) : vec3 = {x = f32.abs p.x, y = p.y, z = p.z}
+
+-- An old man's head: a skull deeper than it is wide, cheekbones, a long
+-- bulbous nose with a bridge, and ears that come to a point (the jaw is
+-- under the beard). The face's front stays where the eyes and brows sit.
 def sd_head (pose: pose) (p: vec3) : f32 =
   let p = head_space pose p
-  let head = sd_sphere (p -^ vec 0 1.6 0.02) 0.17
-  let nose = sd_ellipsoid (p -^ vec 0 1.58 0.19) (vec 0.035 0.05 0.05)
-  in smin 0.03 head nose
+  let skull = sd_ellipsoid (p -^ vec 0 1.62 0) (vec 0.165 0.18 0.19)
+  let q = mirror_x p
+  let cheek = sd_sphere (q -^ vec 0.072 1.565 0.115) 0.055
+  let jaw = sd_ellipsoid (p -^ vec 0 1.5 0.06) (vec 0.12 0.08 0.11)
+  let face = smin 0.04 skull cheek |> smin 0.05 jaw
+  let bridge = sd_round_cone_ab p (vec 0 1.64 0.168) (vec 0 1.585 0.212) 0.015 0.022
+  let tip = sd_sphere (p -^ vec 0 1.57 0.215) 0.032
+  let wings = sd_sphere (q -^ vec 0.026 1.56 0.19) 0.02
+  let nose = smin 0.015 bridge tip |> smin 0.01 wings
+  let ear = sd_round_cone_ab q (vec 0.158 1.575 0.005) (vec 0.18 1.685 (-0.045)) 0.028 0.005
+  let ear = f32.max ear (-(q.x - 0.15)) -- (flat against the head)
+  in smin 0.02 face nose |> smin 0.012 ear
+
+-- White hair round the back of his head, below the hat: a shell a little
+-- outside the skull, behind the ears, down to the collar.
+def sd_hair (pose: pose) (p: vec3) : f32 =
+  let p = head_space pose p
+  let shell = sd_ellipsoid (p -^ vec 0 1.6 (-0.01)) (vec 0.178 0.2 0.205)
+  in f32.max shell (p.z + 0.03 - 0.1 * (p.y - 1.5))
 
 -- The eyes: eyeballs set into the face (their iris and pupil are shading,
 -- see eye_albedo), with upper lids that close to blink.
 -- (the head's surface is at z ~ 0.173 here, so the eye stands ~0.011 proud)
 def eye_centre : vec3 = vec 0.062 1.632 0.159 -- the left eye's (+x); mirrored
 def eye_radius : f32 = 0.025
-
--- head space, mirrored onto the left side
-def mirror_x (p: vec3) : vec3 = {x = f32.abs p.x, y = p.y, z = p.z}
 
 def sd_eyes (pose: pose) (p: vec3) : f32 =
   sd_sphere (mirror_x (head_space pose p) -^ eye_centre) eye_radius
@@ -517,12 +548,12 @@ def bounded (b: f32) (m: i32) (exact: () -> hit) : hit = if b > 0.1 then (b, m) 
 
 def wizard (mask: i32) (pose: pose) (p: vec3) : hit =
   let hq = head_space pose p
-  let face () = (sd_head pose p, m_skin) |> umin (sd_eyes pose p, m_eye) |> umin (sd_eyelids pose p, m_skin) |> umin (sd_brows pose p, m_brow)
+  let face () = (sd_head pose p, m_skin) |> umin (sd_hair pose p, m_beard) |> umin (sd_eyes pose p, m_eye) |> umin (sd_eyelids pose p, m_skin) |> umin (sd_brows pose p, m_brow)
   let hat () = (sd_hat pose p, m_hat) |> umin (sd_band pose p, m_band)
   let beard () = (sd_beard pose p, m_beard)
   let figure =
     if !(has mask layers_figure) then nothing
-    else (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p), m_robe)
+    else (smin 0.06 (sd_robe pose (body_space pose p)) (sd_arms pose p) |> f32.min (sd_collar (body_space pose p)), m_robe)
          |> umin (sd_hands pose p, m_skin)
          |> umin (bounded (length (hq -^ vec 0 1.6 0.06) - 0.32) m_skin face)
          |> umin (bounded (sd_capsule hq beard_top beard_tip 0.3) m_beard beard)
