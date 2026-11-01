@@ -70,15 +70,33 @@ def bright_noise (rate: f32) (t: f32) : f32 =
 ---------------------------------------------------------------------
 -- Harpsichord
 
--- One plucked note: eight harmonics, each 1/k as loud and dying faster the
--- higher it is, after a near-instant attack: a bright, buzzy pluck that
--- fades within a second, with no sustain.
-def harp_note (f: f32) (u: f32) : f32 =
-  if u < 0 then 0 else
-  let s = loop s = 0f32 for k < 8 do
-            let kf = f32.i32 (k + 1)
-            in s + f32.sin (tau * f * kf * u) / kf * f32.exp (-u * (3 + 2.5 * kf))
-  in (1 - f32.exp (-u * 3000)) * s
+-- One string of one note, plucked at time 0 and let go at `held`. The
+-- plectrum (a quill) catches the string near one end, at a fraction b of
+-- its length, which leaves harmonic k at sin(k pi b)/k: bright and nasal,
+-- with gaps near multiples of 1/b. The string is a little stiff, so its
+-- upper partials sit slightly sharp; each rings on, the high ones dying
+-- first, until the key is let go and the damper stops it (the high ones
+-- again first).
+def harp_string (f: f32) (b: f32) (u: f32) (held: f32) : f32 =
+  let released = f32.max 0 (u - held)
+  in loop s = 0f32 for k < 32 do
+       let kf = f32.i32 (k + 1)
+       let fk = kf * f * f32.sqrt (1 + 0.00005 * kf * kf)
+       in if fk > 12000 then s else
+          let decay = (0.7 + 0.18 * kf + 0.003 * kf * kf) * u + (25 + 2 * kf) * released
+          in s + f32.sin (f32.pi * kf * b) / kf * f32.exp (-decay) * f32.sin (tau * fk * u)
+
+-- One note: two choirs of strings (as on a two-manual harpsichord's two
+-- eight-foot stops), plucked at different points (one nasal, one rounder)
+-- and a hair apart in tune, one more to each side; and the quill's click
+-- as it passes the string.
+def harp_note (rate: f32) (t: f32) (f: f32) (u: f32) (held: f32) : (f32, f32) =
+  if u < 0 then (0, 0) else
+  let attack = 1 - f32.exp (-u * 4000)
+  let a = attack * harp_string f 0.11 u held
+  let b = attack * harp_string (f * 1.0012) 0.19 u held
+  let click = 0.25 * f32.exp (-u * 900) * bright_noise rate t
+  in (0.6 * a + 0.4 * b + click, 0.4 * a + 0.6 * b + click)
 
 -- Which chord tone sixteenth s (0..7) of a half bar plays: up, down, up
 -- again: 0 1 2 3 2 1 2 3.
@@ -89,12 +107,18 @@ def harp_at (n: i32) : f32 =
   let start = f32.i32 n * sixteenth
   in freq (chord_tone (chord_at start) (arp_degree (n % 8)) + 12)
 
--- The arpeggio: this sixteenth's note, and the last two still ringing.
-def harpsichord (t: f32) : f32 =
+-- The arpeggio: this sixteenth's note, and the last two, each held a
+-- little under two sixteenths (overlapping, as a player's fingers would
+-- linger), then damped.
+def harpsichord (rate: f32) (t: f32) : (f32, f32) =
   let n = i32.f32 (f32.floor (t / sixteenth))
   let u = t - f32.i32 n * sixteenth
-  let ring (k: i32) = if n - k < 0 then 0 else harp_note (harp_at (n - k)) (u + f32.i32 k * sixteenth)
-  in 0.075 * (ring 0 + ring 1 + ring 2)
+  let ring (k: i32) =
+    if n - k < 0 then (0, 0) else harp_note rate t (harp_at (n - k)) (u + f32.i32 k * sixteenth) (1.75 * sixteenth)
+  let (l0, r0) = ring 0
+  let (l1, r1) = ring 1
+  let (l2, r2) = ring 2
+  in (0.07 * (l0 + l1 + l2), 0.07 * (r0 + r1 + r2))
 
 ---------------------------------------------------------------------
 -- Bass, drums
@@ -248,11 +272,12 @@ def music_at (rate: f32) (t: f32) : (f32, f32) =
   let hh = groove * hats rate t
   let low = groove * bass t
   -- (the harpsichord steps back while the tune plays)
-  let harp = (if section t >= 2 then 0.6 else 1) * harpsichord t
+  let (hl, hr) = harpsichord rate t
+  let harp = if section t >= 2 then 0.6 else 1
   let (sl, sr) = strings t
   let (ml, mr) = tune t
   let soft (x: f32) = f32.tanh (1.1 * x) / 1.1
-  in (soft (drums + low + 0.6 * hh + harp + sl + ml), soft (drums + low + hh + 0.7 * harp + sr + mr))
+  in (soft (drums + low + 0.6 * hh + harp * hl + sl + ml), soft (drums + low + hh + harp * hr + sr + mr))
 
 -- n stereo samples, interleaved (left, right), from time t0 at `rate`
 -- samples a second. (One thread per value, each computing its sample's

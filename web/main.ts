@@ -256,13 +256,22 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   const probeBytes = (SPHERES + points.pts.length / 3) * 16;
   const wanted = (flight.active || spells.count > 0) && !!i.fut.entry.probe;
   const probe = wanted && probes.ready(i.device, probeBytes) ? await entries.probe(i, time, d, points.pts) : null;
-  const soundBytes = music.frames * 2 * 4;
+  // (the music's readback gets a submission of its own, ahead of the
+  // render's, so it arrives without waiting for the frame)
+  const soundBytes = music.maxFrames * 2 * 4;
   const req = musicPeriods.has(i) && sounds.ready(i.device, soundBytes) ? music.want(musicPeriods.get(i)!) : null;
-  const sound: FutharkArray | null = req ? await i.fut.entry.sound(req.t0, music.rate, music.frames) : null;
+  if (req) {
+    const sound: FutharkArray = await i.fut.entry.sound(req.t0, music.rate, req.frames);
+    const used = req.frames * 2 * 4;
+    const enc = i.device.createCommandEncoder();
+    sounds.copy(i, enc, sound, soundBytes, used);
+    i.device.queue.submit([enc.finish()]);
+    sound.free(); // (Futhark's later writes to it are queued after the copy)
+    sounds.read(i.device, soundBytes, (data) => music.play(data, req), used);
+  }
   const out = await entries.render(i, w, vw, h, time, cam.yaw, cam.pitch, cam.dist, d, spells.pack());
   const enc = i.device.createCommandEncoder();
   if (probe) probes.copy(i, enc, probe, probeBytes);
-  if (sound) sounds.copy(i, enc, sound, soundBytes);
   enc.copyBufferToTexture(
     { buffer: rawBuffer(i, out), bytesPerRow: w * 4, rowsPerImage: h },
     { texture: ctx.getCurrentTexture() },
@@ -278,10 +287,6 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
       flight.collide(data.subarray(0, SPHERES * 4));
       spells.applyProbe(points.ids, data.subarray(SPHERES * 4));
     });
-  }
-  if (sound && req) {
-    sound.free();
-    sounds.read(i.device, soundBytes, (data) => music.play(data, req));
   }
 }
 
