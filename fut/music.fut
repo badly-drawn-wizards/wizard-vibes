@@ -87,18 +87,28 @@ def harpsichord (t: f32) : f32 =
 ---------------------------------------------------------------------
 -- Bass, drums
 
--- The bass: the chord's root in eighths, low then an octave up, each note a
--- short, round, slightly buzzy tone.
+-- The bass: the chord's root in eighths, low then an octave up. Crunchy:
+-- a sawtooth (harmonics 1/k, band-limited to below 8 kHz) whose upper
+-- harmonics fade quickly after each note starts, as if a filter closed
+-- (bright then mellow), overdriven through a soft clipper (which adds more
+-- harmonics: the grit), over a clean sine an octave below for weight.
 def bass (t: f32) : f32 =
   let e = i32.f32 (f32.floor (t / eighth))
   let u = t - f32.i32 e * eighth
   let root = chord_tone (chord_at (f32.i32 e * eighth)) 0
   let f = freq (root - 12 + (if e % 2 == 1 then 12 else 0))
-  let env = (1 - f32.exp (-u * 400)) * f32.exp (-u * 5) * smoothstep (0.9 * eighth) (0.75 * eighth) u
-  let s = loop s = 0f32 for k < 5 do
-            let kf = f32.i32 (k + 1)
-            in s + f32.sin (tau * f * kf * u) / (kf * f32.sqrt kf)
-  in 0.2 * env * s
+  let env = (1 - f32.exp (-u * 400)) * f32.exp (-u * 4) * smoothstep (0.92 * eighth) (0.8 * eighth) u
+  -- (the filter: harmonic k is damped by how far it is above the cutoff,
+  -- which falls from 30 to 6 times the note's frequency)
+  let cutoff = 6 + 24 * f32.exp (-u * 18)
+  let saw = loop s = 0f32 for k < 24 do
+              let kf = f32.i32 (k + 1)
+              let keep = if kf * f > 8000 then 0 else 1 / (1 + (kf / cutoff) ** 4)
+              in s + keep * f32.sin (tau * f * kf * u) / kf
+  let drive = 3.5
+  let crunch = f32.tanh (drive * saw) / f32.tanh drive
+  let sub = f32.sin (tau * f * 0.5 * u)
+  in env * (0.13 * crunch + 0.12 * sub)
 
 -- The kick on every beat: a sine falling from 150 to 50 Hz (its phase is
 -- the integral of that frequency), with a little click on top.
