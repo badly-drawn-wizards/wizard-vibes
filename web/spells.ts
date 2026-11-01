@@ -15,9 +15,10 @@ const FIRE = 0;
 const STRIKE = 1;
 const WIND = 2;
 const BURST = 3;
+const GUST = 4; // a wind blade's burst into small blades
 const STRIDE = 10;
 
-const LIFE = [3, 0.9, 1.5, 1.4]; // seconds, by kind
+const LIFE = [3, 0.9, 1.5, 1.4, 1.1]; // seconds, by kind
 const SPEED = [30, 0, 24]; // units/s
 const COOLDOWN = [0.25, 0.5, 0.3]; // seconds before the next cast
 const STRIKE_RANGE = 45; // furthest a strike lands
@@ -33,6 +34,14 @@ interface Spell {
   life: number; // seconds: it has faded out by then
   seed: number; // varies each one's look
   top: number; // a strike's top height
+}
+
+// A wind blade bursting into small blades where it is (see spell_gust in
+// fut/spells.fut): it keeps its velocity, which aims the shards.
+function gust(s: Spell): void {
+  s.kind = GUST;
+  s.age = 0;
+  s.life = LIFE[GUST];
 }
 
 export class Spells {
@@ -82,7 +91,10 @@ export class Spells {
     this.staff += ((out ? 1 : 0) - this.staff) * (1 - Math.exp(-dt * (out ? 12 : 2.5)));
     for (const s of this.items) {
       s.age += dt;
-      for (let i = 0; i < 3; i++) s.pos[i] += s.vel[i] * dt;
+      // (a gust stays where the blade broke; its velocity only aims the shards)
+      if (s.kind !== GUST) for (let i = 0; i < 3; i++) s.pos[i] += s.vel[i] * dt;
+      // a wind blade that flew its course bursts too
+      if (s.kind === WIND && s.age >= s.life) gust(s);
     }
     this.items = this.items.filter((s) => s.age < s.life);
   }
@@ -112,10 +124,9 @@ export class Spells {
         s.age = 0;
         s.life = LIFE[BURST];
         s.vel = [0, 0, 0];
-      } else if (s.kind === WIND && d < 0.1 && s.life > s.age + 0.3) {
-        // it breaks up against the land: slows and fades out
-        s.life = s.age + 0.3;
-        s.vel = s.vel.map((v) => v * 0.3) as V3;
+      } else if (s.kind === WIND && d < 0.15) {
+        // it bursts against the land into small blades
+        gust(s);
       } else if (s.kind === STRIKE && s.pos[1] === 0) {
         // the ground below the probe point: its height above the land,
         // divided by the slope

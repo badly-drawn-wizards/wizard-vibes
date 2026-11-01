@@ -9,6 +9,8 @@
 --   spell_strike  lightning striking the ground at (x, y, z) from height b
 --   spell_wind    a blade at (x, y, z) moving at (a, b, c)
 --   spell_burst   a fire bolt's explosion at (x, y, z)
+--   spell_gust    a wind blade's burst into small blades at (x, y, z); it
+--                 was moving at (a, b, c)
 --
 -- Every spell fades out over the last part of its life, so none vanishes
 -- while still visible; the seed makes each one a little different.
@@ -26,6 +28,7 @@ def spell_fire : i32 = 0
 def spell_strike : i32 = 1
 def spell_wind : i32 = 2
 def spell_burst : i32 = 3
+def spell_gust : i32 = 4
 
 -- Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 -- (distance, t, and how far beyond tmax the nearest point of the segment
@@ -48,6 +51,21 @@ def ray_polyline (o: vec3) (d: vec3) (tmax: f32) (n: i32) (point: i32 -> vec3) :
   loop (best, bt, bb) = (f32.inf, 0f32, 0f32) for k < n do
     let (dd, tt, b) = ray_segment o d tmax (point k) (point (k + 1))
     in if dd < best then (dd, tt, b) else (best, bt, bb)
+
+-- A glowing crescent centred at c, facing f (its tips curve back, away
+-- from f) and spanning `width` either side along s: six segments, thickest
+-- in the middle and tapering to the tips. (core, halo, t, behind) of its
+-- brightest part along the ray (see ray_segment, glow_line).
+def crescent (o: vec3) (d: vec3) (tmax: f32) (c: vec3) (f: vec3) (s: vec3) (width: f32) (bend: f32) (thick: f32) : (f32, f32, f32, f32) =
+  let point (k: i32) = let th = (f32.i32 k / 6 - 0.5) * 2.4
+                       in c +^ scale (width * f32.sin th) s -^ scale (bend * (1 - f32.cos th)) f
+  in loop (core, halo, bt, bb) = (0f32, 0f32, 0f32, 0f32) for k < 6 do
+       let (dd, tt, b) = ray_segment o d tmax (point k) (point (k + 1))
+       let taper = f32.sin (f32.pi * (f32.i32 k + 0.5) / 6)
+       let r = thick * (0.2 + 0.8 * taper)
+       let cr = f32.exp (-(dd * dd) / (r * r))
+       let hl = (5 * r) * (5 * r) / (dd * dd + (5 * r) * (5 * r))
+       in if cr > core then (cr, f32.max halo hl, tt, b) else (core, f32.max halo hl, bt, bb)
 
 -- A glowing line: a hot core of radius r and a soft halo of radius h.
 def glow_line (r: f32) (h: f32) (dist: f32) : (f32, f32) =
@@ -102,24 +120,48 @@ def spell_light (fog: f32) (view_distance: f32) (secs: f32) (o: vec3) (d: vec3) 
             let ember = scale (5 * sparks * f32.exp (-2.5 * age)) (vec 1 0.6 0.2)
             in scale (fade * seen t behind r) (fire +^ ember)
           else if kind == spell_wind then
-            -- a pale crescent across its path, curving back; each its own
-            -- width, curve and tilt, rolling slowly one way or the other
-            -- and wobbling a little
+            -- a pale crescent across its path, its tips curving back, sharp
+            -- at the ends; each its own width, curve and tilt, rolling
+            -- slowly and wobbling a little; three fading echoes trail it
             let f = normalise q
             let side = normalise (cross f (vec 0 1 0) +^ vec 0 0.001 0)
             let up = cross side f
             let spin = if rnd 1 < 0.5 then -1 else 1
-            let roll = (rnd 2 - 0.5) * 1.2 + spin * (0.25 + 0.35 * rnd 3) * age
-                       + 0.12 * f32.sin (age * (5 + 4 * rnd 4) + 6.283 * rnd 5)
-            let s = scale (f32.cos roll) side +^ scale (f32.sin roll) up
             let width = 0.7 + 0.45 * rnd 6
             let bend = 0.35 + 0.35 * rnd 7
             let fade = fade * saturate (8 * age)
-            let point (k: i32) = let th = (f32.i32 k / 4 - 0.5) * 2.2
-                                 in p +^ scale (width * f32.sin th) s -^ scale (bend * (1 - f32.cos th)) f
-            let (dist, t, behind) = ray_polyline o d tmax 4 point
-            let (core, halo) = glow_line 0.035 0.3 dist
-            in scale (fade * seen t behind 0.2) (scale (3 * core) (vec 0.75 1 0.95) +^ scale (0.35 * halo) (vec 0.45 0.85 0.8))
+            in loop c = splat 0 for k < 4 do
+                 let a = age - 0.035 * f32.i32 k
+                 let roll = (rnd 2 - 0.5) * 1.2 + spin * (0.25 + 0.35 * rnd 3) * a
+                            + 0.12 * f32.sin (a * (5 + 4 * rnd 4) + 6.283 * rnd 5)
+                 let s = scale (f32.cos roll) side +^ scale (f32.sin roll) up
+                 let centre = p -^ scale (0.035 * f32.i32 k) q
+                 let (core, halo, t, behind) = crescent o d tmax centre f s width bend (0.07 - 0.012 * f32.i32 k)
+                 let k_gain = 0.45 ** f32.i32 k
+                 in c +^ scale (k_gain * fade * seen t behind 0.2)
+                                (scale (3.2 * core) (vec 0.85 1 0.95) +^ scale (0.4 * halo) (vec 0.4 0.85 0.75))
+          else if kind == spell_gust then
+            -- the blade's burst: eight small crescents flying out (mostly
+            -- the way it was going), slowing, spinning and shrinking, and a
+            -- faint ring of air spreading from where it broke
+            -- (only the travel's horizontal part aims them: a blade bursting
+            -- on the ground was heading into it)
+            let travel = vec q.x 0 q.z
+            let blades = loop c = splat 0 for j < 8 do
+              let h (n: i32) = hash2 (seed * 7 + j * 31 + n) 41
+              let dir = normalise (vec (h 1 - 0.5) (0.15 + 0.55 * h 2) (h 3 - 0.5) +^ scale 0.018 travel)
+              let speed = 9 * (0.7 + 0.6 * h 4)
+              let centre = p +^ scale (speed * (1 - f32.exp (-3 * age)) / 3) dir
+              let side = normalise (cross dir (vec 0 1 0) +^ vec 0.001 0 0)
+              let up = cross side dir
+              let roll = 6.283 * h 5 + (if h 6 < 0.5 then -9 else 9) * age
+              let s = scale (f32.cos roll) side +^ scale (f32.sin roll) up
+              let size = 0.5 * (1 - 0.5 * age / life)
+              let (core, halo, t, behind) = crescent o d tmax centre dir s size (0.45 * size) 0.05
+              in c +^ scale (seen t behind 0.2) (scale (3.5 * core) (vec 0.85 1 0.95) +^ scale (0.45 * halo) (vec 0.4 0.85 0.75))
+            let (gd, gt, gb) = ray_segment o d tmax p p
+            let ring = let u = (gd - 5 * age) / (0.2 + 0.3 * age) in f32.exp (-(u * u)) * f32.exp (-4 * age)
+            in scale fade (blades +^ scale (0.8 * ring * seen gt gb 1) (vec 0.6 0.95 0.85))
           else if kind == spell_strike then
             -- a jagged bolt from the sky, re-forking several times a second,
             -- flashing as it fades, with a flash on the ground
