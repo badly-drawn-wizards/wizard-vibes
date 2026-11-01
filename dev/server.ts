@@ -1,7 +1,7 @@
 // Dev server: serves the harness, rebuilds the Futhark program when fut/
 // changes and tells the page to hot-swap it over server-sent events.
 
-import { watch } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
@@ -62,6 +62,8 @@ async function rebuild(): Promise<void> {
 // build per step. (Regenerating config.fut makes the watcher below rebuild.)
 const SETTLE_MS = 700;
 let settle: NodeJS.Timeout | undefined;
+const variantBuilds = new Map<string, Promise<unknown>>();
+
 function setCompileParams(changes: Record<string, Value>): void {
   saveCompileValues(loadSchema(), changes);
   clearTimeout(settle);
@@ -140,6 +142,34 @@ createServer(async (req, res) => {
     const schema = loadSchema();
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     return void res.end(JSON.stringify({ schema, compile: compileValues(schema), presets: schema.quality ?? {} }));
+  }
+  // A build of the current sources with some compile-time parameters
+  // overridden (e.g. a quality preset), for one tab: the shared
+  // config.local.json is not touched. Resolves to { version } once built.
+  if (req.url === "/variant" && req.method === "POST") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", async () => {
+      try {
+        const overrides = JSON.parse(body) as Record<string, Value>;
+        const dir = join("build", "tab-variants", Object.entries(overrides).map(([k, v]) => `${k}-${v}`).sort().join("_") || "none");
+        // (one build per directory at a time: tabs asking together share it)
+        const prev = variantBuilds.get(dir) ?? Promise.resolve();
+        const build = prev.then(() => {
+          mkdirSync(dir, { recursive: true });
+          for (const f of readdirSync("fut")) if (f.endsWith(".fut") || f.endsWith(".js")) cpSync(join("fut", f), join(dir, f));
+          generate(dir, true, overrides);
+          return buildFuthark(dir);
+        });
+        variantBuilds.set(dir, build.catch(() => {}));
+        const r = await build;
+        if (!r.ok) throw new Error(r.message);
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ version: r.version }));
+      } catch (e) {
+        res.writeHead(500).end(String(e));
+      }
+    });
+    return;
   }
   if (req.url === "/config" && req.method === "POST") {
     let body = "";

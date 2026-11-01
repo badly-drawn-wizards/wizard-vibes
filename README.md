@@ -24,8 +24,10 @@ into a list and traces four more rays for each, one GPU thread per ray
 
 The quality panel (Auto / Low / Med / High) picks a preset of the
 compile-time step counts (params.json's "quality"). The static site ships a
-build per level and loads the one chosen; under the dev server a level sets
-the preset, which the server builds as usual. A new build loads and compiles
+build per level and loads the one chosen; under the dev server a level is
+that tab's own build of the current sources with the preset (`POST
+/variant`, rebuilt when the sources change), so other tabs and the shared
+`config.local.json` are left alone. A new build loads and compiles
 while the current one keeps drawing (its pipelines are created
 asynchronously: dev/emcc/async-pipeline.c), and Auto steps down below 40 fps
 and up while frames keep near the display's rate.

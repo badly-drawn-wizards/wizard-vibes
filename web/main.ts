@@ -491,14 +491,23 @@ const levelOf = (compile: Record<string, unknown>): Level | null =>
   LEVELS.find((l) => params.presets[l] && Object.entries(params.presets[l]).every(([k, v]) => compile[k] === v)) ?? null;
 const devLevel = IS_STATIC ? null : levelOf(params.compile);
 const qualityOn = !pinned && Object.keys(params.presets).length > 0 && (!IS_STATIC || !!params.builds);
+// Under the dev server a level is this tab's own build of the current
+// sources with the preset (/variant), so a tab on Auto never changes the
+// shared shader settings; when the sources change it rebuilds its variant.
+// Following the server's own build (the drawer's shader settings) again
+// means picking the level those match, or reloading.
+let tabLevel: Level | null = null;
+let serverBuild: string | null = null;
+async function loadVariant(level: Level): Promise<void> {
+  const res = await fetch("/variant", { method: "POST", body: JSON.stringify(params.presets[level]) });
+  if (!res.ok) throw new Error(await res.text());
+  await reload(((await res.json()) as { version: string }).version);
+}
 const quality = new Quality(document.getElementById("quality")!, devLevel, async (level) => {
   if (IS_STATIC) return reload(params.builds![level]);
-  const running = new Promise<void>((done) => {
-    swapWaiters.push(done);
-    setTimeout(done, 120000); // (in case the server announces nothing)
-  });
-  await fetch("/config", { method: "POST", body: JSON.stringify(params.presets[level]) });
-  await running;
+  tabLevel = level === devLevel ? null : level;
+  if (tabLevel) await loadVariant(tabLevel);
+  else if (serverBuild) await reload(serverBuild);
 }, IS_STATIC ? "auto" : devLevel, qualityOn);
 if (!qualityOn) document.getElementById("quality")!.hidden = true;
 
@@ -517,7 +526,13 @@ if (IS_STATIC) {
   });
   // ?build=N pins a specific build (for benchmarking variants); otherwise follow the server.
   if (pinned) reload(pinned);
-  else events.addEventListener("fut-reload", (e) => reload(JSON.parse((e as MessageEvent).data).version));
+  else {
+    events.addEventListener("fut-reload", (e) => {
+      serverBuild = JSON.parse((e as MessageEvent).data).version;
+      if (tabLevel) void loadVariant(tabLevel);
+      else reload(serverBuild!);
+    });
+  }
   events.addEventListener("web-reload", () => location.reload());
 }
 
