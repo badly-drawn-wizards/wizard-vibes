@@ -165,7 +165,83 @@ def cloud_gap (y: f32) : f32 = f32.max (cloud_bottom - y) (y - cloud_top) |> f32
 ---------------------------------------------------------------------
 -- Terrain: rolling hills with ridged mountains, in world coordinates.
 
-def terrain_max : f32 = 11 -- 9 + 6 - 4: no height exceeds this
+def terrain_max : f32 = 11 -- 9 + 6 - 4, and the alpine cap: no height exceeds this
+
+---------------------------------------------------------------------
+-- Biomes. One broad field b, a few hundred units across, sorts the land:
+-- desert (low dunes) where it is low, alpine (higher, steeper mountains)
+-- where it is high, and the hills and meadows between. Each biome's height
+-- is a function of the same main noise, so mountains run on from meadow
+-- into alpine and sink into dunes across the borders.
+
+-- smoothstep e0 e1 x with its derivative in x
+def smoothstep_d (e0: f32) (e1: f32) (x: f32) : (f32, f32) =
+  let t = saturate ((x - e0) / (e1 - e0))
+  in (t * t * (3 - 2 * t), 6 * t * (1 - t) / (e1 - e0))
+
+-- The biome weights at (x, z): (desert, alpine), each in [0, 1] and never
+-- both above 0 (the meadow's is the rest), with their gradients:
+-- (wd, dwd/dx, dwd/dz, wa, dwa/dx, dwa/dz).
+--
+-- b is two crossing waves, each bent by a third and fourth: evaluated at
+-- every step of the march, it has to be cheap (as a value noise it cost
+-- 1-2 ms a frame at 1080p).
+-- (shifted along the flight so it opens over meadow, with mountains ahead
+-- after a minute and desert after seven)
+def biome_field (x: f32) (z0: f32) : (f32, f32, f32) = -- (b, db/dx, db/dz)
+  let z = z0 + 2850
+  let w1 = 0.0047 * z - 0.0013 * x + 0.4
+  let w2 = 0.0051 * x + 0.0017 * z + 2.1
+  let (c1, c2) = (1.3 * f32.cos w1, 1.1 * f32.cos w2)
+  let u = 0.0062 * x + 0.0021 * z + 1.3 * f32.sin w1
+  let v = 0.0058 * z - 0.0024 * x + 1.1 * f32.sin w2
+  let (cu, cv) = (0.2 * f32.cos u, 0.2 * f32.cos v)
+  in ( 0.5 + 0.2 * (f32.sin u + f32.sin v)
+     , cu * (0.0062 - 0.0013 * c1) + cv * (-0.0024 + 0.0051 * c2)
+     , cu * (0.0021 + 0.0047 * c1) + cv * (0.0058 + 0.0017 * c2) )
+
+def biome_grad (x: f32) (z: f32) : (f32, f32, f32, f32, f32, f32) =
+  let (b, bx, bz) = biome_field x z
+  let (d, dd) = smoothstep_d 0.42 0.32 b
+  let (a, da) = smoothstep_d 0.58 0.68 b
+  in (d, dd * bx, dd * bz, a, da * bx, da * bz)
+
+def biome (x: f32) (z: f32) : (f32, f32) =
+  let b = (biome_field x z).0
+  in (smoothstep 0.42 0.32 b, smoothstep 0.58 0.68 b)
+
+-- The desert's height from the main noise n (in [0, 1]): low ground with
+-- dunes, long ridges bent by the noise. With its gradient from n's world-
+-- space gradient (nx, nz).
+def dune_height (x: f32) (z: f32) (n: f32) (nx: f32) (nz: f32) : (f32, f32, f32) =
+  let a = 0.3 * (0.8 * x + 0.6 * z) + 6 * n
+  let s = 0.45 * f32.cos a
+  in ( -0.5 + 3 * n + 0.45 * (1 + f32.sin a)
+     , 3 * nx + s * (0.24 + 6 * nx), 3 * nz + s * (0.18 + 6 * nz) )
+
+-- The alpine height from the meadow's: steeper, and higher, but eased
+-- under terrain_max (the flight path's rock hangs not far above it):
+-- above alpine_knee, h becomes knee + r tanh ((h - knee) / r).
+def alpine_scale : f32 = 1.25
+def alpine_lift : f32 = 1
+def alpine_knee : f32 = 7
+def alpine_height (hm: f32) : (f32, f32) = -- (height, d height / d hm)
+  let h = alpine_scale * hm + alpine_lift
+  let r = terrain_max - alpine_knee
+  in if h <= alpine_knee then (h, alpine_scale)
+     else let t = f32.tanh ((h - alpine_knee) / r)
+          in (alpine_knee + r * t, alpine_scale * (1 - t * t))
+
+-- Blends the meadow's height hm (with gradient) into the desert's hd and
+-- the alpine's by the weights (with gradients).
+def biome_blend (hm: f32) (hmx: f32) (hmz: f32) (hd: f32) (hdx: f32) (hdz: f32)
+                (wd: f32) (wdx: f32) (wdz: f32) (wa: f32) (wax: f32) (waz: f32) : (f32, f32, f32) =
+  let (ha, dha) = alpine_height hm
+  let (ed, ea) = (hd - hm, ha - hm)
+  let (ax, az) = ((dha - 1) * hmx, (dha - 1) * hmz)
+  in ( hm + wd * ed + wa * ea
+     , hmx + wd * (hdx - hmx) + wa * ax + ed * wdx + ea * wax
+     , hmz + wd * (hdz - hmz) + wa * az + ed * wdz + ea * waz )
 
 -- The land's parameters: sea level, and the rivers' half-width in river-
 -- noise units (0: no rivers).
@@ -201,15 +277,25 @@ def carve (l: land) (h: f32) (hx: f32) (hz: f32) (m: f32) (mx: f32) (mz: f32) : 
 def terrain_octaves : i32 = 4
 
 -- `detail` in octaves (terrain_octaves = full); far-away terrain needs fewer.
-def terrain_height_lod (l: land) (detail: f32) (x: f32) (z: f32) : f32 =
+-- (given the biome weights there: see biome)
+def terrain_height_in (l: land) (wd: f32) (wa: f32) (detail: f32) (x: f32) (z: f32) : f32 =
   let n = fbm2_lod terrain_octaves detail (x * 0.035) (z * 0.035)
-  let ridge = 1 - f32.abs (2 * fbm2_lod 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
-  let h = 9 * n * n + 6 * ridge * ridge * ridge - 4
+  -- (the desert has no ridges)
+  let ridge = if wd >= 1 then 0
+              else 1 - f32.abs (2 * fbm2_lod 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
+  let hm = 9 * n * n + 6 * ridge * ridge * ridge - 4
+  let hd = if wd > 0 then (dune_height x z n 0 0).0 else 0
+  let ha = if wa > 0 then (alpine_height hm).0 else 0
+  let h = hm + wd * (hd - hm) + wa * (ha - hm)
   -- (rivers only carve ground above their bed, so lower ground needs no
   -- river noise)
   in if l.river <= 0 || h <= river_bed l then h else
   let f = fbm2_lod 2 2 (x * river_noise_scale + 31.7) (z * river_noise_scale - 12.3)
   in (carve l h 0 0 (river_weight l f).0 0 0).0
+
+def terrain_height_lod (l: land) (detail: f32) (x: f32) (z: f32) : f32 =
+  let (wd, wa) = biome x z
+  in terrain_height_in l wd wa detail x z
 
 def terrain_height (l: land) (x: f32) (z: f32) : f32 = terrain_height_lod l 5 x z
 
@@ -222,9 +308,12 @@ def terrain_height_grad (l: land) (detail: f32) (x: f32) (z: f32) : (f32, f32, f
   let dr = -2 * f32.sgn (2 * f - 1) -- dr/df
   let hn = 18 * n -- dh/dn
   let hr = 18 * r * r -- dh/dr
-  let h = 9 * n * n + 6 * r * r * r - 4
-  let hx = 0.035 * hn * nx + 0.02 * hr * dr * fx
-  let hz = 0.035 * hn * nz + 0.02 * hr * dr * fz
+  let hm = 9 * n * n + 6 * r * r * r - 4
+  let hmx = 0.035 * hn * nx + 0.02 * hr * dr * fx
+  let hmz = 0.035 * hn * nz + 0.02 * hr * dr * fz
+  let (wd, wdx, wdz, wa, wax, waz) = biome_grad x z
+  let (hd, hdx, hdz) = if wd > 0 then dune_height x z n (0.035 * nx) (0.035 * nz) else (0, 0, 0)
+  let (h, hx, hz) = biome_blend hm hmx hmz hd hdx hdz wd wdx wdz wa wax waz
   in if l.river <= 0 || h <= river_bed l then (h, hx, hz) else
   let (rf, rfx, rfz) = fbm2_lod_grad 2 2 (x * river_noise_scale + 31.7) (z * river_noise_scale - 12.3)
   let (m, dm) = river_weight l rf
@@ -235,12 +324,21 @@ def terrain_normal (l: land) (detail: f32) (x: f32) (z: f32) : vec3 =
   let (_, hx, hz) = terrain_height_grad l detail x z
   in normalise (vec (-hx) 1 (-hz))
 
+-- A heightfield is not a distance: a point at height y over ground of slope
+-- at most s is at least (y - h) / sqrt (1 + s^2) from it. Away from the
+-- rivers' banks the slopes stay below about 1.55, and 1.85 in the
+-- mountains (measured over 36 km^2), so scaling the height difference by
+-- this (for the alpine weight wa), and the march's own 0.85, keeps sphere
+-- tracing safe.
+def terrain_lipschitz (wa: f32) : f32 = 0.6 - 0.1 * wa
+
 -- An upper bound on terrain_height from the first octave of each fbm alone
 -- (2 noise lookups instead of 8): the other octaves can add at most their
 -- amplitudes. The height grows with n and with the ridge, so bounding those
 -- bounds it. (Refining the bound octave by octave was tried and is slower on
 -- the GPU: neighbouring pixels stop at different octaves and diverge.)
-def terrain_upper (x: f32) (z: f32) : f32 =
+-- (given the biome weights there)
+def terrain_upper (wd: f32) (wa: f32) (x: f32) (z: f32) : f32 =
   -- (the first octave has amplitude 0.5 of the total 1 - 0.5^octaves; the
   -- others together 0.5 - 0.5^octaves)
   let total = 1 - 0.5 ** f32.i32 terrain_octaves
@@ -249,11 +347,16 @@ def terrain_upper (x: f32) (z: f32) : f32 =
   let f_hi = f_lo + 0.375 / 0.875
   let ridge_hi = if f_lo <= 0.5 && f_hi >= 0.5 then 1
                  else 1 - f32.min (f32.abs (2 * f_lo - 1)) (f32.abs (2 * f_hi - 1))
-  in 9 * n_hi * n_hi + 6 * ridge_hi * ridge_hi * ridge_hi - 4
+  let hm = 9 * n_hi * n_hi + 6 * ridge_hi * ridge_hi * ridge_hi - 4
+  -- (each biome's height grows with n and the meadow's, so bounding those
+  -- bounds each; the weights are the same, never negative and sum to at
+  -- most 1, so the blend of the bounds bounds the blend)
+  let hd = -0.5 + 3 * n_hi + 0.9
+  in hm + wd * (hd - hm) + wa * ((alpine_height hm).0 - hm)
 
--- A heightfield is not a distance; its slopes stay below about 1.3, so
--- scaling the height difference keeps sphere tracing safe.
-def terrain_dist (l: land) (detail: f32) (w: vec3) : f32 = 0.6 * (w.y - terrain_height_lod l detail w.x w.z)
+-- (the march evaluates the biome once per step for the bound and this)
+def terrain_dist (l: land) (wd: f32) (wa: f32) (detail: f32) (w: vec3) : f32 =
+  terrain_lipschitz wa * (w.y - terrain_height_in l wd wa detail w.x w.z)
 
 ---------------------------------------------------------------------
 -- Structures: one cell of a 30-unit grid in every few holds a cottage, a
@@ -277,9 +380,13 @@ def structure_candidate (x: f32) (z: f32) : (i32, f32, f32, f32) =
   let cx = i32.f32 (f32.floor (x / struct_cell))
   let cz = i32.f32 (f32.floor (z / struct_cell))
   let r = hash2 (cx * 7 + 3) (cz * 13 + 5)
-  let kind = if r < 0.45 then kind_cottage else if r < 0.75 then kind_tower else kind_pyramid
   let px = (f32.i32 cx + 0.25 + 0.5 * hash2 (cx + 41) (cz - 17)) * struct_cell
   let pz = (f32.i32 cz + 0.25 + 0.5 * hash2 (cx - 23) (cz + 59)) * struct_cell
+  -- pyramids in the desert, towers in the mountains, cottages between
+  let (wd, wa) = biome px pz
+  let kind = if wd > 0.5 then (if r < 0.8 then kind_pyramid else kind_tower)
+             else if wa > 0.5 then (if r < 0.7 then kind_tower else kind_cottage)
+             else if r < 0.7 then kind_cottage else kind_tower
   in (kind, px, pz, 2 * f32.pi * hash2 (cx + 5) (cz + 77))
 
 -- Whether the cell holding (x, z) has a structure at all, for density in [0, 1].

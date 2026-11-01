@@ -460,7 +460,7 @@ function reload(version: string): Promise<void> {
   },
   // Average time per frame in ms, without presenting or vsync, and (with
   // ?profile) the GPU time per frame of each kernel.
-  async bench(frames: number, vw: number, h: number): Promise<{ ms: number; kernels?: Record<string, number> }> {
+  async bench(frames: number, vw: number, h: number, t0 = 0): Promise<{ ms: number; kernels?: Record<string, number> }> {
     const i = inst;
     if (!i) throw new Error("no Futhark instance loaded");
     inst = null;
@@ -468,11 +468,11 @@ function reload(version: string): Promise<void> {
     try {
       const w = Math.ceil(vw / 64) * 64;
       const run = async (t: number) => (await entries.render(i, w, vw, h, t, cam.yaw, cam.pitch, cam.dist, ON_PATH)).free();
-      await run(0); // warm-up: pipeline creation
+      await run(t0); // warm-up: pipeline creation
       await i.fut.context_sync();
       i.profile?.start();
       const start = performance.now();
-      for (let f = 0; f < frames; f++) await run(f / 30);
+      for (let f = 0; f < frames; f++) await run(t0 + f / 30);
       await i.fut.context_sync();
       const ms = (performance.now() - start) / frames;
       const kernels = await i.profile?.stop();

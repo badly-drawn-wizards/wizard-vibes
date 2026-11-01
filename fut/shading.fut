@@ -224,15 +224,19 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let c = mix pose.prm.rock_dark pose.prm.rock_light band
     in plain (scale (0.6 + 0.7 * vnoise3 (scale 4 p)) c) with ks = 0.1
   else if m == m_terrain then
-    -- moss in the valleys, bare rock on steep slopes, snow on high flats
+    -- moss in the valleys, bare rock on steep slopes, snow on high flats;
+    -- sand in the desert, and in the mountains more rock and snow lower down
     let w = to_world pose.fl p
     let up = (to_world_dir pose.fl n).y
+    let (wd, wa) = biome w.x w.z
     let grain = 0.75 + 0.5 * vnoise2 (w.x * 1.7) (w.z * 1.7)
     let moss = pose.prm.moss_colour
     let stone = pose.prm.stone_colour
     let snow = pose.prm.snow_colour
-    let c = mix stone moss (smoothstep 0.7 0.85 up)
-    let c = mix c snow (smoothstep pose.prm.snow_line (pose.prm.snow_line + 1.5) w.y * smoothstep 0.6 0.8 up)
+    let c = mix stone moss (smoothstep (0.7 + 0.12 * wa) (0.85 + 0.08 * wa) up)
+    let c = mix c pose.prm.sand_colour (wd * smoothstep 0.5 0.75 up)
+    let snow_line = pose.prm.snow_line - 0.5 * wa
+    let c = mix c snow (smoothstep snow_line (snow_line + 1.5) w.y * smoothstep (0.6 + 0.12 * wa) (0.8 + 0.1 * wa) up)
     in plain (scale grain c) with rim = false
   else if m >= m_wall && m <= m_sandstone then structure_material pose fp m p
   else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28

@@ -12,6 +12,7 @@
 // sd of ~0.25 ms, so detecting 0.5 ms takes ~3 rounds, 0.25 ms ~9, 0.1 ms
 // ~55 (95% confidence, 80% power). Times are GPU ms per 1920x1080 frame
 // (timestamp queries; the frame time where the browser has none); add
+// &t0=T starts the frames at flight time T (e.g. over another biome);
 // &kernels=1 (dev/bench.sh -k) to list each kernel's. &raw=1 returns every
 // sample with the GPU and CPU temperatures, clock and power.
 
@@ -111,10 +112,10 @@ async function coolTo(limit: number): Promise<number> {
   }
 }
 
-async function measure(r: Runner, build: string, frames: number): Promise<Sample | string> {
+async function measure(r: Runner, build: string, frames: number, t0 = 0): Promise<Sample | string> {
   try {
     await r.evaluate(`window.wizard.swap(${JSON.stringify(build)})`);
-    return await r.evaluate<Sample>(`window.wizard.bench(${frames}, 1920, 1080)`);
+    return await r.evaluate<Sample>(`window.wizard.bench(${frames}, 1920, 1080, ${t0})`);
   } catch (e) {
     return `error: ${String(e).split("\n").slice(0, 3).join(" ")}`;
   }
@@ -128,6 +129,7 @@ createServer((req, res) => {
   const builds = (url.searchParams.get("b") ?? "").split(",").filter(Boolean);
   const reps = Number(url.searchParams.get("reps") ?? 3);
   const frames = Number(url.searchParams.get("frames") ?? 12);
+  const t0 = Number(url.searchParams.get("t0") ?? 0); // flight time of the first frame
   const only = url.searchParams.get("browsers")?.split(",");
   const listKernels = url.searchParams.get("kernels") === "1";
   // raw=1: every sample as JSON lines, with the machine's state; cool=T:
@@ -145,7 +147,7 @@ createServer((req, res) => {
         for (let k = 0; k < reps; k++) {
           for (const b of [...builds, ...[...builds].reverse()]) {
             const before = thermals();
-            const t = await measure(r, b, frames);
+            const t = await measure(r, b, frames, t0);
             const gpu = typeof t === "string" ? null : Object.values(t.kernels ?? {}).reduce((s, v) => s + v, 0);
             lines.push(JSON.stringify({ browser: r.name, build: b, round: k, ms: typeof t === "string" ? null : t.ms, gpu, error: typeof t === "string" ? t : undefined, ...before }));
           }
@@ -167,7 +169,7 @@ createServer((req, res) => {
       for (let k = 0; k < reps; k++) {
         const round = new Map<string, number[]>();
         for (const b of [...builds, ...[...builds].reverse()]) {
-          const t = await measure(r, b, frames);
+          const t = await measure(r, b, frames, t0);
           if (typeof t === "string") {
             errors.set(b, t);
             continue;

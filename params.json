@@ -668,6 +668,16 @@
               ]
             },
             {
+              "id": "sand_colour",
+              "label": "Desert sand",
+              "kind": "color",
+              "default": [
+                0.42,
+                0.3,
+                0.17
+              ]
+            },
+            {
               "id": "stone_colour",
               "label": "Stone",
               "kind": "color",
