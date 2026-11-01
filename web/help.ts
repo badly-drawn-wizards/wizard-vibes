@@ -25,6 +25,7 @@ const ROWS: Record<Device, [string, string][]> = {
     ["Cast", key("Space")],
     ["Camera", "drag · wheel"],
     ["Pause", key("P")],
+    ["Music", key("M")],
   ],
   pad: [
     ["Free flight", face("Y") + " / " + menu],

@@ -30,6 +30,11 @@ while the current one keeps drawing (its pipelines are created
 asynchronously: dev/emcc/async-pipeline.c), and Auto steps down below 40 fps
 and up while frames keep near the display's rate.
 
+Music (off until you press ♪ or M) is computed in Futhark the way Shadertoy
+does sound: each stereo sample is a pure function of time (fut/music.fut),
+and the `sound` entry point makes a chunk of samples at a time, read back
+without waiting and scheduled back to back in Web Audio (web/music.ts).
+
 Drag to orbit, scroll to zoom, P to pause. The ¼ / ½ / 1× buttons set the
 render scale. The controls panel (bottom right; ✕ hides it, ? brings it
 back) shows the keys, or a controller's buttons once one is used.

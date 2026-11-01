@@ -11,6 +11,7 @@ import { createDrawer, type Params } from "./params-drawer.ts";
 import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
 import { type Device, Help } from "./help.ts";
 import { Spells } from "./spells.ts";
+import { Music } from "./music.ts";
 import { IS_STATIC } from "./static.ts";
 import { GlRenderer } from "./webgl.ts";
 import { LEVELS, type Level, Quality } from "./quality.ts";
@@ -138,6 +139,13 @@ let device: Device = "keyboard";
 const SPHERES = 6;
 const probes = new ProbeReader();
 
+// Music (off until the ♪ button or M): chunks of samples from the build's
+// `sound` entry point, read back the same way as the probe.
+const music = new Music(document.getElementById("music") as HTMLButtonElement);
+const musicPeriods = new WeakMap<FutInstance, number>();
+const sounds = new ProbeReader();
+if (useGl) music.disable("Music needs WebGPU: its samples come from a compute kernel");
+
 // The orb, and the camera's view, in the world (for casting).
 function castFrom(): { origin: [number, number, number]; dir: [number, number, number] } {
   const { pos, heading } = flight.where(time);
@@ -172,6 +180,7 @@ window.addEventListener("keydown", (e) => {
   if (isTyping(e)) return;
   device = "keyboard";
   if (e.code === "KeyP") paused = !paused;
+  else if (e.code === "KeyM") music.toggle();
   else if (e.code === "Space") {
     casting = true;
     e.preventDefault();
@@ -247,9 +256,13 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
   const probeBytes = (SPHERES + points.pts.length / 3) * 16;
   const wanted = (flight.active || spells.count > 0) && !!i.fut.entry.probe;
   const probe = wanted && probes.ready(i.device, probeBytes) ? await entries.probe(i, time, d, points.pts) : null;
+  const soundBytes = music.frames * 2 * 4;
+  const req = musicPeriods.has(i) && sounds.ready(i.device, soundBytes) ? music.want(musicPeriods.get(i)!) : null;
+  const sound: FutharkArray | null = req ? await i.fut.entry.sound(req.t0, music.rate, music.frames) : null;
   const out = await entries.render(i, w, vw, h, time, cam.yaw, cam.pitch, cam.dist, d, spells.pack());
   const enc = i.device.createCommandEncoder();
   if (probe) probes.copy(i, enc, probe, probeBytes);
+  if (sound) sounds.copy(i, enc, sound, soundBytes);
   enc.copyBufferToTexture(
     { buffer: rawBuffer(i, out), bytesPerRow: w * 4, rowsPerImage: h },
     { texture: ctx.getCurrentTexture() },
@@ -265,6 +278,10 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
       flight.collide(data.subarray(0, SPHERES * 4));
       spells.applyProbe(points.ids, data.subarray(SPHERES * 4));
     });
+  }
+  if (sound && req) {
+    sound.free();
+    sounds.read(i.device, soundBytes, (data) => music.play(data, req));
   }
 }
 
@@ -318,6 +335,7 @@ async function swapTo(version: string): Promise<void> {
     });
     if (next.shaders.warnings) console.info(`${version}: ${next.shaders.warnings} WGSL warnings (see console)`);
     if (next.fut.entry.spell_limit) spellLimits.set(next, Number(await next.fut.entry.spell_limit(0)));
+    if (next.fut.entry.music_period) musicPeriods.set(next, Number(await next.fut.entry.music_period(0)));
     // Compile the pipelines Futhark only makes on first use (the shading's
     // among them) with a small frame, while the current build keeps
     // running, so the swap does not stall.
@@ -403,6 +421,7 @@ function reload(version: string): Promise<void> {
   flight,
   cam,
   spells,
+  music,
   async readFrame(w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number) {
     const i = inst;
     if (!i) throw new Error("no Futhark instance loaded");

@@ -113,6 +113,7 @@ import "wizard"
 import "scene"
 import "collide"
 import "config"
+import "music"
 
 -- dr: free flight's state, from the harness (or on the flight path);
 -- spells: the spells in flight (see spells.fut).
@@ -126,6 +127,11 @@ entry probe (tm: f32) (prm: params) (dr: drive) (pts: []f32) : []f32 =
 
 -- How many spells may be in flight at once (a compile-time parameter).
 entry spell_limit (_: i32) : i32 = max_spells
+
+-- Music: n stereo samples (interleaved) from time t0 within the loop, at
+-- rate samples a second; and the loop's length (see music.fut).
+entry sound (t0: f32) (rate: f32) (n: i32) : []f32 = sound_chunk t0 rate (i64.i32 n)
+entry music_period (_: i32) : f32 = period
 `;
 }
 
