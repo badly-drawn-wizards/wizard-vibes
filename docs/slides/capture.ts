@@ -202,11 +202,42 @@ const fields: Record<string, () => Promise<void>> = {
 
 // ---------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// The music's waveform (data/music.json): the first second as min/max per
+// bucket, and 12 ms of the left channel sample by sample.
+
+async function musicData(): Promise<void> {
+  const dir = join(WORK, "music");
+  mkdirSync(dir, { recursive: true });
+  for (const f of readdirSync("fut")) if (f.endsWith(".fut")) cpSync(join("fut", f), join(dir, f));
+  writeFileSync(join(dir, "wave.fut"), 'import "music"\nentry main (t0: f32) (n: i32) : []f32 = sound_chunk t0 48000 (i64.i32 n)\n');
+  await sh("futhark", ["multicore", "-o", join(dir, "wave"), join(dir, "wave.fut")]);
+  const samples = async (t0: number, n: number) => {
+    const out = await sh(join(dir, "wave"), ["-b"], `${t0}f32 ${n}i32`);
+    return new Float32Array(out.buffer.slice(out.byteOffset + 15, out.byteOffset + 15 + n * 2 * 4));
+  };
+  const second = await samples(0, 48000);
+  const buckets = 400;
+  const env = Array.from({ length: buckets }, (_, b) => {
+    let lo = 1, hi = -1;
+    for (let i = (b * 48000) / buckets; i < ((b + 1) * 48000) / buckets; i++) {
+      lo = Math.min(lo, second[2 * i]);
+      hi = Math.max(hi, second[2 * i]);
+    }
+    return [+lo.toFixed(4), +hi.toFixed(4)];
+  });
+  const zoom = await samples(0.1, 576);
+  const left = Array.from({ length: 576 }, (_, i) => +zoom[2 * i].toFixed(4));
+  writeFileSync("docs/slides/data/music.json", JSON.stringify({ rate: 48000, envelope: env, zoom_start: 0.1, zoom: left }));
+  console.error("  music.json");
+}
+
 mkdirSync(OUT, { recursive: true });
 mkdirSync(WORK, { recursive: true });
 const want = new Set(process.argv.slice(2));
 const pick = (n: string) => want.size === 0 || want.has(n);
 for (const [n, f] of Object.entries(fields)) if (pick(n)) await f();
+if (pick("music")) await musicData();
 // a few renders at a time (each is multi-threaded already)
 const queue = shots.filter((s) => pick(s.name));
 await Promise.all(Array.from({ length: 3 }, async () => {
