@@ -2,13 +2,16 @@
 -- time, and the harness asks for a chunk of samples at a time (the `sound`
 -- entry point; see web/music.ts).
 --
--- Wizard disco: sixteen bars at 120 beats a minute in D minor, on the
--- chords Dm, Gm, Bb, A (i iv VI V, two bars each, twice: the A major
--- chord's C# pulls back to D). A four-on-the-floor kick,
--- open hi-hats on the offbeats and closed ones on the sixteenths, claps on
--- two and four, an octave-jumping bass, and a harpsichord playing sixteenth
--- arpeggios throughout. Halfway, after a one-beat stop, a string pad comes
--- in for the second eight bars.
+-- Wizard disco: 32 bars at 120 beats a minute in D minor, on the chords
+-- Dm, Gm, Bb, A (i iv VI V, two bars each: the A major chord's C# pulls
+-- back to D). Throughout: a four-on-the-floor kick, open hi-hats on the
+-- offbeats and closed ones on the sixteenths, claps on two and four, a
+-- crunchy octave-jumping bass and a harpsichord playing sixteenth
+-- arpeggios. In four sections of eight bars, each after a one-beat stop:
+--   1  the groove;
+--   2  with a string pad;
+--   3  a synth lead plays the tune;
+--   4  the tune again, with a harmony a third below, and the strings.
 --
 -- Times are within the loop (the harness wraps them in double precision: an
 -- f32 time minutes in could not tell one sample from the next), and every
@@ -26,7 +29,16 @@ def sixteenth : f32 = beat / 4
 def bar : f32 = 4 * beat
 def chord_len : f32 = 2 * bar
 def chords : i32 = 4
-def period : f32 = 16 * bar -- the loop, in seconds
+def period : f32 = 32 * bar -- the loop, in seconds
+
+-- The section (0..3) at time t, and whether t is in section k.
+def section (t: f32) : i32 = i32.f32 (f32.floor (t / (8 * bar)))
+-- A gain fading in over `fade` seconds at the start of section k and out
+-- just before its end (for a part playing in sections k .. k2).
+def in_sections (k: i32) (k2: i32) (fade: f32) (t: f32) : f32 =
+  let a = f32.i32 k * 8 * bar
+  let b = f32.i32 (k2 + 1) * 8 * bar
+  in smoothstep a (a + fade) t * smoothstep b (b - 0.3) t
 
 def tau : f32 = 2 * f32.pi
 def freq (midi: f32) : f32 = 440 * 2 ** ((midi - 69) / 12)
@@ -45,8 +57,8 @@ def chord_tone (c: i32) (k: i32) : f32 =
   let interval = if k == 0 then 0 else if k == 1 then third else if k == 2 then 7 else 12
   in f32.i32 (root + interval)
 
--- The stop before the second half: the last beat of bar eight.
-def stopped (t: f32) : bool = t >= 8 * bar - beat && t < 8 * bar
+-- The stops: the last beat of each section.
+def stopped (t: f32) : bool = t - 8 * bar * f32.floor (t / (8 * bar)) >= 8 * bar - beat
 
 -- Noise, one value per sample (hashed sample index), and a brighter version
 -- (differenced: its energy sits up where hi-hats live).
@@ -150,9 +162,82 @@ def strings (t: f32) : (f32, f32) =
   let (l1, r1) = voice c lt (0.035 * smoothstep 0 0.5 lt)
   let fade = f32.max 0 (1 - lt / 0.4)
   let (l0, r0) = if fade > 0 && c > 0 then voice (c - 1) (lt + chord_len) (0.035 * fade) else (0, 0)
-  -- (only in the second half: in at bar eight, out just before the loop)
-  let section = smoothstep (8 * bar) (8 * bar + 0.6) t * smoothstep period (period - 0.3) t
-  in (section * (l1 + l0), section * (r1 + r0))
+  -- (in sections 2 and 4)
+  let g = in_sections 1 1 0.6 t + in_sections 3 3 0.6 t
+  in (g * (l1 + l0), g * (r1 + r0))
+
+---------------------------------------------------------------------
+-- The tune
+
+-- The melody: eight bars of eighth notes, each a code: 0 a rest, 15 hold
+-- the note before, otherwise a degree of the scale (1 = D4 .. 12 = A5;
+-- 13 = C#5, the A chord's leading note). Each bar's eight codes are packed
+-- as hex digits (the first eighth in the lowest), since the WebGPU
+-- backend allows no arrays here.
+--   Dm  A4 - D5 - F5 E5 D5 C5 | A4 - - - . D5 E5 F5
+--   Gm  G5 - F5 E5 D5 - Bb4 - | D5 - - - . G4 A4 Bb4
+--   Bb  F5 - F5 G5 F5 E5 D5 - | D5 - C5 D5 - - . .
+--   A   E5 - C#5 - A4 - C#5 E5 | A5 - - - G5 F5 E5 C#5
+def melody_code (i: i32) : i32 =
+  let b = (i / 8) % 8
+  let w : u32 =
+    if b == 0 then 0x789af8f5 else if b == 1 then 0xa980fff5
+    else if b == 2 then 0xf6f89afb else if b == 3 then 0x6540fff8
+    else if b == 4 then 0xf89abafa else if b == 5 then 0x00ff87f8
+    else if b == 6 then 0x9df5fdf9 else 0xd9abfffc
+  in i32.u32 ((w >> u32.i32 (4 * (i % 8))) & 15)
+
+def degree_midi (d: i32) : f32 =
+  f32.i32 (if d == 13 then 73
+           else let o = (d - 1) / 7
+                let k = (d - 1) % 7
+                -- D natural minor: D E F G A Bb C
+                let step = if k == 0 then 0 else if k == 1 then 2 else if k == 2 then 3 else if k == 3 then 5
+                           else if k == 4 then 7 else if k == 5 then 8 else 10
+                in 62 + 12 * o + step)
+
+-- The note sounding at eighth i (or the one it is releasing from, after
+-- it): (degree, its first eighth, its last eighth); degree 0 if none.
+def note_at (i: i32) : (i32, i32, i32) =
+  let k = if melody_code i == 0 then i - 1 else i
+  in if k < 0 || melody_code k == 0 then (0, 0, 0) else
+  let (j, _) = loop (j, go) = (k, true) while go && j > 0 do
+                 if melody_code j == 15 then (j - 1, true) else (j, false)
+  let (e, _) = loop (e, go) = (k, true) while go && e < 63 do
+                 if melody_code (e + 1) == 15 then (e + 1, true) else (e, false)
+  in (melody_code j, j, e)
+
+-- A synth lead: a square-ish wave (odd harmonics, 1/k), two voices a hair
+-- apart, with vibrato growing in on long notes. tau: time since the note
+-- began; dur: how long it is held.
+def lead_tone (f: f32) (tau_: f32) (dur: f32) : f32 =
+  let env = (1 - f32.exp (-tau_ * 120)) * (0.75 + 0.25 * f32.exp (-tau_ * 6))
+            * (if tau_ < dur then 1 else f32.exp (-(tau_ - dur) * 30))
+  let depth = 0.005 * smoothstep 0.15 0.45 tau_
+  let wob = depth / (2 * f32.pi * 5.5) * (1 - f32.cos (2 * f32.pi * 5.5 * tau_))
+  let osc (g: f32) =
+    loop s = 0f32 for k < 6 do
+      let kf = f32.i32 (2 * k + 1)
+      in if kf * g > 9000 then s else s + f32.sin (tau * g * kf * (tau_ + wob)) / kf
+  in env * (osc f + 0.6 * osc (f * 1.003))
+
+-- The tune in sections 3 and 4, an octave up; in section 4 also a third
+-- below (two scale degrees down).
+def tune (t: f32) : (f32, f32) =
+  let start = 16 * bar
+  in if t < start then (0, 0) else
+  let i = i32.f32 (f32.floor ((t - start) / eighth)) % 64
+  let u = t - start - eighth * f32.floor ((t - start) / eighth)
+  let (d, j, e) = note_at i
+  in if d == 0 then (0, 0) else
+  let tau_ = f32.i32 (i - j) * eighth + u
+  let dur = f32.i32 (e - j + 1) * eighth - 0.02
+  let main = 0.07 * lead_tone (freq (degree_midi d + 12)) tau_ dur
+  let harmony_degree = if d == 13 then 5 else d - 2
+  let second = if section t == 3 && harmony_degree >= 1
+               then 0.045 * lead_tone (freq (degree_midi harmony_degree + 12)) tau_ dur else 0
+  let g = in_sections 2 3 0.05 t
+  in (g * (main + 0.7 * second), g * (0.8 * main + second))
 
 ---------------------------------------------------------------------
 
@@ -162,10 +247,12 @@ def music_at (rate: f32) (t: f32) : (f32, f32) =
   let drums = groove * (kick t + clap rate t)
   let hh = groove * hats rate t
   let low = groove * bass t
-  let harp = harpsichord t
+  -- (the harpsichord steps back while the tune plays)
+  let harp = (if section t >= 2 then 0.6 else 1) * harpsichord t
   let (sl, sr) = strings t
+  let (ml, mr) = tune t
   let soft (x: f32) = f32.tanh (1.1 * x) / 1.1
-  in (soft (drums + low + 0.6 * hh + harp + sl), soft (drums + low + hh + 0.7 * harp + sr))
+  in (soft (drums + low + 0.6 * hh + harp + sl + ml), soft (drums + low + hh + 0.7 * harp + sr + mr))
 
 -- n stereo samples, interleaved (left, right), from time t0 at `rate`
 -- samples a second. (One thread per value, each computing its sample's
