@@ -20,7 +20,6 @@ const APPEAR = 1.5; // seconds (appear_time in fut/enemies.fut)
 const RESPAWN = 5; // seconds after a defeat until the next one appears
 const RANGE = 40; // they only cast at him from nearer than this
 export const PLAYER_HP = 10;
-const DOWN = 3; // seconds he is down after being defeated
 
 // Damage, by kind of spell. (A fire bolt does its damage by its burst,
 // which a bolt that hits sets off.)
@@ -75,7 +74,7 @@ export class Enemies {
   hp = PLAYER_HP;
   defeated = 0; // enemies he has defeated
   hurt = 99; // seconds since he was last hit
-  down = -1; // seconds since he was defeated, or -1
+  down = -1; // seconds since he was defeated (until a reset), or -1
   shielded = false; // his shield is up: it takes what would hit him
   onChange: () => void = () => {};
   // (for the sound and the shield)
@@ -110,10 +109,14 @@ export class Enemies {
     return out;
   }
 
-  // Back to full health (and up, if he was down).
-  refill(): void {
+  // The fight from the start: him at full health and up, none defeated, and
+  // a new set of enemies appearing.
+  reset(): void {
     this.hp = PLAYER_HP;
     this.down = -1;
+    this.defeated = 0;
+    this.hurt = 99;
+    this.slots.forEach((s, i) => Object.assign(s, { gen: s.gen + 1, hp: HP, appear: APPEAR, down: -1, castIn: 5 + i * 2 }));
     this.onChange();
   }
 
@@ -155,14 +158,7 @@ export class Enemies {
     }
     this.last = [...him];
     this.hurt += dt;
-    if (this.down >= 0) {
-      this.down += dt;
-      if (this.down >= DOWN) {
-        this.down = -1;
-        this.hp = PLAYER_HP;
-        this.onChange();
-      }
-    }
+    if (this.down >= 0) this.down += dt;
     this.slots.forEach((s, i) => {
       if (s.down >= 0) {
         s.down += dt;

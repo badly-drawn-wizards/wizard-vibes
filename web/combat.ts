@@ -1,9 +1,10 @@
 // The fight, put together: the enemies (enemies.ts), his mana (mana.ts) and
 // shield (shield.ts), casting with them, the sounds of it all (sfx.ts), and
-// what it shows: bottom left his health (with enemies about), his mana and
-// how many he has defeated; a red flash when he is hit; and a crosshair at
-// the view's centre, where spells go, which turns into a lock when a strike
-// would find a target.
+// what it shows: bottom left his health (with enemies about), his mana, how
+// many he has defeated and a reset button; a red flash when he is hit; and
+// a crosshair at the view's centre, where spells go, which turns into a
+// lock when a strike would find a target. Defeated, he stays down: a panel
+// says so, until he tries again (its button, Enter, or the reset button).
 
 import { Enemies, PLAYER_HP } from "./enemies.ts";
 import { MANA, Mana, SPELL_COST } from "./mana.ts";
@@ -41,6 +42,8 @@ export class Combat {
     health: document.querySelector<HTMLElement>("#vitals .health")!,
     mana: document.querySelector<HTMLElement>("#vitals .mana")!,
     score: document.querySelector<HTMLElement>("#vitals .score")!,
+    foot: document.querySelector<HTMLElement>("#vitals .foot")!,
+    defeat: document.getElementById("defeat")!,
     crosshair: document.getElementById("crosshair")!,
     hurt: document.getElementById("hurt")!,
   };
@@ -62,6 +65,19 @@ export class Combat {
     enemies.onCast = (kind, pos) => sfx.play(kind === MARK ? SFX.mark : kind === FIRE ? SFX.castFire : SFX.castWind, at(pos));
     shield.onRaise = () => sfx.play(SFX.shieldUp);
     shield.onDrop = () => sfx.play(SFX.shieldDown);
+    document.querySelector<HTMLButtonElement>("#vitals .reset")!.onclick = () => this.reset();
+    this.el.defeat.querySelector("button")!.onclick = () => this.reset();
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Enter" && this.enemies.down >= 0 && !(e.target as HTMLElement | null)?.closest?.("input, select, textarea, button")) this.reset();
+    });
+  }
+
+  // The fight from the start: full health and mana, no spells in flight,
+  // a new set of enemies.
+  reset(): void {
+    this.enemies.reset();
+    this.mana.value = MANA;
+    this.spells.clear();
   }
 
   // The renderer's share (the drive record's shield and foe fields).
@@ -107,12 +123,19 @@ export class Combat {
   private show(n: number, m: Moment): void {
     const { el, enemies, mana, shield } = this;
     el.vitals.hidden = el.crosshair.hidden = !m.drawn;
-    el.health.hidden = el.score.hidden = n === 0;
+    el.health.hidden = el.foot.hidden = n === 0;
     el.health.querySelector<HTMLElement>(".bar span")!.style.width = `${(100 * enemies.hp) / PLAYER_HP}%`;
     el.mana.querySelector<HTMLElement>(".bar span")!.style.width = `${(100 * mana.value) / MANA}%`;
     el.mana.classList.toggle("short", mana.short < 0.4);
-    el.score.textContent = enemies.down >= 0 ? "defeated!" : `${enemies.defeated} defeated`;
-    el.hurt.style.opacity = String(enemies.down >= 0 ? 0.8 : 0.7 * Math.exp(-4 * enemies.hurt));
+    el.score.textContent = `${enemies.defeated} defeated`;
+    const lost = n > 0 && enemies.down >= 0;
+    if (el.defeat.hidden === lost) {
+      el.defeat.hidden = !lost;
+      const k = enemies.defeated;
+      el.defeat.querySelector(".stats")!.textContent = k === 0 ? "No enemies defeated" : `${k} ${k === 1 ? "enemy" : "enemies"} defeated`;
+    }
+    el.hurt.style.opacity = String(lost ? 0.6 : 0.7 * Math.exp(-4 * enemies.hurt));
+    if (lost) el.crosshair.hidden = true;
     el.crosshair.classList.toggle("locked", this.spells.selected === STRIKE && !!this.spells.lockOn(m.aim.origin, m.aim.dir));
     el.crosshair.classList.toggle("shielded", shield.raisedNow);
   }

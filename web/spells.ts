@@ -83,6 +83,11 @@ export class Spells {
     if (i >= 0 && i < SPELL_NAMES.length) this.selected = i;
   }
 
+  // Ends every spell in flight.
+  clear(): void {
+    this.items = [];
+  }
+
   // Whether he could cast now (not cooling down, nor at the limit).
   get ready(): boolean {
     return this.cooldown <= 0 && this.items.length < this.limit;

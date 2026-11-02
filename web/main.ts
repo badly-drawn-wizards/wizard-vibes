@@ -127,11 +127,12 @@ attachCamera(cam, canvas);
 // whatever the drawer says). Free flight starts from behind him. Clicking
 // the view takes the keys back from the drawer's controls.
 const flight = new FreeFlight();
-const mode = new Mode(document.getElementById("mode-note")!);
+const mode = new Mode(document.getElementById("mode-note")!, document.getElementById("modes")!);
+if (useGl) mode.forbid("fight", "Fights need WebGPU: the WebGL fallback cannot draw spells");
 const enemyCount = () => (mode.fight ? Math.min(6, Number(params.values.enemies ?? 0)) : 0);
 mode.onChange = () => {
   flight.setActive(mode.free);
-  if (mode.fight) combat.enemies.refill();
+  if (mode.fight) combat.reset();
 };
 flight.setActive(mode.free);
 window.addEventListener("keydown", (e) => {
@@ -171,6 +172,8 @@ const musicPeriods = new WeakMap<FutInstance, number>();
 const sounds = new ProbeReader();
 if (useGl) music.disable("Music needs WebGPU: its samples come from a compute kernel");
 if (useGl) sfx.disable("Sound effects need WebGPU: their samples come from a compute kernel");
+// (in the WebGL fallback: a note in place of the vitals, bottom left)
+const glNote = document.getElementById("gl-note")!;
 
 // The fight with the enemies, his mana and shield (see combat.ts).
 const combat = new Combat(spells, sfx);
@@ -341,7 +344,9 @@ function tick(now: number): void {
     fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
     frameGl(glr, dt);
     quality.frame(!paused && !document.hidden);
-    setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : failure ? "WebGL fallback (WebGPU failed)" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${mode.free ? ` · ${mode.name}` : ""}${padConnected ? " · controller" : ""}`);
+    glNote.textContent = `${hasWebGpu ? "WebGL" : failure ? "WebGL fallback (WebGPU failed)" : "WebGL fallback (no WebGPU)"}: no spells, collisions, fights or anti-aliasing`;
+    glNote.hidden = false;
+    setStatus(`${glr.version!.slice(0, 8)} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${padConnected ? " · controller" : ""}`);
     return;
   }
   if (!inst || inFlight) return;
@@ -351,7 +356,7 @@ function tick(now: number): void {
   const current = inst;
   inFlight = frame(current, dt)
     .then(() => quality.frame(!paused && !document.hidden))
-    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${mode.free ? ` · ${mode.name}` : ""}${padConnected ? " · controller" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${padConnected ? " · controller" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }

@@ -84,8 +84,10 @@ Drag to orbit, scroll to zoom, P to pause. The ¼ / ½ / 1× buttons set the
 render scale. The controls panel (bottom right; ✕ hides it, ? brings it
 back) shows the keys, or a controller's buttons once one is used.
 
-F cycles the mode: fixed (on the flight path), flight (free flight) and
-fight (free flight with the enemies; outside it there are none). In free flight: W / S accelerate the way the camera looks and brake,
+F cycles the mode (or pick it in the top bar): fixed (on the flight path),
+flight (free flight) and fight (free flight with the enemies; outside it
+there are none). Defeated, he stays down until you try again (Enter, or
+the reset button by his health, which also starts a fight afresh). In free flight: W / S accelerate the way the camera looks and brake,
 A / D accelerate to the camera's left and right, E / Q climb and descend,
 Shift boosts. The camera then stays put in the world while he turns. He faces
 the way he travels, banks into turns, points the way he accelerates, and his

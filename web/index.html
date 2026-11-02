@@ -29,7 +29,22 @@
   #vitals .health .bar span { background: linear-gradient(90deg, #c0283c, #ff6a5a); }
   #vitals .mana .bar span { background: linear-gradient(90deg, #2a4fd0, #6fb4ff); }
   #vitals .mana.short .bar { border-color: #ff6a5a; }
+  #vitals .foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  #vitals .foot[hidden] { display: none; }
   #vitals .score { font-size: 0.85em; color: var(--dim); }
+  #vitals .reset, #defeat button { font: inherit; color: var(--fg); background: none; border: 1px solid #2c2950;
+                                   border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  #vitals .reset { font-size: 0.85em; }
+  #gl-note { position: fixed; bottom: 16px; left: 16px; max-width: min(360px, calc(100vw - 100px)); color: var(--dim);
+             background: rgb(5 4 13 / 0.6); padding: 8px 12px; border-radius: 6px; backdrop-filter: blur(4px); }
+  #gl-note[hidden], #defeat[hidden] { display: none; }
+  #defeat { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); text-align: center; color: var(--fg);
+            background: rgb(5 4 13 / 0.8); padding: 20px 32px; border-radius: 8px; backdrop-filter: blur(4px);
+            display: grid; gap: 10px; justify-items: center; animation: defeat-in 0.6s ease-out; }
+  #defeat .title { font-size: 1.8em; letter-spacing: 0.1em; color: #ff8a8a; }
+  #defeat .hint { font-size: 0.8em; color: var(--dim); }
+  #defeat button { font-size: 1.05em; padding: 4px 16px; }
+  @keyframes defeat-in { from { opacity: 0; } to { opacity: 1; } }
   #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
                pointer-events: none; opacity: 0.75;
                background: linear-gradient(#fff, #fff) center / 2px 7px no-repeat,
@@ -125,6 +140,7 @@
   </span>
   <button id="music" type="button">♪ off</button>
   <button id="sfx" type="button">fx on</button>
+  <span id="modes" title="Mode (F)"></span>
   <select id="platform" title="What he flies on">
     <option value="0">Rock</option><option value="1">Ice</option><option value="2">Magic carpet</option>
   </select>
@@ -136,7 +152,14 @@
 <div id="vitals">
   <div class="row health" title="Health"><span class="label">♥</span><span class="bar"><span></span></span></div>
   <div class="row mana" title="Mana"><span class="label">✦</span><span class="bar"><span></span></span></div>
-  <div class="score"></div>
+  <div class="foot"><span class="score"></span><button class="reset" type="button" title="Start the fight again">↺ Reset</button></div>
+</div>
+<div id="gl-note" hidden></div>
+<div id="defeat" hidden>
+  <div class="title">Defeated</div>
+  <div class="stats"></div>
+  <button type="button">Try again</button>
+  <div class="hint">or press Enter</div>
 </div>
 <div id="crosshair"></div>
 <div id="mode-note"></div>
