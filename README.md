@@ -61,6 +61,20 @@ get a march of their own, over just the stretch of each ray
 through their bounding spheres, so most rays only pay a ray-sphere test per
 enemy (about 0.4 ms a frame at 1080p for three).
 
+Spells cost mana (the blue bar, bottom left, under his health), which
+refills. Holding R (LB on a controller) raises a shield that stops their
+spells, at a cost in mana, and he cannot cast from behind it. Their
+lightning is telegraphed: a red ring closes in on where it will land. A
+crosshair marks where spells go, and locks when a strike would find a
+target. With `full_enemies` (compile-time, slow) they are as detailed as
+he is. Glass of any shape (fut/glass.fut: the orb, the potions, the shield)
+reflects and refracts by Fresnel.
+
+Sound effects are made the same way as the music (fut/sfx.fut: noise as
+sums of random sines, sweeps, bells), each rendered once and kept; the
+"fx" button turns them off. The music keeps its loop as it is computed and
+then plays that.
+
 Music (off until you press ♪ or M) is computed in Futhark the way Shadertoy
 does sound: each stereo sample is a pure function of time (fut/music.fut),
 and the `sound` entry point makes a chunk of samples at a time, read back

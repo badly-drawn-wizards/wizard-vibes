@@ -14,7 +14,7 @@
 // marks where one will land for a moment first (MARK), so he can get out
 // of the way.
 
-type V3 = [number, number, number];
+import { dist, dot, sub, type V3 } from "./vec.ts";
 
 export const SPELL_NAMES = ["Fire bolt", "Lightning strike", "Wind blade"];
 
@@ -60,9 +60,6 @@ interface Spell {
 }
 
 
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const dist = (a: V3, b: V3) => Math.hypot(...sub(a, b));
 
 
 export class Spells {

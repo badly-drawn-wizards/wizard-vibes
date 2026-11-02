@@ -415,6 +415,9 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   let layer = hit_layer tagged
   let m = hit_material tagged
   let vis = pose.prm.layers -- only visible layers occlude, or show in AO
+  -- (the enemies are far from everything but themselves: leaving them out
+  -- spares the normal and AO probes elsewhere a loop over them)
+  let vis = if layer == layers_enemies then vis else vis & !layers_enemies
   in if m == m_water then water_surface pose p rd t else
   -- The terrain's normal comes from its height gradient, worked out
   -- analytically (one evaluation instead of four of the whole scene), and it

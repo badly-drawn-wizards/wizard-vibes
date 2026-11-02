@@ -12,7 +12,7 @@
 
 import { BURST, FIRE, HIS, MARK, STRIKE, type Spells, type Target, WIND } from "./spells.ts";
 
-type V3 = [number, number, number];
+import { add, dist, normalise, scale, sub, turn, type V3 } from "./vec.ts";
 
 const MAX = 6; // as max_enemies in fut/materials.fut
 const HP = 3;
@@ -38,9 +38,6 @@ function hash3(x: number, y: number, z: number): number {
 // enemy_rnd in fut/enemies.fut.
 const rnd = (seed: number, gen: number, i: number, k: number) => hash3(seed + 7919 * gen, i + 17, k + 101);
 
-// A direction turned by `yaw` about the vertical (yaw in fut/world.fut).
-const turn = (a: number, [x, y, z]: V3): V3 => [x * Math.cos(a) + z * Math.sin(a), y, z * Math.cos(a) - x * Math.sin(a)];
-const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 
 // Where enemy i (of generation gen) stands, and which way it faces, when he
 // is at `him` (enemy_at in fut/enemies.fut, while it is not falling).
@@ -185,21 +182,18 @@ export class Enemies {
     const r = rnd(seed, gen, i, 29);
     const kind = r < 0.5 ? FIRE : r < 0.8 ? WIND : STRIKE;
     const chest = add(him, [0, 1.1, 0]);
-    if (Math.hypot(chest[0] - orb[0], chest[1] - orb[1], chest[2] - orb[2]) > RANGE) return;
+    if (dist(chest, orb) > RANGE) return;
     // (off by up to 2.5 either way, mostly less)
     const miss = () => (Math.random() + Math.random() - 1) * 2.5;
     if (kind === STRIKE) {
       // marked first, where he will be by the time it lands
       const lead = 1.1;
-      const at = add(add(him, this.vel.map((v) => v * lead) as V3), [miss(), 0.6, miss()]);
+      const at = add(add(him, scale(lead, this.vel)), [miss(), 0.6, miss()]);
       if (spells.launch(MARK, orb, [0, 1, 0], i, at)) this.onCast(MARK, at);
       return;
     }
     const speed = kind === FIRE ? 30 : 24;
-    const flight = Math.hypot(chest[0] - orb[0], chest[1] - orb[1], chest[2] - orb[2]) / speed;
-    const aim = add(add(chest, this.vel.map((v) => v * flight) as V3), [miss(), miss() / 2, miss()]);
-    const d = [aim[0] - orb[0], aim[1] - orb[1], aim[2] - orb[2]];
-    const len = Math.hypot(...d);
-    if (spells.launch(kind, orb, d.map((x) => x / len) as V3, i)) this.onCast(kind, orb);
+    const aim = add(add(chest, scale(dist(chest, orb) / speed, this.vel)), [miss(), miss() / 2, miss()]);
+    if (spells.launch(kind, orb, normalise(sub(aim, orb)), i)) this.onCast(kind, orb);
   }
 }

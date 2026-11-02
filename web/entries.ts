@@ -30,7 +30,9 @@ export class Entries {
     const r = this.records.get(i);
     if (r && r.version === this.params.version) return r.rec;
     r?.rec.free();
-    const rec = buildRecord(i, "params", this.params.values);
+    // (older builds may take as uniforms what are compile-time now: they
+    // get the values in force)
+    const rec = buildRecord(i, "params", { ...this.params.compile, ...this.params.values });
     this.records.set(i, { version: this.params.version, rec });
     return rec;
   }

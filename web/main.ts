@@ -10,13 +10,11 @@ import { clearError, setStatus, showError } from "./overlay.ts";
 import { createDrawer, type Params } from "./params-drawer.ts";
 import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
 import { type Device, Help } from "./help.ts";
-import { MARK, Spells } from "./spells.ts";
-import { Enemies, PLAYER_HP } from "./enemies.ts";
-import { MANA, Mana, SPELL_COST } from "./mana.ts";
-import { Shield } from "./shield.ts";
+import { Spells } from "./spells.ts";
+import { Combat } from "./combat.ts";
 import { Music } from "./music.ts";
 import { AudioHub } from "./audio.ts";
-import { type Placement, SFX, Sfx } from "./sfx.ts";
+import { Sfx } from "./sfx.ts";
 import { IS_STATIC } from "./static.ts";
 import { GlRenderer } from "./webgl.ts";
 import { LEVELS, type Level, Quality } from "./quality.ts";
@@ -161,59 +159,8 @@ const sounds = new ProbeReader();
 if (useGl) music.disable("Music needs WebGPU: its samples come from a compute kernel");
 if (useGl) sfx.disable("Sound effects need WebGPU: their samples come from a compute kernel");
 
-// The fight with the enemies (see enemies.ts), and what it draws on: his
-// mana (casting and the shield) and his shield. Bottom left, his health
-// (with enemies about), his mana and how many he has defeated; a red flash
-// when he is hit, and a while out when defeated. A crosshair marks where
-// spells go (the view's centre), and turns into a lock when a strike would
-// find a target.
-const enemies = new Enemies();
-const mana = new Mana();
-const shield = new Shield(mana);
-spells.onHit = (side, kind) => enemies.hit(side, kind);
-enemies.onBlock = () => {
-  shield.block();
-  sfx.play(SFX.block);
-};
-
-// Where a sound at world point `pos` is heard from: panned by which side
-// of the view it is on, quieter further from him.
-function placed(pos: [number, number, number]): Placement {
-  const him = flight.where(time).pos;
-  const v = [pos[0] - him[0], pos[1] - him[1], pos[2] - him[2]];
-  const d = Math.hypot(...v) || 1;
-  const { dir } = castFrom();
-  const right = [-dir[2], 0, dir[0]];
-  const r = Math.hypot(right[0], right[2]) || 1;
-  return { pan: (0.8 * (v[0] * right[0] + v[2] * right[2])) / (r * d), gain: 1 / (1 + d / 15) };
-}
-const CAST_SOUND = [SFX.castFire, SFX.castStrike, SFX.castWind];
-spells.onSound = (what, pos) => sfx.play(what === "burst" ? SFX.burst : what === "gust" ? SFX.gust : SFX.thunder, placed(pos));
-enemies.onHurt = () => sfx.play(SFX.hurt);
-enemies.onDefeat = (pos) => sfx.play(SFX.defeat, placed(pos));
-enemies.onAppear = (pos) => sfx.play(SFX.appear, placed(pos));
-enemies.onCast = (kind, pos) => sfx.play(kind === MARK ? SFX.mark : kind === 0 ? SFX.castFire : SFX.castWind, placed(pos));
-shield.onRaise = () => sfx.play(SFX.shieldUp);
-shield.onDrop = () => sfx.play(SFX.shieldDown);
-let fizzled = 0; // (time of the last fizzle, so holding the key does not drone)
-const vitals = document.getElementById("vitals")!;
-const healthRow = vitals.querySelector<HTMLElement>(".health")!;
-const manaRow = vitals.querySelector<HTMLElement>(".mana")!;
-const score = vitals.querySelector<HTMLElement>(".score")!;
-const crosshair = document.getElementById("crosshair")!;
-const hurt = document.getElementById("hurt")!;
-function showVitals(n: number, canCast: boolean): void {
-  vitals.hidden = crosshair.hidden = !canCast;
-  healthRow.hidden = score.hidden = n === 0;
-  healthRow.querySelector<HTMLElement>(".bar span")!.style.width = `${(100 * enemies.hp) / PLAYER_HP}%`;
-  manaRow.querySelector<HTMLElement>(".bar span")!.style.width = `${(100 * mana.value) / MANA}%`;
-  manaRow.classList.toggle("short", mana.short < 0.4);
-  score.textContent = enemies.down >= 0 ? "defeated!" : `${enemies.defeated} defeated`;
-  hurt.style.opacity = String(enemies.down >= 0 ? 0.8 : 0.7 * Math.exp(-4 * enemies.hurt));
-  const { origin, dir } = castFrom();
-  crosshair.classList.toggle("locked", spells.selected === 1 && !!spells.lockOn(origin, dir));
-  crosshair.classList.toggle("shielded", shield.raisedNow);
-}
+// The fight with the enemies, his mana and shield (see combat.ts).
+const combat = new Combat(spells, sfx);
 
 // The orb, and the camera's view, in the world (for casting).
 function castFrom(): { origin: [number, number, number]; dir: [number, number, number] } {
@@ -293,29 +240,11 @@ function step(dt: number, canCast: boolean): Drive {
   if (pad?.toggle) flight.toggle();
   if (pad?.active) device = "pad";
   if (pad?.spell != null) spells.select(pad.spell);
-  // the shield (not while he is down); casting, not from behind it, and
-  // only with the mana for the spell
-  const able = canCast && !paused && enemies.down < 0;
-  shield.update(paused ? 0 : dt, !!pad?.shield, able);
-  enemies.shielded = shield.up;
-  if (able && !shield.raisedNow && (casting || pad?.cast) && spells.ready) {
-    if (mana.spend(SPELL_COST[spells.selected])) {
-      const { origin, dir } = castFrom();
-      spells.cast(origin, dir);
-      sfx.play(CAST_SOUND[spells.selected]);
-    } else if (time - fizzled > 0.5 || time < fizzled) {
-      fizzled = time;
-      sfx.play(SFX.fizzle);
-    }
-  }
-  mana.update(paused ? 0 : dt);
-  // the fight (only where spells can be drawn; not while he is down)
-  const n = canCast ? Math.min(6, Number(params.values.enemies ?? 0)) : 0;
-  const seed = Number(params.values.enemy_seed ?? 0);
-  const him = flight.where(time).pos;
-  spells.targets = enemies.targets(n, seed, time, him);
-  enemies.update(paused ? 0 : dt, n, seed, time, him, spells);
-  showVitals(n, canCast);
+  combat.update({
+    dt: paused ? 0 : dt, time, him: flight.where(time).pos, aim: castFrom(), drawn: canCast, able: canCast && !paused,
+    n: Math.min(6, Number(params.values.enemies ?? 0)), seed: Number(params.values.enemy_seed ?? 0),
+    casting: casting || !!pad?.cast, shielding: !!pad?.shield,
+  });
   spells.update(paused ? 0 : dt, casting || !!pad?.cast);
   help.update(device, spells.selected);
   // right stick: look right turns the view right (the camera's yaw is its
@@ -334,7 +263,7 @@ function step(dt: number, canCast: boolean): Drive {
   const [sx, sy, sz] = viewDir(cam);
   return {
     ...flight.drive(), staff: spells.staff, sx, sy, sz, flash: spells.sinceCast, spell: spells.selected,
-    shield: shield.amount, shield_hit: shield.sinceHit, ...enemies.foes(),
+    ...combat.drive(),
   };
 }
 
@@ -519,10 +448,10 @@ function reload(version: string): Promise<void> {
   flight,
   cam,
   spells,
-  enemies,
+  enemies: combat.enemies,
   sfx,
-  mana,
-  shield,
+  mana: combat.mana,
+  shield: combat.shield,
   get time() {
     return time;
   },
