@@ -5,9 +5,10 @@
 //   left stick     fly along / across the camera's view
 //   right stick    turn the camera
 //   RT / LT        climb / descend (by how far they are pulled)
-//   LB / L3        boost
+//   L3             boost
 //   X / A / B      choose a spell: fire bolt, lightning strike, wind blade
 //   RB             cast it (held: again as soon as it can)
+//   LB             raise the shield (held)
 //   Y / Start      toggle free flight
 
 export interface Pad {
@@ -18,6 +19,7 @@ export interface Pad {
   toggle: boolean; // pressed since the last read
   spell: number | null; // a spell chosen since the last read
   cast: boolean; // held
+  shield: boolean; // held
   active: boolean; // anything pressed or pushed (for showing its glyphs)
 }
 
@@ -80,10 +82,11 @@ export function readPad(): Pad | null {
     move: [mx, -my], // (stick axes point down)
     look: [lx, -ly],
     up: Math.max(-1, Math.min(1, rt - lt)),
-    boost: pressed(k.lb) || pressed(k.l3),
+    boost: pressed(k.l3),
     toggle,
     spell,
     cast: pressed(k.rb),
+    shield: pressed(k.lb),
     active: g.buttons.some((x) => x.pressed) || mx !== 0 || my !== 0 || lx !== 0 || ly !== 0 || rt > 0.1 || lt > 0.1,
   };
 }

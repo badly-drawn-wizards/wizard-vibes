@@ -10,7 +10,9 @@
 // hit the enemies, theirs hit him, as spheres listed in `targets`; a hit is
 // reported to `onHit` (a bolt or blade where it strikes, a burst once for
 // each target in its blast, a strike once where it lands). His strikes
-// lock on to a target near where he aims.
+// lock on to a target near where he aims. Theirs are telegraphed: a ring
+// marks where one will land for a moment first (MARK), so he can get out
+// of the way.
 
 type V3 = [number, number, number];
 
@@ -22,9 +24,10 @@ export const STRIKE = 1;
 export const WIND = 2;
 export const BURST = 3;
 const GUST = 4; // a wind blade's burst into small blades
+export const MARK = 5; // where a strike is about to land
 const STRIDE = 10;
 
-const LIFE = [3, 0.9, 1.5, 1.4, 1.1]; // seconds, by kind
+const LIFE = [3, 0.9, 1.5, 1.4, 1.1, 1.1]; // seconds, by kind
 const SPEED = [30, 0, 24]; // units/s
 const COOLDOWN = [0.25, 0.5, 0.3]; // seconds before the next cast
 const STRIKE_RANGE = 45; // furthest a strike lands
@@ -56,25 +59,11 @@ interface Spell {
   done: boolean; // its blast (a burst's or a strike's) has been dealt
 }
 
-// A fire bolt bursting where it is.
-function burst(s: Spell): void {
-  s.kind = BURST;
-  s.age = 0;
-  s.life = LIFE[BURST];
-  s.vel = [0, 0, 0];
-}
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const dist = (a: V3, b: V3) => Math.hypot(...sub(a, b));
 
-// A wind blade bursting into small blades where it is (see spell_gust in
-// fut/spells.fut): it keeps its velocity, which aims the shards.
-function gust(s: Spell): void {
-  s.kind = GUST;
-  s.age = 0;
-  s.life = LIFE[GUST];
-}
 
 export class Spells {
   selected = 1; // lightning: the orb's own colours
@@ -83,6 +72,8 @@ export class Spells {
   sinceCast = 10; // seconds
   targets: Target[] = [];
   onHit: (side: number, kind: number, owner: number) => void = () => {};
+  // (for the sound: a bolt bursting, a blade breaking up, a strike landing)
+  onSound: (what: "burst" | "gust" | "strike", pos: V3) => void = () => {};
   private items: Spell[] = [];
   private cooldown = 0;
   private nextId = 1;
@@ -93,6 +84,11 @@ export class Spells {
 
   select(i: number): void {
     if (i >= 0 && i < SPELL_NAMES.length) this.selected = i;
+  }
+
+  // Whether he could cast now (not cooling down, nor at the limit).
+  get ready(): boolean {
+    return this.cooldown <= 0 && this.items.length < this.limit;
   }
 
   // Casts the selected spell from `origin` along the unit vector `dir`
@@ -111,7 +107,7 @@ export class Spells {
     if (this.items.length >= this.limit) return false;
     const s: Spell = { id: this.nextId++, kind, pos: [...origin], vel: [0, 0, 0], age: 0, life: LIFE[kind],
       seed: (Math.random() * 1e5) | 0, top: 0, owner, done: false };
-    if (kind === STRIKE) {
+    if (kind === STRIKE || kind === MARK) {
       const target = at ?? (owner === HIS ? this.lockOn(origin, dir) : null);
       if (target) s.pos = [...target];
       else {
@@ -125,11 +121,12 @@ export class Spells {
       s.vel = dir.map((d) => d * SPEED[kind]) as V3;
     }
     this.items.push(s);
+    if (kind === STRIKE && s.pos[1] !== 0) this.onSound("strike", s.pos);
     return true;
   }
 
   // The enemy target nearest his aim, within LOCK_ON of it and in range.
-  private lockOn(origin: V3, dir: V3): V3 | null {
+  lockOn(origin: V3, dir: V3): V3 | null {
     let best: V3 | null = null;
     let bestAngle = LOCK_ON;
     for (const t of this.targets) {
@@ -146,6 +143,19 @@ export class Spells {
     return best;
   }
 
+  // A fire bolt bursting where it is.
+  private burst(s: Spell): void {
+    Object.assign(s, { kind: BURST, age: 0, life: LIFE[BURST], vel: [0, 0, 0] });
+    this.onSound("burst", s.pos);
+  }
+
+  // A wind blade bursting into small blades where it is (see spell_gust in
+  // fut/spells.fut): it keeps its velocity, which aims the shards.
+  private gust(s: Spell): void {
+    Object.assign(s, { kind: GUST, age: 0, life: LIFE[GUST] });
+    this.onSound("gust", s.pos);
+  }
+
   // Whether a spell of `owner`'s can hit target t.
   private opposed(owner: number, t: Target): boolean {
     return (owner === HIS) !== (t.side === HIS);
@@ -158,8 +168,8 @@ export class Spells {
         const t = this.targets.find((t) => this.opposed(s.owner, t) && dist(s.pos, t.c) < t.r);
         if (!t) continue;
         this.onHit(t.side, s.kind, s.owner);
-        if (s.kind === FIRE) burst(s);
-        else gust(s);
+        if (s.kind === FIRE) this.burst(s);
+        else this.gust(s);
       } else if ((s.kind === BURST || (s.kind === STRIKE && s.pos[1] !== 0)) && !s.done) {
         // (once per target: the nearest sphere of each)
         s.done = true;
@@ -182,7 +192,12 @@ export class Spells {
       // (a gust stays where the blade broke; its velocity only aims the shards)
       if (s.kind !== GUST) for (let i = 0; i < 3; i++) s.pos[i] += s.vel[i] * dt;
       // a wind blade that flew its course bursts too
-      if (s.kind === WIND && s.age >= s.life) gust(s);
+      if (s.kind === WIND && s.age >= s.life) this.gust(s);
+      // a mark's time is up: the strike comes down
+      if (s.kind === MARK && s.age >= s.life) {
+        Object.assign(s, { kind: STRIKE, age: 0, life: LIFE[STRIKE], done: false });
+        this.onSound("strike", s.pos);
+      }
     }
     this.collide();
     this.items = this.items.filter((s) => s.age < s.life);
@@ -209,14 +224,15 @@ export class Spells {
       if (!s || !(d < 1e5)) return;
       if (s.kind === FIRE && d < 0.15) {
         // burst where it hit
-        burst(s);
+        this.burst(s);
       } else if (s.kind === WIND && d < 0.15) {
         // it bursts against the land into small blades
-        gust(s);
+        this.gust(s);
       } else if (s.kind === STRIKE && s.pos[1] === 0) {
         // the ground below the probe point: its height above the land,
         // divided by the slope
         s.pos[1] = PROBE_HEIGHT - d / Math.max(0.2, data[i * 4 + 2]);
+        this.onSound("strike", s.pos);
       }
     });
   }
@@ -226,7 +242,7 @@ export class Spells {
   pack(): Float32Array {
     const out = new Float32Array(this.limit * STRIDE).fill(-1);
     this.items.slice(0, this.limit).forEach((s, i) => {
-      const extra = s.kind === STRIKE ? [0, s.top, 0] : s.vel;
+      const extra = s.kind === STRIKE || s.kind === MARK ? [0, s.top, 0] : s.vel;
       out.set([s.kind, ...s.pos, ...extra, s.age, s.life, s.seed], i * STRIDE);
     });
     return out;

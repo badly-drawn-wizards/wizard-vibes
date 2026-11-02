@@ -9,6 +9,7 @@
 import "vec3"
 import "hash"
 import "params"
+import "config"
 import "sdf"
 import "world"
 import "scene"
@@ -57,7 +58,7 @@ def bark_albedo (prm: params) (fp: f32) (p: vec3) : vec3 =
   -- Bark reads as narrow dark crevices between lighter plates: darken only
   -- near each plate's edge (plate values under ~0.2), at both scales.
   let crevice (v: f32) = smoothstep 0.2 0.0 v
-  let wood = prm.wood_colour
+  let wood = wood_colour
   let base = scale ((1 - 0.85 * crevice broad) * (1 - 0.6 * crevice fine)) wood
   -- lighter and darker stretches along the length
   let base = scale (0.7 + 0.6 * tone) base
@@ -135,7 +136,7 @@ def leather (pose: pose) (fp: f32) (p: vec3) : f32 =
 def leather_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
   let (u, dy, on_belt) = belt_coords pose p
   let g = vnoise3 (scale 85 p)
-  let base = scale (0.75 + 0.35 * mix1 0.6 g (keep fp 0.012)) pose.prm.leather_colour
+  let base = scale (0.75 + 0.35 * mix1 0.6 g (keep fp 0.012)) leather_colour
   in if !on_belt then base
      else let worn = mix1 1 0.6 (smoothstep 0.018 0.03 (f32.abs dy))
           let s = stitch u dy * keep fp 0.011
@@ -178,7 +179,7 @@ def eye_albedo (pose: pose) (p: vec3) : vec3 =
   let pupil = smoothstep 0.955 0.965 cosa
   let rim = 1 - 0.5 * smoothstep 0.92 0.88 cosa -- darker towards the iris's edge
   let sclera = vec 0.9 0.88 0.85
-  let blue = scale rim pose.prm.iris_colour
+  let blue = scale rim iris_colour
   in mix (mix sclera blue iris) (splat 0.02) pupil
 
 ---------------------------------------------------------------------

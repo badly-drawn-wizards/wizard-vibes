@@ -36,9 +36,9 @@ def cloud_colour (colour: vec3) (h: f32) : vec3 = vec 0.04 0.045 0.09 +^ scale (
 -- for the glow around it, so the two always match. 0 for materials that do
 -- not glow.
 def glow_colour (prm: params) (m: i32) : vec3 =
-  if m == m_potion then prm.potion_colour_1
-  else if m == m_potion + 1 then prm.potion_colour_2
-  else if m == m_potion + 2 then prm.potion_colour_3
+  if m == m_potion then potion_colour_1
+  else if m == m_potion + 1 then potion_colour_2
+  else if m == m_potion + 2 then potion_colour_3
   else splat 0
 
 -- The potions' liquids glow in a thin halo, coloured by whichever liquid is

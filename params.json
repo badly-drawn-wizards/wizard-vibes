@@ -146,6 +146,7 @@
             {
               "id": "iris_colour",
               "label": "Eyes",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.25,
@@ -166,6 +167,7 @@
             {
               "id": "brow_colour",
               "label": "Eyebrows",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.82,
@@ -209,6 +211,7 @@
             {
               "id": "band_colour",
               "label": "Hat band",
+              "compile": true,
               "kind": "color",
               "default": [
                 1,
@@ -243,6 +246,7 @@
             {
               "id": "gold_colour",
               "label": "Gold (cradle, buckle)",
+              "compile": true,
               "kind": "color",
               "default": [
                 1,
@@ -253,6 +257,7 @@
             {
               "id": "leather_colour",
               "label": "Leather",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.17,
@@ -263,6 +268,7 @@
             {
               "id": "tome_colour",
               "label": "Tome",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.32,
@@ -273,6 +279,7 @@
             {
               "id": "wood_colour",
               "label": "Staff wood",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.4,
@@ -345,6 +352,17 @@
               "max": 3,
               "step": 0.01,
               "default": 1
+            },
+            {
+              "id": "shield_colour",
+              "label": "Shield",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.3,
+                0.6,
+                1
+              ]
             }
           ]
         },
@@ -372,6 +390,7 @@
             {
               "id": "potion_colour_1",
               "label": "Left",
+              "compile": true,
               "kind": "color",
               "default": [
                 1,
@@ -382,6 +401,7 @@
             {
               "id": "potion_colour_2",
               "label": "Middle",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.2,
@@ -392,6 +412,7 @@
             {
               "id": "potion_colour_3",
               "label": "Right",
+              "compile": true,
               "kind": "color",
               "default": [
                 0.65,
@@ -1049,6 +1070,13 @@
           "label": "Trees (2-6 ms at 1080p)",
           "kind": "checkbox",
           "default": true,
+          "compile": true
+        },
+        {
+          "id": "full_enemies",
+          "label": "Enemies as detailed as him (slow)",
+          "kind": "checkbox",
+          "default": false,
           "compile": true
         },
         {

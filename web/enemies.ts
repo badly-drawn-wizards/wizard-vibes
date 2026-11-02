@@ -10,7 +10,7 @@
 // under 8 the seconds it has still to appear, 8 and over 8 plus the seconds
 // since its defeat.
 
-import { BURST, FIRE, HIS, STRIKE, type Spells, type Target, WIND } from "./spells.ts";
+import { BURST, FIRE, HIS, MARK, STRIKE, type Spells, type Target, WIND } from "./spells.ts";
 
 type V3 = [number, number, number];
 
@@ -54,6 +54,9 @@ export function enemyAt(seed: number, gen: number, i: number, secs: number, him:
   return { pos: add(him, off), yaw: Math.atan2(-off[0], -off[2]) };
 }
 
+// His shield, raised (shield_centre and shield_radius in fut/shading.fut).
+const SHIELD: Target = { c: [0, 0.85, 0], r: 1.85, side: HIS };
+
 // The spheres that stand for a wizard on his platform at `pos` (the
 // platform's top): his body, and the platform.
 export function spheres(pos: V3, side: number): Target[] {
@@ -76,8 +79,16 @@ export class Enemies {
   defeated = 0; // enemies he has defeated
   hurt = 99; // seconds since he was last hit
   down = -1; // seconds since he was defeated, or -1
+  shielded = false; // his shield is up: it takes what would hit him
   onChange: () => void = () => {};
+  // (for the sound and the shield)
+  onBlock: () => void = () => {};
+  onHurt: () => void = () => {};
+  onDefeat: (pos: V3) => void = () => {};
+  onAppear: (pos: V3) => void = () => {};
+  onCast: (kind: number, pos: V3) => void = () => {};
   private slots: Slot[] = Array.from({ length: MAX }, (_, i) => ({ gen: 0, hp: HP, appear: 0, down: -1, castIn: 5 + i * 2 }));
+  private seen = { seed: 0, secs: 0, him: [0, 0, 0] as V3 }; // as of the last targets()
   private last: V3 | null = null; // where he was last frame
   private vel: V3 = [0, 0, 0]; // how fast he is going, smoothed
 
@@ -91,9 +102,11 @@ export class Enemies {
     return f;
   }
 
-  // The spheres spells can hit: his, and the first n enemies' that stand.
+  // The spheres spells can hit: his (or his shield), and the first n
+  // enemies' that stand.
   targets(n: number, seed: number, secs: number, him: V3): Target[] {
-    const out = this.down < 0 ? spheres(him, HIS) : [];
+    const out = this.down >= 0 ? [] : this.shielded ? [{ ...SHIELD, c: add(him, SHIELD.c) }] : spheres(him, HIS);
+    this.seen = { seed, secs, him };
     this.slots.slice(0, n).forEach((s, i) => {
       if (s.down < 0 && s.appear < 0.5) out.push(...spheres(enemyAt(seed, s.gen, i, secs, him).pos, i));
     });
@@ -105,8 +118,14 @@ export class Enemies {
     const damage = DAMAGE[kind] ?? 0;
     if (side === HIS) {
       if (this.down >= 0) return;
+      if (this.shielded) {
+        this.onBlock();
+        return;
+      }
+      if (damage === 0) return;
       this.hp = Math.max(0, this.hp - damage);
       this.hurt = 0;
+      this.onHurt();
       if (this.hp === 0) this.down = 0;
     } else {
       const s = this.slots[side];
@@ -115,6 +134,8 @@ export class Enemies {
       if (s.hp <= 0) {
         s.down = 0;
         this.defeated++;
+        const { seed, secs, him } = this.seen;
+        this.onDefeat(enemyAt(seed, s.gen, side, secs, him).pos);
       }
     }
     this.onChange();
@@ -141,7 +162,10 @@ export class Enemies {
     this.slots.forEach((s, i) => {
       if (s.down >= 0) {
         s.down += dt;
-        if (s.down >= RESPAWN) Object.assign(s, { gen: s.gen + 1, hp: HP, appear: APPEAR, down: -1, castIn: 4 + 4 * Math.random() });
+        if (s.down >= RESPAWN) {
+          Object.assign(s, { gen: s.gen + 1, hp: HP, appear: APPEAR, down: -1, castIn: 4 + 4 * Math.random() });
+          if (i < n) this.onAppear(enemyAt(seed, s.gen, i, secs, him).pos);
+        }
         return;
       }
       s.appear = Math.max(0, s.appear - dt);
@@ -165,7 +189,10 @@ export class Enemies {
     // (off by up to 2.5 either way, mostly less)
     const miss = () => (Math.random() + Math.random() - 1) * 2.5;
     if (kind === STRIKE) {
-      spells.launch(STRIKE, orb, [0, 1, 0], i, add(him, [miss(), 0.6, miss()]));
+      // marked first, where he will be by the time it lands
+      const lead = 1.1;
+      const at = add(add(him, this.vel.map((v) => v * lead) as V3), [miss(), 0.6, miss()]);
+      if (spells.launch(MARK, orb, [0, 1, 0], i, at)) this.onCast(MARK, at);
       return;
     }
     const speed = kind === FIRE ? 30 : 24;
@@ -173,6 +200,6 @@ export class Enemies {
     const aim = add(add(chest, this.vel.map((v) => v * flight) as V3), [miss(), miss() / 2, miss()]);
     const d = [aim[0] - orb[0], aim[1] - orb[1], aim[2] - orb[2]];
     const len = Math.hypot(...d);
-    spells.launch(kind, orb, d.map((x) => x / len) as V3, i);
+    if (spells.launch(kind, orb, d.map((x) => x / len) as V3, i)) this.onCast(kind, orb);
   }
 }

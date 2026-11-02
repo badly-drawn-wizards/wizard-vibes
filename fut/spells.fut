@@ -11,6 +11,8 @@
 --   spell_burst   a fire bolt's explosion at (x, y, z)
 --   spell_gust    a wind blade's burst into small blades at (x, y, z); it
 --                 was moving at (a, b, c)
+--   spell_mark    where an enemy's strike will land, (x, y, z), when its
+--                 life is up (it then becomes the strike, from height b)
 --
 -- Every spell fades out over the last part of its life, so none vanishes
 -- while still visible; the seed makes each one a little different.
@@ -29,6 +31,7 @@ def spell_strike : i32 = 1
 def spell_wind : i32 = 2
 def spell_burst : i32 = 3
 def spell_gust : i32 = 4
+def spell_mark : i32 = 5
 
 -- Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 -- (distance, t, and how far beyond tmax the nearest point of the segment
@@ -182,6 +185,21 @@ def spell_light (fog: f32) (view_distance: f32) (secs: f32) (o: vec3) (d: vec3) 
             in scale env (scale (seen t behind 0.5) (scale (9 * core) (vec 0.85 0.9 1) +^ scale (0.8 * halo) (vec 0.55 0.6 1))
                                +^ scale (1.5 * ground * seen gt gb 2) (vec 0.6 0.65 1))
                  +^ scale (2 * ring * seen gt gb 3) (vec 0.7 0.8 1)
+          else if kind == spell_mark then
+            -- a red ring closing in on where the strike will land, turning,
+            -- brighter and faster to pulse as it comes; and a thread of
+            -- light down to it from the sky
+            let u = saturate (age / life)
+            let r = 2.2 - 1.3 * u
+            let point (k: i32) = let a = f32.i32 k * (2 * f32.pi / 20) + 2 * age
+                                 in p +^ vec (r * f32.cos a) 0 (r * f32.sin a)
+            let (dist, t, behind) = ray_polyline o d tmax 20 point
+            let (core, halo) = glow_line 0.03 0.15 dist
+            let (bd, bt, bb) = ray_segment o d tmax (vec p.x q.y p.z) p
+            let (bcore, bhalo) = glow_line 0.012 0.08 bd
+            let env = (0.4 + u) * (0.75 + 0.25 * f32.sin (age * (12 + 25 * u)))
+            in scale env (scale (seen t behind 0.5) (scale (3 * core) (vec 1 0.25 0.3) +^ scale (0.25 * halo) (vec 1 0.1 0.15))
+                          +^ scale (u * seen bt bb 0.5) (scale (1.5 * bcore) (vec 1 0.4 0.4) +^ scale (0.1 * bhalo) (vec 1 0.1 0.1)))
           else splat 0
 
 -- The light the spells add along the world-space ray o + t d, t in

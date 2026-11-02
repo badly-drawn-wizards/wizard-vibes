@@ -12,6 +12,7 @@ import "lightning"
 import "media"
 import "world"
 import "textures"
+import "glass"
 
 
 ---------------------------------------------------------------------
@@ -237,10 +238,10 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m == m_hat then
     let s = (hat_stars pose fp p).0
     in plain (mix pose.prm.hat_colour pose.prm.star_colour s) with emission = scale (pose.prm.star_glow * s) pose.prm.star_colour
-  else if m == m_gold then plain pose.prm.gold_colour with ks = 1.6 with shininess = 48 with metal = true
-  else if m == m_band then plain pose.prm.band_colour with ks = 1.6 with shininess = 48 with metal = true
+  else if m == m_gold then plain gold_colour with ks = 1.6 with shininess = 48 with metal = true
+  else if m == m_band then plain band_colour with ks = 1.6 with shininess = 48 with metal = true
   else if m == m_eye then plain (eye_albedo pose p) with ks = 1 with shininess = 150 with rim = false
-  else if m == m_brow then plain pose.prm.brow_colour
+  else if m == m_brow then plain brow_colour
   else if m == m_wood then
     plain (scale (0.75 + 0.25 * f32.sin (p.y * 45 + 3 * f32.sin (p.x * 40))) (vec 0.36 0.21 0.1))
   else if m == m_rock || m == m_ice || m == m_carpet then
@@ -275,7 +276,7 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m >= m_wall && m <= m_sandstone then structure_material pose fp m p
   else if m == m_leather then plain (leather_albedo pose fp p) with ks = 0.35 with shininess = 28
   else if m == m_cork then plain (cork_albedo fp p) with ks = 0.05
-  else if m == m_tome then plain pose.prm.tome_colour with ks = 0.15 with shininess = 16
+  else if m == m_tome then plain tome_colour with ks = 0.15 with shininess = 16
   else if m == m_pages then plain (vec 0.85 0.8 0.66)
   else if m >= m_potion && m < m_potion + 3 then
     -- the glowing liquid (its glass is drawn by `glass`)
@@ -300,7 +301,9 @@ def tree_material (trunk: vec3) (leaf: vec3) (needle: vec3) (m: i32) (w: vec3) :
     in plain (scale (0.55 + 0.9 * v) (if m == m_leaves then leaf else needle)) with ks = 0.12 with shininess = 12 with rim = false
 
 -- The enemies' materials (see enemies.fut), at point p of his space.
-def is_enemy (m: i32) : bool = m >= m_enemy && m < m_enemy + enemy_parts * max_enemies
+def is_enemy (m: i32) : bool =
+  (m >= m_enemy && m < m_enemy + enemy_parts * max_enemies)
+  || (full_enemies && m >= m_enemy_full && m < m_enemy_full + full_parts * max_enemies)
 
 -- An enemy's part (in its space, q), before what happens to it.
 def enemy_surface (lk: looks) (sheen: f32) (glow: f32) (tm: f32) (rock: (vec3, vec3, vec3)) (moss: vec3) (fp: f32) (part: i32) (q: vec3) : material =
@@ -319,15 +322,21 @@ def enemy_surface (lk: looks) (sheen: f32) (glow: f32) (tm: f32) (rock: (vec3, v
           else let halo = f32.exp (-(f32.max 0 (glyph_sdf (-tm) q.x q.z)) / 0.05)
                in mat with emission = scale ((0.25 + 0.06 * glow) * (5 * rune_paint (-tm) q + halo)) lk.circle
 
+-- (with full_enemies, the parts of his figure are shaded as his are, in
+-- the enemy's pose)
 #[noinline]
-def enemy_material (seed: i32) (fs: foes) (secs: f32) (tm: f32) (fl: flight) (rock: (vec3, vec3, vec3)) (moss: vec3)
-                   ((sheen, glow): (f32, f32)) (fp: f32) (m: i32) (p: vec3) : material =
-  let i = (m - m_enemy) / enemy_parts
-  let part = (m - m_enemy) % enemy_parts
-  let e = enemy_at seed (foe_state fs i) i secs fl
-  let lk = looks_of seed e.gen i
+def enemy_material (prm: params) (g: glow) (fs: foes) (secs: f32) (tm: f32) (fl: flight) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
+  let full = m >= m_enemy_full
+  let i = if full then (m - m_enemy_full) / full_parts else (m - m_enemy) / enemy_parts
+  let e = enemy_at prm.enemy_seed (foe_state fs i) i secs fl
+  let lk = looks_of prm.enemy_seed e.gen i
   let q = enemy_space fl e p
-  let mat = enemy_surface lk sheen glow tm rock moss fp part q
+  let mat =
+    if full_enemies && full
+    then let n = yaw_inv e.yaw (to_world_dir fl n)
+         in material (enemy_pose prm lk secs) g fp ((m - m_enemy_full) % full_parts) q n
+    else enemy_surface lk prm.sheen prm.rune_glow tm (prm.rock_dark, prm.rock_light, prm.rock_top) prm.moss_colour
+                       fp ((m - m_enemy) % enemy_parts) q
   -- appearing, it flashes in its circle's colour; defeated, it chars and
   -- smoulders as it falls, its circle going out
   in if e.appear > 0 then mat with emission = mat.emission +^ scale (2 * e.appear * e.appear) lk.circle
@@ -426,9 +435,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   let mat = if is_tree m
             then tree_material trunk_colour leaf_colour needle_colour m (to_world pose.fl p)
             else if is_enemy m
-            then enemy_material pose.prm.enemy_seed pose.foes pose.secs pose.tm pose.fl
-                                (pose.prm.rock_dark, pose.prm.rock_light, pose.prm.rock_top) pose.prm.moss_colour
-                                (pose.prm.sheen, pose.prm.rune_glow) fp m p
+            then enemy_material pose.prm g pose.foes pose.secs pose.tm pose.fl fp m p n
             else material pose g fp m p n
   let occ = if m == m_terrain then 1 else ambient_occlusion (dist vis pose) p ng
   let po = p +^ scale 0.002 ng
@@ -505,49 +512,91 @@ def glass_tint : vec3 = vec 0.93 0.97 1
 -- Distances (entry, exit) where the ray meets the orb; entry > exit on a miss.
 def orb_hit (pose: pose) (ro: vec3) (rd: vec3) : (f32, f32) = ray_sphere pose.orb orb_radius ro rd
 
--- Refraction of i at a surface with normal n facing against i, for the ratio
--- eta of refractive indices (from / to). Reflects on total internal reflection.
-def refract (i: vec3) (n: vec3) (eta: f32) : vec3 =
-  let cosi = -(dot n i)
-  let k = 1 - eta * eta * (1 - cosi * cosi)
-  in if k < 0 then reflect i n
-     else scale eta i +^ scale (eta * cosi - f32.sqrt k) n
+-- What a glass surface at p, met as fr describes, reflects towards the
+-- eye: the sky, and (by `shine`) highlights of the moon and the orb.
+def glass_reflection (pose: pose) (g: glow) (shine: f32) (p: vec3) (fr: interface) : vec3 =
+  let rr = fr.reflected
+  let to_orb = normalise (pose.orb -^ p)
+  let highlights = scale (2 * shine * pow (saturate (dot rr pose.moon)) 300) (vec 0.8 0.85 1)
+                   +^ scale (2.5 * shine * g.level * pow (saturate (dot rr to_orb)) 120) (vec 0.7 0.85 1)
+  in scale fr.f (sky pose (to_world_dir pose.fl rr)) +^ highlights
 
--- Schlick's approximation of the reflected fraction.
-def fresnel (ior: f32) (cosi: f32) : f32 =
-  let r0 = ((1 - ior) / (1 + ior)) ** 2
-  in r0 + (1 - r0) * pow (1 - saturate cosi) 5
+def potion_ior : f32 = 1.5
 
 -- The potions' glass, a thin wall rays pass through. Finds where the ray
--- (up to t_end) first meets it and returns what the wall adds there (a
--- Fresnel reflection of the sky, highlights from the moon and the orb, and a
--- faint rim) and what it lets through (Fresnel transmission, slightly
--- tinted). Only rays passing near the potions are traced.
+-- (up to t_end) first meets it and returns what the wall adds there (its
+-- reflection and a faint rim) and what it lets through (what neither of
+-- its faces reflects, slightly tinted). Only rays passing near the potions
+-- are traced.
 #[noinline] -- (few call sites: the whole pose is passed)
 def glass (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec3) =
   -- the potions' bounding sphere, in local space (body space leans)
   let c = from_body_space pose (potions_at (gear_of pose.prm))
-  let r = potions_radius + 0.02
-  let (enter, exit) = ray_sphere c r ro rd
+  let (enter, exit) = ray_sphere c (potions_radius + 0.02) ro rd
   in if enter > exit then (splat 0, splat 1) else
-  let t0 = f32.max 0.02 enter
-  let t1 = f32.min t_end exit
-  let (t, _, hit) =
-    loop (t, i, hit) = (t0, 0i32, false) while !hit && i < 64 && t < t1 do
-      let d = potion_glass pose (ro +^ scale t rd)
-      in if d < 0.0004 * t then (t, i + 1, true) else (t + d * 0.9, i + 1, false)
+  let (hit, t, n) = glass_hit (potion_glass pose) 64 ro rd (f32.max 0.02 enter) (f32.min t_end exit)
   in if !hit then (splat 0, splat 1) else
   let p = ro +^ scale t rd
-  let n = normal (\_ q -> potion_glass pose q) p
-  let n = if dot n rd > 0 then scale (-1) n else n
-  let cosi = saturate (-(dot n rd))
-  let f = 0.04 + 0.96 * pow (1 - cosi) 5
-  let rr = reflect rd n
-  let to_orb = normalise (pose.orb -^ p)
-  let highlights = scale (2 * pow (saturate (dot rr pose.moon)) 300) (vec 0.8 0.85 1)
-                   +^ scale (2.5 * g.level * pow (saturate (dot rr to_orb)) 120) (vec 0.7 0.85 1)
-  let added = scale f (sky pose (to_world_dir pose.fl rr)) +^ highlights +^ scale (0.08 * pow (1 - cosi) 2) (vec 0.6 0.7 0.9)
-  in (added, scale (1 - f) (vec 0.9 0.95 0.97))
+  let fr = fresnel_at potion_ior rd n
+  let cosi = saturate (-(dot fr.n rd))
+  let added = glass_reflection pose g 1 p fr +^ scale (0.08 * pow (1 - cosi) 2) (vec 0.6 0.7 0.9)
+  in (added, scale ((1 - fr.f) * (1 - fr.f)) (vec 0.9 0.95 0.97))
+
+---------------------------------------------------------------------
+-- The shield: a bubble round him, raised from the harness (pose.shield,
+-- 0 down .. 1 up; web/shield.ts). Glass-like (each face reflects by
+-- Fresnel), it glows at its rim and in a faint honeycomb, and flares and
+-- ripples each time it stops a spell (pose.shield_hit: the seconds since).
+
+def shield_centre : vec3 = vec 0 0.85 0
+def shield_radius : f32 = 1.85
+def shield_ior : f32 = 1.33
+
+def shield_sdf (pose: pose) (p: vec3) : f32 =
+  let q = p -^ shield_centre
+  let r = shield_radius * (0.25 + 0.75 * smoothstep 0 1 pose.shield)
+  -- (the ripple's slope stays under 0.25, so the field stays safe to trace)
+  let ripple = 0.02 * f32.exp (-4 * pose.shield_hit) * f32.sin (12 * q.y - 40 * pose.shield_hit)
+  in length q - r - ripple
+
+-- Distance to the edges of a grid of hexagons (apothem 0.5, one across
+-- per unit of u).
+def hex_edge (u: f32) (v: f32) : f32 =
+  let m (a: f32) (b: f32) = a - b * f32.floor (a / b)
+  let h = 0.8660254 -- (rows are sqrt 3 apart)
+  let (ax, ay) = (m u 1 - 0.5, m v (2 * h) - h)
+  let (bx, by) = (m (u - 0.5) 1 - 0.5, m (v - h) (2 * h) - h)
+  let (gx, gy) = if ax * ax + ay * ay < bx * bx + by * by then (ax, ay) else (bx, by)
+  in 0.5 - f32.max (0.5 * f32.abs gx + h * f32.abs gy) (f32.abs gx)
+
+#[noinline] -- (few call sites: the whole pose is passed)
+def shield_layer (pose: pose) (g: glow) (ro: vec3) (rd: vec3) (t_end: f32) : (vec3, vec3) =
+  let (enter, exit) = ray_sphere shield_centre (shield_radius + 0.05) ro rd
+  in if pose.shield <= 0.005 || enter > exit || exit < 0 then (splat 0, splat 1) else
+  let sdf = shield_sdf pose
+  let t1 = f32.min t_end exit
+  -- what one face adds: its reflection, and its glow
+  let face (t: f32) (n: vec3) =
+    let p = ro +^ scale t rd
+    let fr = fresnel_at shield_ior rd n
+    let q = normalise (p -^ shield_centre)
+    -- (30 cells round, so the grid meets itself)
+    let k = 30 / (2 * f32.pi)
+    let cells = smoothstep 0.05 0 (hex_edge (k * f32.atan2 q.z q.x) (k * f32.asin q.y)) * keep (t * pose.pix) 0.2
+    let rim = pow (1 - saturate (-(dot fr.n rd))) 3
+    let flare = 2 * f32.exp (-5 * pose.shield_hit)
+    let glow = scale (pose.shield * (0.02 + 0.6 * rim + 0.09 * cells + flare * (0.15 + rim))) shield_colour
+    -- (an energy skin, not glass: sharp highlights of the moon and the
+    -- orb, which is inside, only made blots on it)
+    in (glass_reflection pose g 0.1 p fr +^ glow, 1 - fr.f)
+  -- the near face, then the far one seen through it (a thin skin: each
+  -- face reflects, neither bends the ray)
+  let (front, tf, nf) = glass_hit sdf 32 ro rd (f32.max 0.02 enter) t1
+  in if !front then (splat 0, splat 1) else
+  let (a1, k1) = face tf nf
+  let (back, tb, nb) = glass_hit sdf 32 ro rd (tf + 0.02) t1
+  let (a2, k2) = if back then face tb nb else (splat 0, 1)
+  in (a1 +^ scale k1 a2, splat (k1 * k2))
 
 -- Where a reflected path starts: (exists, point, direction, weight).
 type reflection = (bool, vec3, vec3, f32)
@@ -578,7 +627,7 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       -- rays skip: see march_enemies)
       let (t_terrain, m_land) =
         if inside || enters || !(has vis layers_enemies) || pose.prm.enemies <= 0 then (t_terrain, m_land)
-        else let (te, me) = march_enemies pose.prm.enemies pose.prm.enemy_seed pose.foes pose.secs pose.fl ro rd (f32.min tmax t_terrain)
+        else let (te, me) = march_enemies pose.prm pose.foes pose.secs pose.fl ro rd (f32.min tmax t_terrain)
              in if te < t_terrain then (te, me) else (t_terrain, m_land)
       let local_end = f32.max 0 (ray_sphere occluder_centre local_radius ro rd).1
       let local_max = f32.min tmax (f32.min t_terrain local_end)
@@ -592,6 +641,11 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
         if inside || !(has vis layers_gear) then (splat 0, splat 1) else glass pose g ro rd (if m >= 0 then t else local_max)
       let acc = acc +^ (w *^ glass_added)
       let w = w *^ glass_through
+      -- his shield, if raised (outside the orb, the potions and him)
+      let (shield_added, shield_through) =
+        if inside then (splat 0, splat 1) else shield_layer pose g ro rd (if m >= 0 then t else tmax)
+      let acc = acc +^ (w *^ shield_added)
+      let w = w *^ shield_through
       let first = if seg > 0 then first else if m >= 0 then t else if enters then t_in else f32.inf
       let acc = acc +^ (w *^ emitted) +^ (scale tr w *^ cloud_rad)
       -- whatever lies beyond this segment is seen through its media
@@ -602,14 +656,14 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
            -- into the glass
            let p = ro +^ scale t_in rd
            let n = normalise (p -^ pose.orb)
-           let f = fresnel pose.prm.orb_ior (-(dot n rd))
-           let refl = if refl.0 then refl else (true, p, reflect rd n, w.x * f)
-           in (p, refract rd n (1 / pose.prm.orb_ior), scale (1 - f) (w *^ glass_tint), acc, true, false, refl, first)
+           let fr = fresnel_at pose.prm.orb_ior rd n
+           let refl = if refl.0 then refl else (true, p, fr.reflected, w.x * fr.f)
+           in (p, fr.refracted, scale (1 - fr.f) (w *^ glass_tint), acc, true, false, refl, first)
          else if inside && t >= t_out then
            -- out of the glass
            let p = ro +^ scale t_out rd
            let n = normalise (p -^ pose.orb)
-           in (p, refract rd (scale (-1) n) pose.prm.orb_ior, w *^ glass_tint, acc, false, false, refl, first)
+           in (p, (fresnel_at (1 / pose.prm.orb_ior) rd n).refracted, w *^ glass_tint, acc, false, false, refl, first)
          else (ro, rd, w, acc +^ (w *^ sky pose (to_world_dir pose.fl rd)), inside, true, refl, first)
   in (acc, refl, first)
 

@@ -39,6 +39,10 @@ def m_carpet : i32 = 34
 def m_enemy : i32 = 40
 def enemy_parts : i32 = 10
 def max_enemies : i32 = 6
+-- (and with full_enemies, their figures: full_parts ids each, from
+-- m_enemy_full, offset by his figure's own material ids, all under 25)
+def m_enemy_full : i32 = 100
+def full_parts : i32 = 25
 
 ---------------------------------------------------------------------
 -- Layers. Every part of the scene belongs to one of the layers_* (generated

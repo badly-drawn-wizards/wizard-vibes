@@ -19,12 +19,26 @@
                 border-radius: 4px; padding: 2px 6px; cursor: pointer; }
   #hud button[aria-pressed="true"] { color: var(--fg); border-color: var(--fg); }
   #hud button:disabled { opacity: 0.35; cursor: not-allowed; }
-  #combat { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
-            align-items: center; background: rgb(5 4 13 / 0.6); padding: 6px 12px; border-radius: 6px;
-            backdrop-filter: blur(4px); color: var(--fg); }
-  #combat .hp { width: 160px; height: 8px; border: 1px solid #2c2950; border-radius: 4px; overflow: hidden; }
-  #combat .hp span { display: block; height: 100%; background: linear-gradient(90deg, #c0283c, #ff6a5a);
-                     transition: width 0.2s; }
+  #vitals { position: fixed; bottom: 16px; left: 16px; display: grid; gap: 6px; color: var(--fg);
+            background: rgb(5 4 13 / 0.6); padding: 8px 12px; border-radius: 6px; backdrop-filter: blur(4px); }
+  #vitals[hidden], #vitals .row[hidden], #crosshair[hidden] { display: none; }
+  #vitals .row { display: flex; gap: 8px; align-items: center; }
+  #vitals .label { width: 1em; text-align: center; }
+  #vitals .bar { width: min(200px, 40vw); height: 9px; border: 1px solid #2c2950; border-radius: 4px; overflow: hidden; }
+  #vitals .bar span { display: block; height: 100%; transition: width 0.15s; }
+  #vitals .health .bar span { background: linear-gradient(90deg, #c0283c, #ff6a5a); }
+  #vitals .mana .bar span { background: linear-gradient(90deg, #2a4fd0, #6fb4ff); }
+  #vitals .mana.short .bar { border-color: #ff6a5a; }
+  #vitals .score { font-size: 0.85em; color: var(--dim); }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+               pointer-events: none; opacity: 0.75;
+               background: linear-gradient(#fff, #fff) center / 2px 7px no-repeat,
+                           linear-gradient(#fff, #fff) center / 7px 2px no-repeat; }
+  #crosshair::before { content: ""; position: absolute; inset: 0; border: 1.5px solid rgb(255 255 255 / 0.8);
+                       border-radius: 50%; mask: radial-gradient(circle, transparent 0 5px, #000 5px); }
+  #crosshair.locked { opacity: 1; }
+  #crosshair.locked::before { border-color: #ff5a6a; border-radius: 3px; transform: rotate(45deg); }
+  #crosshair.shielded { opacity: 0.3; }
   #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0;
           background: radial-gradient(ellipse at center, transparent 45%, rgb(170 10 20 / 0.85)); }
   #hud select { font: inherit; color: var(--fg); background: #0b0a1c; border: 1px solid #2c2950;
@@ -106,6 +120,7 @@
     <button data-scale="0.25">¼</button><button data-scale="0.5">½</button><button data-scale="1">1×</button>
   </span>
   <button id="music" type="button">♪ off</button>
+  <button id="sfx" type="button">fx on</button>
   <select id="platform" title="What he flies on">
     <option value="0">Rock</option><option value="1">Ice</option><option value="2">Magic carpet</option>
   </select>
@@ -114,7 +129,12 @@
   </span>
   <span id="quality"></span>
 </div>
-<div id="combat" hidden><span class="hp" title="Health"><span></span></span><span class="score"></span></div>
+<div id="vitals">
+  <div class="row health" title="Health"><span class="label">♥</span><span class="bar"><span></span></span></div>
+  <div class="row mana" title="Mana"><span class="label">✦</span><span class="bar"><span></span></span></div>
+  <div class="score"></div>
+</div>
+<div id="crosshair"></div>
 <div id="hurt"></div>
 <button id="drawer-toggle" type="button" title="Parameters">⚙</button>
 <aside id="drawer"><div id="params"></div></aside>

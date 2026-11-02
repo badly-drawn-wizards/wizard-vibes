@@ -23,6 +23,7 @@ const ROWS: Record<Device, [string, string][]> = {
     ["Boost", key("Shift")],
     ["Spell", key("1") + key("2") + key("3")],
     ["Cast", key("Space")],
+    ["Shield", key("R") + " (hold)"],
     ["Camera", "drag · wheel"],
     ["Pause", key("P")],
     ["Music", key("M")],
@@ -32,9 +33,10 @@ const ROWS: Record<Device, [string, string][]> = {
     ["Fly", stickGlyph("L")],
     ["Camera", stickGlyph("R")],
     ["Climb / descend", shoulder("RT") + " / " + shoulder("LT")],
-    ["Boost", shoulder("LB") + " / " + stickGlyph("L") + "↓"],
+    ["Boost", stickGlyph("L") + "↓"],
     ["Spell", face("X") + face("A") + face("B")],
     ["Cast", shoulder("RB")],
+    ["Shield", shoulder("LB") + " (hold)"],
   ],
 };
 

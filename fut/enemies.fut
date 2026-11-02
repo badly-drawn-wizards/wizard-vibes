@@ -14,15 +14,21 @@
 -- They are drawn in the layer layers_enemies, with materials m_enemy +
 -- enemy_parts * i + part (part_* below). A simpler figure than his: robe,
 -- arms, head and nose, beard, hat and band, staff and orb; one arm on the
--- staff, the other raised and lowered as if casting.
+-- staff, the other raised and lowered as if casting. Or, with full_enemies
+-- (compile-time), his own figure, at rest, in their colours and
+-- proportions (materials m_enemy_full + full_parts * i + his material).
 
 import "vec3"
 import "sdf"
 import "hash"
 import "world"
 import "params"
+import "config"
+import "rig"
+import "figure"
 open import "materials"
 open import "platform"
+open import "foes"
 
 def part_robe : i32 = 0
 def part_skin : i32 = 1
@@ -36,18 +42,8 @@ def part_side : i32 = 8 -- the rest of the platform
 
 -- Everything about an enemy lies within this sphere of its own space
 -- (the platform below, the hat's tip above).
-def enemy_centre : vec3 = vec 0 (-0.1) 0
-def enemy_radius : f32 = 2.8
-
--- The states of the enemies, from the harness: per enemy, 16 times its
--- generation (how many enemies have had its place before it) plus its
--- phase: under 8, the seconds it has still to appear; 8 and over, 8 plus
--- the seconds since it was defeated.
-type foes = (f32, f32, f32, f32, f32, f32)
-
-def foe_state (fs: foes) (i: i32) : f32 =
-  if i == 0 then fs.0 else if i == 1 then fs.1 else if i == 2 then fs.2
-  else if i == 3 then fs.3 else if i == 4 then fs.4 else fs.5
+def enemy_centre : vec3 = vec 0 0.1 0
+def enemy_radius : f32 = 3
 
 def appear_time : f32 = 1.5 -- seconds an enemy takes to appear
 def fall_time : f32 = 3 -- and a defeated one to fall out of sight
@@ -129,7 +125,8 @@ def enemy_orb : vec3 = vec 0.45 2.05 0.2
 
 -- The figure, in its own space: (distance, part).
 def sd_enemy_figure (lk: looks) (secs: f32) (q: vec3) : (f32, i32) =
-  let robe = sd_round_cone_ab q (vec 0 0.06 0) (vec 0 1.32 0) lk.hem 0.15
+  -- (cut flat at the platform: the cone's rounded foot poked through the carpet)
+  let robe = f32.max (sd_round_cone_ab q (vec 0 0.06 0) (vec 0 1.32 0) lk.hem 0.15) (-q.y)
   -- one hand on the staff, the other raised and lowered as if casting
   let cast = 0.5 + 0.5 * f32.sin (1.3 * secs + lk.phase)
   let hand = vec (-0.3) (1.12 + 0.38 * cast) (0.28 + 0.12 * cast)
@@ -148,11 +145,28 @@ def sd_enemy_figure (lk: looks) (secs: f32) (q: vec3) : (f32, i32) =
   in (cloth, part_robe) |> umin (skin, part_skin) |> umin (beard, part_beard) |> umin (hat, part_hat)
      |> umin (band, part_band) |> umin (staff, part_staff) |> umin (orb, part_orb)
 
--- The enemies near his space's point p (n of them; tagged materials).
+-- With full_enemies: the pose of an enemy with looks lk (his, at rest,
+-- breathing in its own time, in its colours and proportions).
+def enemy_pose (prm: params) (lk: looks) (secs: f32) : pose =
+  let prm = prm with robe_colour = lk.robe with hat_colour = lk.hat with skin_colour = lk.skin
+                with beard_tint = lk.beard with robe_hem = lk.hem + 0.06 with hat_droop = lk.droop
+  in pose_at (secs + lk.phase) prm on_path
+
+-- The figure of enemy i (looks lk), at q in its space: (distance, material).
+def enemy_figure (prm: params) (i: i32) (lk: looks) (secs: f32) (q: vec3) : hit =
+  let m = m_enemy + enemy_parts * i
+  in if full_enemies
+     then let ep = enemy_pose prm lk secs
+          let (d, fm) = bounded_figure figure_layers ep 0.1 q
+          in (d, m_enemy_full + full_parts * i + hit_material fm) |> umin (sd_sphere (q -^ ep.orb) orb_radius, m + part_orb)
+     else let (d, part) = sd_enemy_figure lk secs q in (d, m + part)
+
+-- The enemies near his space's point p (tagged materials).
 #[noinline]
-def enemies_dist (n: i32) (seed: i32) (fs: foes) (secs: f32) (fl: flight) (p: vec3) : hit =
-  tag layers_enemies <|
-  loop best = nothing for i < i32.min n max_enemies do
+def enemies_dist (prm: params) (fs: foes) (secs: f32) (fl: flight) (p: vec3) : hit =
+  let seed = prm.enemy_seed
+  in tag layers_enemies <|
+  loop best = nothing for i < i32.min prm.enemies max_enemies do
     let e = enemy_at seed (foe_state fs i) i secs fl
     in if !(shown e) then best else
     let q = enemy_space fl e p
@@ -161,18 +175,18 @@ def enemies_dist (n: i32) (seed: i32) (fs: foes) (secs: f32) (fl: flight) (p: ve
     in if bound > f32.min 0.3 best.0 then umin best (bound, m) else
     let lk = looks_of seed e.gen i
     let (pd, pm) = platform_exact lk.kind secs q
-    let (fd, fpart) = sd_enemy_figure lk secs q
-    let h = if fd < pd then (e.size * fd, m + fpart) else (e.size * pd, m + if pm == m_ground then part_top else part_side)
+    let (fd, fm) = enemy_figure prm i lk secs q
+    let h = if fd < pd then (e.size * fd, fm) else (e.size * pd, m + if pm == m_ground then part_top else part_side)
     in umin best h
 
 -- Sphere-traces the enemies alone along ro + t rd up to tmax: (distance,
 -- tagged material), or infinity. Only the stretch of the ray through their
 -- bounding spheres is marched (most rays miss them all, at the cost of a
 -- ray-sphere test each).
-def march_enemies (n: i32) (seed: i32) (fs: foes) (secs: f32) (fl: flight) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
+def march_enemies (prm: params) (fs: foes) (secs: f32) (fl: flight) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
   let (t0, t1) =
-    loop (t0, t1) = (f32.inf, -f32.inf) for i < i32.min n max_enemies do
-      let e = enemy_at seed (foe_state fs i) i secs fl
+    loop (t0, t1) = (f32.inf, -f32.inf) for i < i32.min prm.enemies max_enemies do
+      let e = enemy_at prm.enemy_seed (foe_state fs i) i secs fl
       -- (tumbling moves the centre round the axis: a wider sphere covers it)
       let c = to_local_dir fl (e.pos +^ tumble_axis -^ fl.pos)
       let (a, b) = ray_sphere c (e.size * enemy_radius + 0.6) ro rd
@@ -182,6 +196,6 @@ def march_enemies (n: i32) (seed: i32) (fs: foes) (secs: f32) (fl: flight) (ro: 
   let (t, _, hit, m) =
     loop (t, i, hit, m) = (f32.max 0.02 t0, 0i32, false, 0i32)
     while i < 128 && t < t1 && !hit do
-      let (d, mat) = enemies_dist n seed fs secs fl (ro +^ scale t rd)
+      let (d, mat) = enemies_dist prm fs secs fl (ro +^ scale t rd)
       in if d < 0.0005 * t then (t, i + 1, true, mat) else (t + d, i + 1, false, m)
   in if hit then (t, m) else (f32.inf, 0)

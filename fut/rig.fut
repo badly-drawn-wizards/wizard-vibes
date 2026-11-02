@@ -6,7 +6,7 @@ import "vec3"
 import "params"
 import "anim"
 import "world"
-import "enemies"
+import "foes"
 
 -- Wizard
 
@@ -73,6 +73,7 @@ type pose = { tm: f32, secs: f32, fl: flight
             , orb_boost: f32 -- its glow, flaring as a spell is cast
             , spell: i32 -- the spell in hand: what goes on in the orb (0 fire, 1 lightning, 2 wind)
             , foes: foes -- the enemies' states
+            , shield: f32, shield_hit: f32 -- his shield (see shield_layer in shading.fut)
             , l_shoulder: vec3, l_elbow: vec3, l_wrist: vec3
             -- the left hand's grip on the staff, the staff's axis there, and
             -- the palm (on the side facing the elbow)
@@ -90,13 +91,15 @@ type pose = { tm: f32, secs: f32, fl: flight
 -- since the last cast (for the thrust and the orb's flare); spell is the
 -- spell in hand (0 fire, 1 lightning, 2 wind), which colours the orb.
 --
--- foe0 .. foe5: the enemies' states (see foes in enemies.fut).
+-- shield: how far his shield is raised (0..1); shield_hit: the seconds
+-- since it last stopped a spell. foe0 .. foe5: the enemies' states (see
+-- foes.fut).
 type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32, climb: f32,
-              staff: f32, sx: f32, sy: f32, sz: f32, flash: f32, spell: f32,
+              staff: f32, sx: f32, sy: f32, sz: f32, flash: f32, spell: f32, shield: f32, shield_hit: f32,
               foe0: f32, foe1: f32, foe2: f32, foe3: f32, foe4: f32, foe5: f32}
 
 def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0, climb = 0,
-                       staff = 0, sx = 0, sy = 0, sz = 1, flash = 10, spell = 1,
+                       staff = 0, sx = 0, sy = 0, sz = 1, flash = 10, spell = 1, shield = 0, shield_hit = 10,
                        foe0 = 0, foe1 = 0, foe2 = 0, foe3 = 0, foe4 = 0, foe5 = 0}
 
 def flight_of (prm: params) (dr: drive) (secs: f32) : flight =
@@ -200,4 +203,5 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
      , l_shoulder, l_elbow, l_wrist, l_grip, l_axis, l_palm, r_shoulder, r_elbow, r_wrist
      , staff_x = column (vec 1 0 0), staff_y = column (vec 0 1 0), staff_z = column (vec 0 0 1), staff_t
      , orb = held orb_pos, orb_tint, bolt_tint, orb_boost, spell
+     , shield = dr.shield, shield_hit = dr.shield_hit
      , foes = (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5) }

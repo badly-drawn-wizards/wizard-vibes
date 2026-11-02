@@ -114,6 +114,7 @@ import "scene"
 import "collide"
 import "config"
 import "music"
+import "sfx"
 
 -- dr: free flight's state, from the harness (or on the flight path);
 -- spells: the spells in flight (see spells.fut).
@@ -132,6 +133,12 @@ entry spell_limit (_: i32) : i32 = max_spells
 -- rate samples a second; and the loop's length (see music.fut).
 entry sound (t0: f32) (rate: f32) (n: i32) : []f32 = sound_chunk t0 rate (i64.i32 n)
 entry music_period (_: i32) : f32 = period
+
+-- Sound effects: effect k's n stereo samples at rate (interleaved), how
+-- long each is, and how many there are (see sfx.fut).
+entry sfx (k: i32) (rate: f32) (n: i32) : []f32 = sfx_samples k rate (i64.i32 n)
+entry sfx_seconds (k: i32) : f32 = sfx_length k
+entry sfx_kinds (_: i32) : i32 = sfx_count
 `;
 }
 

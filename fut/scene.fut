@@ -20,7 +20,7 @@ open import "enemies"
 -- The enemies (see enemies.fut), in the layers of `mask`.
 def enemies (mask: i32) (pose: pose) (p: vec3) : hit =
   if !(has mask layers_enemies) || pose.prm.enemies <= 0 then nothing
-  else enemies_dist pose.prm.enemies pose.prm.enemy_seed pose.foes pose.secs pose.fl p
+  else enemies_dist pose.prm pose.foes pose.secs pose.fl p
 
 -- His platform, in the layer of the rock (see platform.fut).
 def rock (pose: pose) (p: vec3) : hit = platform pose.prm.platform pose.secs p |> tag layers_rock
