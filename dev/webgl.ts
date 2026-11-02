@@ -22,7 +22,7 @@ import { makePortable } from "../web/wgsl-portable.ts";
 import { allParams, loadSchema, type Param } from "./params.ts";
 
 // The drive record's fields (see fut/rig.fut), as Futhark orders them.
-const DRIVE = ["ax", "ay", "az", "climb", "flash", "foe0", "foe1", "foe2", "foe3", "foe4", "foe5", "free", "heading", "shield", "shield_hit", "spell", "staff", "sx", "sy", "sz", "turn", "x", "y", "z"];
+const DRIVE = ["arena_x", "arena_y", "arena_z", "ax", "ay", "az", "climb", "flash", "foe0", "foe1", "foe2", "foe3", "foe4", "foe5", "free", "heading", "shield", "shield_hit", "spell", "staff", "sx", "sy", "sz", "turn", "x", "y", "z"];
 const DRIVE_BOOL = new Set(["free"]);
 
 export interface GlField {

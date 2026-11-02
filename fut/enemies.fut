@@ -2,8 +2,10 @@
 -- (see platform.fut) with a magic circle of its own colour, and looks of
 -- its own (robe, hat, beard and skin colours, the hat's height and droop,
 -- the beard's length), all hashed from the seed and its number. Where they
--- are is a pure function of the time and his flight: each circles him in
--- the world at its own distance, height and speed, turned to face him.
+-- are is a pure function of the time, the arena (a point in the world the
+-- harness keeps where the fight is: see foes.fut) and where he is: each
+-- circles the arena at its own distance, height and speed, turned to face
+-- him, so he can fly round them.
 --
 -- Their fights are run by the harness (web/enemies.ts), which passes each
 -- one's state as a float (see foe_of): how many times it has been
@@ -59,7 +61,8 @@ type enemy = {pos: vec3, yaw: f32, gen: i32, appear: f32, dying: f32, size: f32,
 
 def tumble_axis : vec3 = vec 0 0.5 0
 
-def enemy_at (seed: i32) (state: f32) (i: i32) (secs: f32) (fl: flight) : enemy =
+def enemy_at (seed: i32) (fs: foes) (i: i32) (secs: f32) (fl: flight) : enemy =
+  let state = foe_state fs i
   let gf = f32.floor (state / 16)
   let phase = state - 16 * gf
   let gen = i32.f32 gf
@@ -76,7 +79,9 @@ def enemy_at (seed: i32) (state: f32) (i: i32) (secs: f32) (fl: flight) : enemy 
   -- away at the end; a new one grows in)
   let fall = if dying >= 0 then 2.5 * dying * dying else 0
   let size = if dying >= 0 then smoothstep fall_time (fall_time - 1) dying else 1 - 0.95 * appear * appear
-  in { pos = fl.pos +^ off -^ vec 0 fall 0, yaw = f32.atan2 (-off.x) (-off.z), gen, appear, dying, size
+  let pos = fs.arena +^ off
+  let to_him = fl.pos -^ pos
+  in { pos = pos -^ vec 0 fall 0, yaw = f32.atan2 to_him.x to_him.z, gen, appear, dying, size
      , tumble = if dying >= 0 then 1.4 * dying + 0.5 * dying * dying else 0 }
 
 -- Whether it is drawn at all.
@@ -167,7 +172,7 @@ def enemies_dist (prm: params) (fs: foes) (secs: f32) (fl: flight) (p: vec3) : h
   let seed = prm.enemy_seed
   in tag layers_enemies <|
   loop best = nothing for i < i32.min prm.enemies max_enemies do
-    let e = enemy_at seed (foe_state fs i) i secs fl
+    let e = enemy_at seed fs i secs fl
     in if !(shown e) then best else
     let q = enemy_space fl e p
     let bound = e.size * (length (q -^ enemy_centre) - enemy_radius)
@@ -186,7 +191,7 @@ def enemies_dist (prm: params) (fs: foes) (secs: f32) (fl: flight) (p: vec3) : h
 def march_enemies (prm: params) (fs: foes) (secs: f32) (fl: flight) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
   let (t0, t1) =
     loop (t0, t1) = (f32.inf, -f32.inf) for i < i32.min prm.enemies max_enemies do
-      let e = enemy_at prm.enemy_seed (foe_state fs i) i secs fl
+      let e = enemy_at prm.enemy_seed fs i secs fl
       -- (tumbling moves the centre round the axis: a wider sphere covers it)
       let c = to_local_dir fl (e.pos +^ tumble_axis -^ fl.pos)
       let (a, b) = ray_sphere c (e.size * enemy_radius + 0.6) ro rd

@@ -328,7 +328,7 @@ def enemy_surface (lk: looks) (sheen: f32) (glow: f32) (tm: f32) (rock: (vec3, v
 def enemy_material (prm: params) (g: glow) (fs: foes) (secs: f32) (tm: f32) (fl: flight) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
   let full = m >= m_enemy_full
   let i = if full then (m - m_enemy_full) / full_parts else (m - m_enemy) / enemy_parts
-  let e = enemy_at prm.enemy_seed (foe_state fs i) i secs fl
+  let e = enemy_at prm.enemy_seed fs i secs fl
   let lk = looks_of prm.enemy_seed e.gen i
   let q = enemy_space fl e p
   let mat =

@@ -37,6 +37,7 @@ export class Combat {
   private sfx: Sfx;
   private fizzled = -1; // when the last fizzle sounded (holding the key does not drone)
   private here: { him: V3; dir: V3 } = { him: [0, 0, 0], dir: [0, 0, 1] };
+  private started = false; // the fight has an arena (it starts with the first enemies)
   private el = {
     vitals: document.getElementById("vitals")!,
     health: document.querySelector<HTMLElement>("#vitals .health")!,
@@ -72,10 +73,20 @@ export class Combat {
     });
   }
 
+  // Starts the fight afresh on the next update (once the view has settled:
+  // the arena goes where he then looks).
+  restart(): void {
+    this.started = false;
+  }
+
   // The fight from the start: full health and mana, no spells in flight,
   // a new set of enemies.
   reset(): void {
-    this.enemies.reset();
+    this.started = true;
+    // (round a point ahead, where he looks)
+    const [x, , z] = this.here.dir;
+    const d = Math.hypot(x, z) || 1;
+    this.enemies.reset([this.here.him[0] + (12 * x) / d, this.here.him[1], this.here.him[2] + (12 * z) / d]);
     this.mana.value = MANA;
     this.spells.clear();
   }
@@ -105,6 +116,7 @@ export class Combat {
     mana.update(m.dt);
     // (only where spells can be drawn)
     const n = m.drawn ? m.n : 0;
+    if (n > 0 && !this.started) this.reset();
     spells.targets = enemies.targets(n, m.seed, m.time, m.him);
     enemies.update(m.dt, n, m.seed, m.time, m.him, spells);
     this.show(n, m);

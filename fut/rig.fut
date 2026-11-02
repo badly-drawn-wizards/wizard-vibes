@@ -92,15 +92,15 @@ type pose = { tm: f32, secs: f32, fl: flight
 -- spell in hand (0 fire, 1 lightning, 2 wind), which colours the orb.
 --
 -- shield: how far his shield is raised (0..1); shield_hit: the seconds
--- since it last stopped a spell. foe0 .. foe5: the enemies' states (see
--- foes.fut).
+-- since it last stopped a spell. foe0 .. foe5: the enemies' states, and
+-- arena_x, _y, _z the point they circle (see foes.fut).
 type drive = {free: bool, x: f32, y: f32, z: f32, heading: f32, turn: f32, ax: f32, ay: f32, az: f32, climb: f32,
               staff: f32, sx: f32, sy: f32, sz: f32, flash: f32, spell: f32, shield: f32, shield_hit: f32,
-              foe0: f32, foe1: f32, foe2: f32, foe3: f32, foe4: f32, foe5: f32}
+              arena_x: f32, arena_y: f32, arena_z: f32, foe0: f32, foe1: f32, foe2: f32, foe3: f32, foe4: f32, foe5: f32}
 
 def on_path : drive = {free = false, x = 0, y = 0, z = 0, heading = 0, turn = 0, ax = 0, ay = 0, az = 0, climb = 0,
                        staff = 0, sx = 0, sy = 0, sz = 1, flash = 10, spell = 1, shield = 0, shield_hit = 10,
-                       foe0 = 0, foe1 = 0, foe2 = 0, foe3 = 0, foe4 = 0, foe5 = 0}
+                       arena_x = 0, arena_y = 12, arena_z = 12, foe0 = 0, foe1 = 0, foe2 = 0, foe3 = 0, foe4 = 0, foe5 = 0}
 
 def flight_of (prm: params) (dr: drive) (secs: f32) : flight =
   if !dr.free then flight_at prm.bank secs
@@ -204,4 +204,4 @@ def pose_at (secs: f32) (prm: params) (dr: drive) : pose =
      , staff_x = column (vec 1 0 0), staff_y = column (vec 0 1 0), staff_z = column (vec 0 0 1), staff_t
      , orb = held orb_pos, orb_tint, bolt_tint, orb_boost, spell
      , shield = dr.shield, shield_hit = dr.shield_hit
-     , foes = (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5) }
+     , foes = {states = (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5), arena = vec dr.arena_x dr.arena_y dr.arena_z} }

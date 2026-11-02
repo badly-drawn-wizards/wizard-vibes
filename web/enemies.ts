@@ -19,6 +19,12 @@ const HP = 3;
 const APPEAR = 1.5; // seconds (appear_time in fut/enemies.fut)
 const RESPAWN = 5; // seconds after a defeat until the next one appears
 const RANGE = 40; // they only cast at him from nearer than this
+// The arena, the point they circle, stays where the fight began unless he
+// goes further than this from it; then it follows him, slower than he
+// flies, and never lower than this.
+const ARENA_LEASH = 35;
+const ARENA_SPEED = 6;
+const ARENA_FLOOR = 12;
 export const PLAYER_HP = 10;
 
 // Damage, by kind of spell. (A fire bolt does its damage by its burst,
@@ -38,16 +44,18 @@ function hash3(x: number, y: number, z: number): number {
 const rnd = (seed: number, gen: number, i: number, k: number) => hash3(seed + 7919 * gen, i + 17, k + 101);
 
 
-// Where enemy i (of generation gen) stands, and which way it faces, when he
-// is at `him` (enemy_at in fut/enemies.fut, while it is not falling).
-export function enemyAt(seed: number, gen: number, i: number, secs: number, him: V3): { pos: V3; yaw: number } {
+// Where enemy i (of generation gen) stands, circling `arena`, and which way
+// it faces, he being at `him` (enemy_at in fut/enemies.fut, while it is not
+// falling).
+export function enemyAt(seed: number, gen: number, i: number, secs: number, arena: V3, him: V3): { pos: V3; yaw: number } {
   const r = (k: number) => rnd(seed, gen, i, k);
   const radius = 9 + 12 * r(0);
   const speed = (0.04 + 0.06 * r(1)) * (r(2) < 0.5 ? -1 : 1);
   const a = 2 * Math.PI * (i / MAX + 0.12 * r(3)) + speed * secs;
   const h = -1.5 + 4 * r(4) + 0.5 * Math.sin(0.6 * secs + 6.3 * r(5));
   const off: V3 = [radius * Math.sin(a), h, radius * Math.cos(a)];
-  return { pos: add(him, off), yaw: Math.atan2(-off[0], -off[2]) };
+  const pos = add(arena, off);
+  return { pos, yaw: Math.atan2(him[0] - pos[0], him[2] - pos[2]) };
 }
 
 // His shield, raised (shield_centre and shield_radius in fut/shading.fut).
@@ -76,6 +84,7 @@ export class Enemies {
   hurt = 99; // seconds since he was last hit
   down = -1; // seconds since he was defeated (until a reset), or -1
   shielded = false; // his shield is up: it takes what would hit him
+  arena: V3 = [0, ARENA_FLOOR, 12];
   onChange: () => void = () => {};
   // (for the sound and the shield)
   onBlock: () => void = () => {};
@@ -88,9 +97,9 @@ export class Enemies {
   private last: V3 | null = null; // where he was last frame
   private vel: V3 = [0, 0, 0]; // how fast he is going, smoothed
 
-  // The renderer's states (foe0 .. foe5 of the drive record).
+  // The renderer's states (foe0 .. foe5 of the drive record), and the arena.
   foes(): Record<string, number> {
-    const f: Record<string, number> = {};
+    const f: Record<string, number> = { arena_x: this.arena[0], arena_y: this.arena[1], arena_z: this.arena[2] };
     this.slots.forEach((s, i) => {
       const phase = s.down >= 0 ? 8 + Math.min(s.down, 7.9) : Math.min(s.appear, 7.9);
       f[`foe${i}`] = 16 * s.gen + phase;
@@ -104,14 +113,15 @@ export class Enemies {
     const out = this.down >= 0 ? [] : this.shielded ? [{ ...SHIELD, c: add(him, SHIELD.c) }] : spheres(him, HIS);
     this.seen = { seed, secs, him };
     this.slots.slice(0, n).forEach((s, i) => {
-      if (s.down < 0 && s.appear < 0.5) out.push(...spheres(enemyAt(seed, s.gen, i, secs, him).pos, i));
+      if (s.down < 0 && s.appear < 0.5) out.push(...spheres(enemyAt(seed, s.gen, i, secs, this.arena, him).pos, i));
     });
     return out;
   }
 
-  // The fight from the start: him at full health and up, none defeated, and
-  // a new set of enemies appearing.
-  reset(): void {
+  // The fight from the start, round `arena`: him at full health and up,
+  // none defeated, and a new set of enemies appearing.
+  reset(arena: V3): void {
+    this.arena = [arena[0], Math.max(ARENA_FLOOR, arena[1]), arena[2]];
     this.hp = PLAYER_HP;
     this.down = -1;
     this.defeated = 0;
@@ -142,7 +152,7 @@ export class Enemies {
         s.down = 0;
         this.defeated++;
         const { seed, secs, him } = this.seen;
-        this.onDefeat(enemyAt(seed, s.gen, side, secs, him).pos);
+        this.onDefeat(enemyAt(seed, s.gen, side, secs, this.arena, him).pos);
       }
     }
     this.onChange();
@@ -159,12 +169,17 @@ export class Enemies {
     this.last = [...him];
     this.hurt += dt;
     if (this.down >= 0) this.down += dt;
+    // (the arena follows him once he is far from it)
+    const away = sub(him, this.arena);
+    const far = Math.hypot(away[0], away[2]) - ARENA_LEASH;
+    if (far > 0) this.arena = add(this.arena, scale(Math.min(far, ARENA_SPEED * dt) / (Math.hypot(away[0], away[2]) || 1), [away[0], 0, away[2]]));
+    this.arena[1] += (Math.max(ARENA_FLOOR, him[1]) - this.arena[1]) * (1 - Math.exp(-dt / 4));
     this.slots.forEach((s, i) => {
       if (s.down >= 0) {
         s.down += dt;
         if (s.down >= RESPAWN) {
           Object.assign(s, { gen: s.gen + 1, hp: HP, appear: APPEAR, down: -1, castIn: 4 + 4 * Math.random() });
-          if (i < n) this.onAppear(enemyAt(seed, s.gen, i, secs, him).pos);
+          if (i < n) this.onAppear(enemyAt(seed, s.gen, i, secs, this.arena, him).pos);
         }
         return;
       }
@@ -180,7 +195,7 @@ export class Enemies {
   // Enemy i casts at him: its kind of spell, from its orb, aimed where he
   // will be when it arrives, give or take.
   private cast(seed: number, gen: number, i: number, secs: number, him: V3, spells: Spells): void {
-    const { pos, yaw } = enemyAt(seed, gen, i, secs, him);
+    const { pos, yaw } = enemyAt(seed, gen, i, secs, this.arena, him);
     const orb = add(pos, turn(yaw, [0.45, 2.05, 0.2]));
     const r = rnd(seed, gen, i, 29);
     const kind = r < 0.5 ? FIRE : r < 0.8 ? WIND : STRIKE;

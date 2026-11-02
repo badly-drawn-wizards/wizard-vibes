@@ -132,7 +132,7 @@ if (useGl) mode.forbid("fight", "Fights need WebGPU: the WebGL fallback cannot d
 const enemyCount = () => (mode.fight ? Math.min(6, Number(params.values.enemies ?? 0)) : 0);
 mode.onChange = () => {
   flight.setActive(mode.free);
-  if (mode.fight) combat.reset();
+  if (mode.fight) combat.restart();
 };
 flight.setActive(mode.free);
 window.addEventListener("keydown", (e) => {
