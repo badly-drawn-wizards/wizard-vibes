@@ -9,6 +9,8 @@
 //   X / A / B      choose a spell: fire bolt, lightning strike, wind blade
 //   RB             cast it (held: again as soon as it can)
 //   LB             raise the shield (held)
+//   A              (defeated) try again
+//   View / Back    start the fight again
 //   Y / Start      toggle free flight
 
 export interface Pad {
@@ -20,6 +22,8 @@ export interface Pad {
   spell: number | null; // a spell chosen since the last read
   cast: boolean; // held
   shield: boolean; // held
+  confirm: boolean; // A pressed since the last read
+  reset: boolean; // View / Back pressed since the last read
   active: boolean; // anything pressed or pushed (for showing its glyphs)
 }
 
@@ -35,15 +39,15 @@ function stick(x: number, y: number): [number, number] {
 
 // Button indices by role (-1: not a button in that layout), and the
 // triggers' axes where they are axes instead (-1: buttons).
-type Layout = Record<"a" | "b" | "x" | "y" | "lb" | "rb" | "lt" | "rt" | "start" | "l3" | "ltAxis" | "rtAxis", number>;
+type Layout = Record<"a" | "b" | "x" | "y" | "lb" | "rb" | "lt" | "rt" | "back" | "start" | "l3" | "ltAxis" | "rtAxis", number>;
 
 // The browser's "standard" layout.
-const STANDARD: Layout = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7, start: 9, l3: 10, ltAxis: -1, rtAxis: -1 };
+const STANDARD: Layout = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7, back: 8, start: 9, l3: 10, ltAxis: -1, rtAxis: -1 };
 
 // Xbox controllers the browser does not map (e.g. over Bluetooth on Linux)
 // report their raw HID buttons, with gaps where the codes have them, and the
 // triggers as axes after the sticks (in HID code order: gas, then brake).
-const XBOX_RAW: Layout = { a: 0, b: 1, x: 3, y: 4, lb: 6, rb: 7, lt: -1, rt: -1, start: 11, l3: 13, ltAxis: 5, rtAxis: 4 };
+const XBOX_RAW: Layout = { a: 0, b: 1, x: 3, y: 4, lb: 6, rb: 7, lt: -1, rt: -1, back: 10, start: 11, l3: 13, ltAxis: 5, rtAxis: 4 };
 
 function layout(g: Gamepad): Layout {
   if (g.mapping === "standard") return STANDARD;
@@ -51,6 +55,8 @@ function layout(g: Gamepad): Layout {
 }
 
 let toggleHeld = false;
+let confirmHeld = false;
+let resetHeld = false;
 let spellHeld = -1;
 const seen = new Set<string>();
 
@@ -76,6 +82,10 @@ export function readPad(): Pad | null {
   const held = [k.x, k.a, k.b].findIndex((i) => pressed(i));
   const spell = held >= 0 && held !== spellHeld ? held : null;
   spellHeld = held;
+  const confirm = pressed(k.a) && !confirmHeld;
+  confirmHeld = pressed(k.a);
+  const reset = pressed(k.back) && !resetHeld;
+  resetHeld = pressed(k.back);
   const rt = Math.max(b(k.rt), axis(k.rtAxis));
   const lt = Math.max(b(k.lt), axis(k.ltAxis));
   return {
@@ -87,6 +97,8 @@ export function readPad(): Pad | null {
     spell,
     cast: pressed(k.rb),
     shield: pressed(k.lb),
+    confirm,
+    reset,
     active: g.buttons.some((x) => x.pressed) || mx !== 0 || my !== 0 || lx !== 0 || ly !== 0 || rt > 0.1 || lt > 0.1,
   };
 }

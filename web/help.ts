@@ -14,6 +14,7 @@ const face = (b: "A" | "B" | "X" | "Y") => `<span class="glyph face ${b}">${b}</
 const shoulder = (b: string) => `<span class="glyph shoulder">${b}</span>`;
 const stickGlyph = (s: "L" | "R") => `<span class="glyph stick">${s}</span>`;
 const menu = `<span class="glyph shoulder">≡</span>`;
+const view = `<span class="glyph shoulder">⧉</span>`;
 
 const ROWS: Record<Device, [string, string][]> = {
   keyboard: [
@@ -24,6 +25,7 @@ const ROWS: Record<Device, [string, string][]> = {
     ["Spell", key("1") + key("2") + key("3")],
     ["Cast", key("Space")],
     ["Shield", key("R") + " (hold)"],
+    ["Try again (defeated)", key("Enter")],
     ["Camera", "drag · wheel"],
     ["Pause", key("P")],
     ["Music", key("M")],
@@ -37,6 +39,8 @@ const ROWS: Record<Device, [string, string][]> = {
     ["Spell", face("X") + face("A") + face("B")],
     ["Cast", shoulder("RB")],
     ["Shield", shoulder("LB") + " (hold)"],
+    ["Try again (defeated)", face("A")],
+    ["Reset the fight", view],
   ],
 };
 

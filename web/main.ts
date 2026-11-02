@@ -255,6 +255,8 @@ function step(dt: number, canCast: boolean): Drive {
   const pad = readPad();
   padConnected = !!pad;
   if (pad?.toggle) mode.cycle();
+  // (A tries again once he is defeated; View / Back resets the fight)
+  if (pad?.reset || (pad?.confirm && combat.enemies.down >= 0)) combat.reset();
   if (pad?.active) device = "pad";
   if (pad?.spell != null) spells.select(pad.spell);
   combat.update({
