@@ -45,6 +45,16 @@ the ground), and only at the High quality preset (`draw_trees`): they cost
 2 to 6 ms a frame at 1080p, as rays crossing the canopy take many short
 steps.
 
+He flies on a rock, a shard of ice or a magic carpet (the drop-down in the
+top bar, or Platform in the drawer; fut/platform.fut, with the magic
+circle). Other wizards fly round him (Enemies in the drawer: how many, and
+a seed for their looks): each has its own robe, hat, beard and skin, its
+own platform and circle colour, all hashed from the seed and its number
+(fut/enemies.fut). Where they are is a pure function of the time and his
+flight. They get a march of their own, over just the stretch of each ray
+through their bounding spheres, so most rays only pay a ray-sphere test per
+enemy (about 0.4 ms a frame at 1080p for three).
+
 Music (off until you press ♪ or M) is computed in Futhark the way Shadertoy
 does sound: each stereo sample is a pure function of time (fut/music.fut),
 and the `sound` entry point makes a chunk of samples at a time, read back
@@ -59,7 +69,7 @@ A / D accelerate to the camera's left and right, E / Q climb and descend,
 Shift boosts. The camera then stays put in the world while he turns. He faces
 the way he travels, banks into turns, points the way he accelerates, and his
 runes brighten as he climbs and dim as he descends. The `probe` entry point
-(fut/collide.fut) samples the land around a few spheres covering the rock and
+(fut/collide.fut) samples the land around a few spheres covering the platform and
 him; the harness copies its floats into a mappable buffer with each frame and
 reads them back without waiting, to push him out of anything he hits
 (web/flight.ts).
@@ -123,7 +133,8 @@ see the workflow for filling it from a machine that has built it.
   |---|---|
   | `wizard.fut` | camera, tone mapping, entry points (`render` returns one frame as `[]u32`, packed BGRA8) |
   | `shading.fut` | materials, lights, glass (orb and potions), the per-ray passes |
-  | `scene.fut` | geometry: the figure and its pose (IK, breathing, lean), rock, terrain bounds |
+  | `scene.fut` | geometry: the figure and its pose (IK, breathing, lean), terrain bounds |
+  | `platform.fut`, `enemies.fut` | the rock, ice and carpet, and the magic circle; the enemy wizards |
   | `march.fut` | sphere tracing, normals, soft shadows, AO |
   | `media.fut`, `lightning.fut` | glows, haze, potion halos, clouds, lightning |
   | `textures.fut` | bump-mapped bark, cloth, leather, hair, cork |

@@ -69,9 +69,10 @@
             "Clouds",
             "Structures",
             "Water",
-            "Trees"
+            "Trees",
+            "Enemies"
           ],
-          "default": 2047
+          "default": 4095
         }
       ]
     },
@@ -403,10 +404,10 @@
       ]
     },
     {
-      "name": "Rock",
+      "name": "Platform",
       "groups": [
         {
-          "name": "Stone",
+          "name": "Rock, ice & carpet",
           "params": [
             {
               "id": "rock_dark",
@@ -436,6 +437,39 @@
                 0.3,
                 0.14,
                 0.08
+              ]
+            },
+            {
+              "id": "ice_colour",
+              "label": "Ice",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.42,
+                0.66,
+                0.86
+              ]
+            },
+            {
+              "id": "carpet_colour",
+              "label": "Carpet",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.5,
+                0.05,
+                0.06
+              ]
+            },
+            {
+              "id": "carpet_trim",
+              "label": "Carpet border",
+              "compile": true,
+              "kind": "color",
+              "default": [
+                0.8,
+                0.55,
+                0.15
               ]
             }
           ]
@@ -472,6 +506,20 @@
               ]
             }
           ]
+        }
+      ],
+      "params": [
+        {
+          "id": "platform",
+          "label": "Platform",
+          "kind": "select",
+          "options": [
+            "Rock",
+            "Ice",
+            "Magic carpet"
+          ],
+          "default": 0,
+          "doc": "What the wizard flies on (also in the top bar)."
         }
       ]
     },
@@ -885,6 +933,29 @@
               "default": 1.9
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Enemies",
+      "params": [
+        {
+          "id": "enemies",
+          "label": "Enemies",
+          "kind": "int",
+          "min": 0,
+          "max": 6,
+          "default": 3,
+          "doc": "Other wizards flying round him."
+        },
+        {
+          "id": "enemy_seed",
+          "label": "Appearance seed",
+          "kind": "int",
+          "min": 0,
+          "max": 999,
+          "default": 1,
+          "doc": "Picks each enemy's looks, platform and circle colour."
         }
       ]
     },

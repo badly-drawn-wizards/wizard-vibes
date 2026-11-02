@@ -33,6 +33,12 @@ def m_water : i32 = 29
 def m_trunk : i32 = 30
 def m_leaves : i32 = 31
 def m_needles : i32 = 32
+def m_ice : i32 = 33
+def m_carpet : i32 = 34
+-- The enemies: enemy_parts ids each, from m_enemy (see enemies.fut).
+def m_enemy : i32 = 40
+def enemy_parts : i32 = 10
+def max_enemies : i32 = 6
 
 ---------------------------------------------------------------------
 -- Layers. Every part of the scene belongs to one of the layers_* (generated

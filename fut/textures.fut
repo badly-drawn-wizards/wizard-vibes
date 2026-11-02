@@ -272,13 +272,51 @@ def flagstone_height (fp: f32) (p: vec3) : f32 =
   let (edge, _) = flagstone p
   in (-0.008 * smoothstep 0.025 0.004 edge + 0.0015 * vnoise3 (scale 25 p)) * keep fp 0.03
 
--- (albedo, how much of it is moss) of the top
-def flagstone_albedo (pose: pose) (fp: f32) (p: vec3) : vec3 =
-  let (edge, id) = flagstone p
-  let grain = 0.8 + 0.35 * vnoise3 (scale 9 p) * keep fp 0.1
-  let stone = scale ((0.72 + 0.45 * id) * grain) pose.prm.rock_top
-  let moss = smoothstep 0.03 0.006 edge * keep fp 0.06 * (0.4 + 0.6 * vnoise3 (scale 5 p))
-  in mix stone (scale 0.8 pose.prm.moss_colour) moss
+---------------------------------------------------------------------
+-- The ice and the carpet (see platform.fut).
+
+-- Clear blue ice, deeper and darker towards the point, with pale cracks.
+def ice_albedo (base: vec3) (fp: f32) (p: vec3) : vec3 =
+  let deep = smoothstep 0 (-2.5) p.y
+  let crack = smoothstep 0.035 0 (f32.abs (vnoise3 (scale 2.5 p) - 0.5)) * keep fp 0.08
+  in mix (mix base (base *^ vec 0.3 0.45 0.7) deep) (vec 0.8 0.9 1) (0.7 * crack)
+
+-- Its top: frost, patchy and sparkling a little.
+def frost_albedo (base: vec3) (fp: f32) (p: vec3) : vec3 =
+  let patch = vnoise3 (scale 3 p)
+  let sparkle = smoothstep 0.82 0.9 (vnoise3 (scale 40 p)) * keep fp 0.05
+  in mix (mix base (vec 0.75 0.85 0.95) (0.4 + 0.5 * patch)) (vec 1 1 1) sparkle
+
+-- A woven rug: a field of `field` with a lattice of darker lines and a
+-- dark blue medallion in the middle, inside a border of `trim` with a
+-- zigzag, edged with cream lines; the tassels cream. In the carpet's
+-- frame (at the platform's origin, x across, z along).
+def carpet_albedo (field: vec3) (trim: vec3) (fp: f32) (p: vec3) : vec3 =
+  let cream = vec 0.85 0.75 0.55
+  let navy = vec 0.04 0.06 0.2
+  let (ax, az) = (f32.abs p.x, f32.abs p.z)
+  in if az >= 1.6 then cream else
+  -- (lines widen to the pixel's footprint, fading as they do)
+  let w = f32.max 0.012 fp
+  let fade = 0.012 / w
+  let line (d: f32) = fade * smoothstep w (0.5 * w) (f32.abs d)
+  let e = f32.min (1.15 - ax) (1.6 - az)
+  -- the border: along whichever edge is nearer, a zigzag
+  let along = if 1.15 - ax < 1.6 - az then p.z else p.x
+  let zig = 0.07 + 0.06 * f32.abs (2 * fract (along * 5) - 1)
+  let border = smoothstep (0.2 + 0.5 * w) (0.2 - 0.5 * w) e
+  let band = mix trim field (smoothstep (zig - 0.5 * w) (zig + 0.5 * w) e * smoothstep (zig + 0.05) (zig + 0.05 - w) e)
+  -- the field: a lattice and the medallion
+  let lattice = f32.max (line (fract ((p.x + p.z) * 3) - 0.5)) (line (fract ((p.x - p.z) * 3) - 0.5))
+  let dm = ax / 0.75 + az / 1.1
+  let c = mix field (scale 0.55 field) lattice
+  let c = mix c navy (smoothstep (0.55 + 0.5 * w) (0.55 - 0.5 * w) dm)
+  let c = mix c trim (smoothstep (0.2 + 0.5 * w) (0.2 - 0.5 * w) dm)
+  let c = mix c cream (f32.max (line (dm - 0.55)) (line (dm - 0.6)))
+  let c = mix c band border
+  let c = mix c cream (f32.max (line (e - 0.03)) (line (e - 0.2)))
+  -- the pile
+  in scale (0.85 + 0.3 * vnoise3 (scale 30 p) * keep fp 0.04) c
 
 ---------------------------------------------------------------------
 -- The terrain up close: rough rock, and grass in tufts of blades. The
@@ -310,7 +348,7 @@ def bump_height (pose: pose) (fp: f32) (m: i32) (p: vec3) : f32 =
   else if m == m_cork then cork fp p
   else if m == m_hat then (hat_stars pose fp p).1
   else if m == m_beard then hair pose fp p
-  else if m == m_ground then flagstone_height fp p
+  else if m == m_ground then (if pose.prm.platform == platform_rock then flagstone_height fp p else 0)
   else if m == m_terrain then terrain_bump fp (to_world pose.fl p)
   else 0
 

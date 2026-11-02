@@ -18,6 +18,12 @@ import { LEVELS, type Level, Quality } from "./quality.ts";
 
 // The drawer's uniforms, and the entry points that take them.
 const params: Params = await createDrawer(document.getElementById("params")!);
+
+// What he flies on: the top bar's choice, kept in step with the drawer's.
+const platform = document.getElementById("platform") as HTMLSelectElement;
+platform.value = String(params.values.platform ?? 0);
+platform.onchange = () => params.set("platform", Number(platform.value));
+params.listen((id, v) => id === "platform" && (platform.value = String(v)));
 const entries = new Entries(params);
 
 document.getElementById("drawer-toggle")!.onclick = () => document.body.classList.toggle("drawer-open");

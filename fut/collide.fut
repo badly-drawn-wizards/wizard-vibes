@@ -9,15 +9,17 @@ import "params"
 import "world"
 import "scene"
 
--- (centre in the wizard's frame, radius): the rock's top, middle and tip,
--- the wizard's body and head, and the orb.
-def collision_spheres : [6](vec3, f32) =
-  [ (vec 0 (-0.5) 0, rock_radius)
-  , (vec 0 (-1.7) 0, 0.95)
-  , (vec 0 (-2.6) 0, 0.45)
-  , (vec 0 1 0, 0.5)
-  , (vec 0 2 0, 0.4)
-  , (orb_pos, 0.2) ]
+-- (centre in the wizard's frame, radius): the platform's top, middle and
+-- tip (the carpet has only a top: its others shrink into the first), the
+-- wizard's body and head, and the orb.
+def collision_spheres (kind: i32) : [6](vec3, f32) =
+  let carpet = kind == platform_carpet
+  in [ (vec 0 (-0.5) 0, rock_radius)
+     , if carpet then (vec 0 (-0.5) 0, 0) else (vec 0 (-1.7) 0, 0.95)
+     , if carpet then (vec 0 (-0.5) 0, 0) else (vec 0 (-2.6) 0, 0.45)
+     , (vec 0 1 0, 0.5)
+     , (vec 0 2 0, 0.4)
+     , (orb_pos, 0.2) ]
 
 -- The land at a world point, in the visible layers: (distance, outward unit
 -- normal). The ground's distance is its height above the terrain scaled by
@@ -52,7 +54,7 @@ def land_probe (prm: params) (w: vec3) : (f32, vec3) =
 -- radius 0.
 def probe_frame [k] (prm: params) (dr: drive) (secs: f32) (pts: [k]f32) : []f32 =
   let fl = flight_of prm dr secs
-  let spheres = map (\(c, r) -> (to_world fl c, r)) collision_spheres
+  let spheres = map (\(c, r) -> (to_world fl c, r)) (collision_spheres prm.platform)
   let points = tabulate (k / 3) (\i -> (vec pts[3 * i] pts[3 * i + 1] pts[3 * i + 2], 0f32))
   in flatten (map (\(w, r) ->
                     let (d, n) = land_probe prm w

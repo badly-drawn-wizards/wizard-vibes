@@ -14,73 +14,16 @@ import "march"
 open import "materials"
 open import "rig"
 open import "figure"
+open import "platform"
+open import "enemies"
 
----------------------------------------------------------------------
--- Rune circle: 14 glyphs on a circle of radius 1.125, turning once per loop.
+-- The enemies (see enemies.fut), in the layers of `mask`.
+def enemies (mask: i32) (pose: pose) (p: vec3) : hit =
+  if !(has mask layers_enemies) || pose.prm.enemies <= 0 then nothing
+  else enemies_dist pose.prm.enemies pose.prm.enemy_seed pose.secs pose.fl p
 
-def rune_radius : f32 = 1.125
-
--- 2D distance in the ground plane to the nearest rune stroke.
-#[noinline]
-def glyph_sdf (tm: f32) (x: f32) (z: f32) : f32 =
-  let c = rune_radius
-  let r = length2 (vec2 x z)
-  -- Far from the band, a cheap lower bound. It is only used where the glow
-  -- density is negligible, so the bound's looseness never shows.
-  in if f32.abs (r - c) > 0.45 then f32.abs (r - c) - 0.12
-  else
-    let n = 14f32
-    let sector = 2 * f32.pi / n
-    let q = rot2 tm (vec2 x z)
-    let a = f32.atan2 q.y q.x + f32.pi
-    let idx = i32.f32 (f32.floor (a / sector))
-    let lp = rep_angle n {x = q.x, y = 0, z = q.y}
-    let h1 = hash2 idx 3
-    let h2 = hash2 idx 7
-    let seg (ax: f32) (az: f32) (bx: f32) (bz: f32) =
-      sd_capsule lp (vec (c + ax) 0 az) (vec (c + bx) 0 bz) 0.008
-    let g1 = seg (-0.08) (-0.05 + 0.1 * h1) 0.08 (0.05 - 0.1 * h1)
-    let g2 = seg (-0.08 + 0.16 * h2) (-0.06) (0.08 - 0.16 * h1) 0.06
-    let g3 = if h2 > 0.5 then seg 0 (-0.07) 0 0.07 else sd_torus (lp -^ vec c 0 0) 0.05 0.004
-    in f32.min g1 (f32.min g2 g3)
-
--- Approximate 3D distance to the nearest letter: the in-plane distance and
--- the height above the ground, combined by Pythagoras.
-def glyph_dist (tm: f32) (p: vec3) : f32 =
-  if p.y > 0.35 then p.y -- high above the ground: skip the strokes
-  else let d = f32.max 0 (glyph_sdf tm p.x p.z)
-       in f32.sqrt (d * d + p.y * p.y)
-
--- Emission painted on the ground (before brightness): two rings and the glyphs.
-#[noinline]
-def rune_paint (tm: f32) (p: vec3) : f32 =
-  let r = length2 (vec2 p.x p.z)
-  let ring w c = 1 - smoothstep (w * 0.5) w (f32.abs (r - c))
-  let rings = f32.max (ring 0.018 0.95) (ring 0.012 1.3)
-  let glyph = 1 - smoothstep 0.0 0.008 (glyph_sdf tm p.x p.z)
-  in f32.max rings glyph
-
-
----------------------------------------------------------------------
--- The floating rock the wizard stands on: an inverted cone with a flat top
--- (the magic circle's outer ring, at radius 1.3, fits inside), roughened
--- below by noise that fades out towards the rim.
-
-def rock_radius : f32 = 1.6
-def rock_depth : f32 = 2.8
-
-#[noinline]
-def rock_exact (p: vec3) : hit =
-  let cone = sd_capped_cone (p -^ vec 0 (-rock_depth) 0) rock_depth 0.3 rock_radius
-  -- (the weight is 0 at and above the top face, where the wizard is, so the
-  -- noise is only evaluated below it)
-  let rough = if p.y >= 0 then 0
-              else saturate (-p.y * 2.5) * (0.22 * vnoise3 (scale 2.2 p) + 0.1 * vnoise3 (scale 5.3 p) - 0.16)
-  -- the noise steepens the field; scale it back to keep tracing safe
-  in (0.6 * (cone + rough), if p.y > -0.03 then m_ground else m_rock)
-
--- (the rock fits in a sphere of radius 2.3; its noise needs a wider margin)
-def rock (p: vec3) : hit = sphere_bounded_hit (vec 0 (-1.2) 0) 2.3 0.3 m_rock rock_exact p |> tag layers_rock
+-- His platform, in the layer of the rock (see platform.fut).
+def rock (pose: pose) (p: vec3) : hit = platform pose.prm.platform pose.secs p |> tag layers_rock
 
 -- The terrain far below, sampled through the flight frame. No peak is above
 -- terrain_max, so well above it the height over terrain_max is a cheap lower
@@ -165,7 +108,7 @@ def terrain (mask: i32) (pose: pose) (p: vec3) : hit =
 -- separate passes, see follow in shading.fut.)
 #[noinline]
 def local_scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
-  bounded_figure mask pose tol p |> umin (if has mask layers_rock then rock p else nothing)
+  bounded_figure mask pose tol p |> umin (if has mask layers_rock then rock pose p else nothing)
 
 def local_layers : i32 = figure_layers | layers_rock
 
@@ -187,7 +130,7 @@ def shadow_scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : f32 =
                     |> f32.min (sd_capsule hq beard_top beard_tip 0.05)
   let staff = if !(has mask layers_staff) then 1e9
               else sd_capsule (staff_rest pose p) staff_foot staff_top staff_radius
-  let rock = if !(has mask layers_rock) then 1e9 else (rock p).0
+  let rock = if !(has mask layers_rock) then 1e9 else (rock pose p).0
   in f32.min figure (f32.min staff rock)
 
 -- Everything in local_scene lies in this sphere (radius 3.3), and so do the
@@ -199,6 +142,7 @@ def local_radius : f32 = 3.6
 #[noinline]
 def scene (mask: i32) (pose: pose) (tol: f32) (p: vec3) : hit =
   local_scene mask pose tol p |> umin (if has mask land_layers then terrain mask pose p else nothing)
+  |> umin (enemies mask pose p)
 
 def dist (mask: i32) (pose: pose) (tol: f32) (p: vec3) : f32 = (scene mask pose tol p).0
 

@@ -202,6 +202,30 @@ def water_surface (pose: pose) (p: vec3) (rd: vec3) (t: f32) : vec3 =
   water_shade { sky = sky_in_of pose, fl = pose.fl, moon = pose.moon, pix = pose.pix, colour = pose.prm.water_colour
               , fog = pose.prm.fog, view_distance = pose.prm.view_distance } p rd t
 
+-- A platform's surface (see platform.fut): m is m_ground (its top),
+-- m_rock, m_ice or m_carpet. Its colours are passed in (each enemy has its
+-- own); the circle's runes are added by the caller. (rock: dark, light and
+-- top colours, as rock_dark etc.)
+def platform_surface (kind: i32) (rock: (vec3, vec3, vec3)) (moss: vec3) (carpet: vec3) (fp: f32) (m: i32) (p: vec3) : material =
+  if m == m_ground then
+    if kind == platform_ice then plain (frost_albedo ice_colour fp p) with ks = 0.5 with shininess = 30 with rim = false
+    else if kind == platform_carpet then plain (carpet_albedo carpet carpet_trim fp p) with ks = 0.02 with sheen = 0.5 with rim = false
+    else let (edge, id) = flagstone p
+         let grain = 0.8 + 0.35 * vnoise3 (scale 9 p) * keep fp 0.1
+         let stone = scale ((0.72 + 0.45 * id) * grain) rock.2
+         let moss_part = smoothstep 0.03 0.006 edge * keep fp 0.06 * (0.4 + 0.6 * vnoise3 (scale 5 p))
+         in plain (mix stone (scale 0.8 moss) moss_part) with ks = 0.3 with shininess = 40 with rim = false
+  else if m == m_ice then
+    -- glossy, with a faint glow from within
+    plain (ice_albedo ice_colour fp p) with ks = 1.2 with shininess = 90 with emission = scale 0.03 ice_colour
+  else if m == m_carpet then plain (carpet_albedo carpet carpet_trim fp p) with ks = 0.02 with sheen = 0.5 with rim = false
+  else
+    -- red-orange sandstone, banded and mottled (strongly saturated, since
+    -- the blue moonlight mutes warm colours)
+    let band = 0.5 + 0.5 * f32.sin (p.y * 9 + 2 * vnoise3 (scale 1.5 p))
+    let c = mix rock.0 rock.1 band
+    in plain (scale (0.6 + 0.7 * vnoise3 (scale 4 p)) c) with ks = 0.1
+
 -- (inlined into its one caller, surface: as a GPU function of its own, the
 -- whole pose it takes came to more than WGSL's 255 parameters)
 def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : material =
@@ -219,12 +243,8 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
   else if m == m_brow then plain pose.prm.brow_colour
   else if m == m_wood then
     plain (scale (0.75 + 0.25 * f32.sin (p.y * 45 + 3 * f32.sin (p.x * 40))) (vec 0.36 0.21 0.1))
-  else if m == m_rock then
-    -- red-orange sandstone, banded and mottled (strongly saturated, since
-    -- the blue moonlight mutes warm colours)
-    let band = 0.5 + 0.5 * f32.sin (p.y * 9 + 2 * vnoise3 (scale 1.5 p))
-    let c = mix pose.prm.rock_dark pose.prm.rock_light band
-    in plain (scale (0.6 + 0.7 * vnoise3 (scale 4 p)) c) with ks = 0.1
+  else if m == m_rock || m == m_ice || m == m_carpet then
+    platform_surface pose.prm.platform (pose.prm.rock_dark, pose.prm.rock_light, pose.prm.rock_top) pose.prm.moss_colour carpet_colour fp m p
   else if m == m_terrain then
     -- moss in the valleys, bare rock on steep slopes, snow on high flats;
     -- sand in the desert, and in the mountains more rock and snow lower down
@@ -262,9 +282,8 @@ def material (pose: pose) (_g: glow) (fp: f32) (m: i32) (p: vec3) (n: vec3) : ma
     let c = glow_colour pose.prm m
     in plain (scale 0.3 c) with emission = scale 0.8 c with ks = 0.6 with shininess = 60
   else if m == m_ground then
-    plain (flagstone_albedo pose fp p)
+    platform_surface pose.prm.platform (pose.prm.rock_dark, pose.prm.rock_light, pose.prm.rock_top) pose.prm.moss_colour carpet_colour fp m p
        with emission = scale (0.9 * pose.runes * rune_pulse pose.prm.rune_pulse tm * rune_paint tm p) pose.prm.rune_colour
-       with ks = 0.3 with shininess = 40 with rim = false
   else plain (splat 0.5)
 
 -- The trees' materials, at world point w. (Apart from `material`, whose
@@ -279,6 +298,31 @@ def tree_material (trunk: vec3) (leaf: vec3) (needle: vec3) (m: i32) (w: vec3) :
     -- clumps of lighter and darker leaves, a little sheen on the lit side
     let v = 0.6 * vnoise3 (scale 3 w) + 0.4 * vnoise3 (scale 11 w)
     in plain (scale (0.55 + 0.9 * v) (if m == m_leaves then leaf else needle)) with ks = 0.12 with shininess = 12 with rim = false
+
+-- The enemies' materials (see enemies.fut), at point p of his space.
+def is_enemy (m: i32) : bool = m >= m_enemy && m < m_enemy + enemy_parts * max_enemies
+
+#[noinline]
+def enemy_material (seed: i32) (secs: f32) (tm: f32) (fl: flight) (rock: (vec3, vec3, vec3)) (moss: vec3)
+                   ((sheen, glow): (f32, f32)) (fp: f32) (m: i32) (p: vec3) : material =
+  let i = (m - m_enemy) / enemy_parts
+  let part = (m - m_enemy) % enemy_parts
+  let lk = looks_of seed i
+  let q = enemy_space fl (enemy_at seed i secs fl) p
+  in if part == part_robe then plain lk.robe with rim = false with sheen = sheen with ks = 0.03
+  else if part == part_skin then plain lk.skin with ks = 0.15 with shininess = 16
+  else if part == part_beard then plain lk.beard with ks = 0.05
+  else if part == part_hat then plain lk.hat with ks = 0.05
+  else if part == part_band then plain (vec 1 0.6 0.14) with ks = 1.6 with shininess = 48 with metal = true
+  else if part == part_staff then plain (scale (0.75 + 0.25 * f32.sin (q.y * 40)) (vec 0.3 0.19 0.1)) with ks = 0.05
+  else if part == part_orb then plain (scale 0.3 lk.circle) with emission = scale 2.5 lk.circle with ks = 1 with shininess = 80
+  else let side = if lk.kind == platform_ice then m_ice else if lk.kind == platform_carpet then m_carpet else m_rock
+       let mat = platform_surface lk.kind rock moss lk.carpet fp (if part == part_top then m_ground else side) q
+       -- (the circle turns the other way to his; without his glowing
+       -- media, a halo round its strokes is painted on instead)
+       in if part != part_top then mat
+          else let halo = f32.exp (-(f32.max 0 (glyph_sdf (-tm) q.x q.z)) / 0.05)
+               in mat with emission = scale ((0.25 + 0.06 * glow) * (5 * rune_paint (-tm) q + halo)) lk.circle
 
 ---------------------------------------------------------------------
 -- Lighting
@@ -367,6 +411,10 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
           else ng
   let mat = if is_tree m
             then tree_material trunk_colour leaf_colour needle_colour m (to_world pose.fl p)
+            else if is_enemy m
+            then enemy_material pose.prm.enemy_seed pose.secs pose.tm pose.fl
+                                (pose.prm.rock_dark, pose.prm.rock_light, pose.prm.rock_top) pose.prm.moss_colour
+                                (pose.prm.sheen, pose.prm.rune_glow) fp m p
             else material pose g fp m p n
   let occ = if m == m_terrain then 1 else ambient_occlusion (dist vis pose) p ng
   let po = p +^ scale 0.002 ng
@@ -512,6 +560,12 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       -- holds it (the peaks reach into that sphere, so the terrain goes
       -- first). Neither pass evaluates the other's geometry at every step.
       let (t_terrain, m_land) = if inside || enters || !(has vis land_layers) then (f32.inf, 0) else march_terrain vis pose ro rd tmax
+      -- the enemies, in front of the land (a pass of their own, which most
+      -- rays skip: see march_enemies)
+      let (t_terrain, m_land) =
+        if inside || enters || !(has vis layers_enemies) || pose.prm.enemies <= 0 then (t_terrain, m_land)
+        else let (te, me) = march_enemies pose.prm.enemies pose.prm.enemy_seed pose.secs pose.fl ro rd (f32.min tmax t_terrain)
+             in if te < t_terrain then (te, me) else (t_terrain, m_land)
       let local_end = f32.max 0 (ray_sphere occluder_centre local_radius ro rd).1
       let local_max = f32.min tmax (f32.min t_terrain local_end)
       let (t, m, emitted, tr) = march (local_scene vis pose) (media pose g) ro rd local_max

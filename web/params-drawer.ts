@@ -119,6 +119,11 @@ export interface Params {
   readonly compile: Record<string, Value>;
   readonly presets: Record<string, Record<string, Value>>;
   readonly builds?: Record<string, string>;
+  // sets a parameter as its control in the drawer would (for controls
+  // elsewhere, such as the top bar's), and calls `listen`'s functions on
+  // every change, from either
+  set(id: string, v: Value): void;
+  listen(f: (id: string, v: Value) => void): void;
 }
 
 export async function createDrawer(host: HTMLElement): Promise<Params> {
@@ -133,7 +138,13 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
   const stored = load();
   const current: Record<string, Value> = {};
   for (const p of uniforms) current[p.id] = p.id in stored ? stored[p.id] : p.default;
-  const state = { values: current, version: 0, compile, presets: presets ?? {}, builds };
+  const setters = new Map<string, (v: Value) => void>();
+  const listeners: ((id: string, v: Value) => void)[] = [];
+  const state = {
+    values: current, version: 0, compile, presets: presets ?? {}, builds,
+    set: (id: string, v: Value) => setters.get(id)?.(v),
+    listen: (f: (id: string, v: Value) => void) => listeners.push(f),
+  };
 
   const pending: Record<string, Value> = {};
   let send: number | undefined;
@@ -212,7 +223,9 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
       const r = row(p, p.compile ? compile[p.id] : current[p.id], (v) => {
         if (p.compile) compileNow[p.id] = v;
         set(p, v);
+        for (const f of listeners) f(p.id, v);
       });
+      setters.set(p.id, r.set);
       if (p.compile && IS_STATIC) {
         for (const c of r.el.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button")) c.disabled = true;
         r.el.title = "Fixed in this build (changing it rebuilds the shader, which needs the dev server)";
@@ -238,7 +251,7 @@ export async function createDrawer(host: HTMLElement): Promise<Params> {
 // One labelled control, with a reset-to-default button; `reset` does the same
 // (only if the value differs, so a group reset does not trigger needless
 // shader rebuilds).
-function row(p: Param, initial: Value, onChange: (v: Value) => void): { el: HTMLElement; reset: () => void } {
+function row(p: Param, initial: Value, onChange: (v: Value) => void): { el: HTMLElement; reset: () => void; set: (v: Value) => void } {
   let value = initial;
   const changed = onChange;
   onChange = (v) => {
@@ -246,14 +259,16 @@ function row(p: Param, initial: Value, onChange: (v: Value) => void): { el: HTML
     changed(v);
   };
   let reset = () => {};
+  let set = (_: Value) => {};
   const el = rowElement(p, initial, onChange, (show) => {
-    reset = () => {
-      if (same(value, p.default)) return;
-      show(p.default);
-      onChange(p.default);
+    set = (v) => {
+      if (same(value, v)) return;
+      show(v);
+      onChange(v);
     };
+    reset = () => set(p.default);
   });
-  return { el, reset: () => reset() };
+  return { el, reset: () => reset(), set: (v) => set(v) };
 }
 
 function rowElement(p: Param, initial: Value, onChange: (v: Value) => void, expose: (show: (v: Value) => void) => void): HTMLElement {

@@ -12,12 +12,15 @@
   canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
            cursor: grab; touch-action: none; image-rendering: auto; }
   canvas:active { cursor: grabbing; }
-  #hud { position: fixed; top: 12px; left: 12px; display: flex; gap: 12px; align-items: center;
+  #hud { position: fixed; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+         max-width: calc(100vw - 84px); box-sizing: border-box;
          background: rgb(5 4 13 / 0.6); padding: 6px 10px; border-radius: 6px; backdrop-filter: blur(4px); }
   #hud button { font: inherit; color: var(--dim); background: none; border: 1px solid #2c2950;
                 border-radius: 4px; padding: 2px 6px; cursor: pointer; }
   #hud button[aria-pressed="true"] { color: var(--fg); border-color: var(--fg); }
   #hud button:disabled { opacity: 0.35; cursor: not-allowed; }
+  #hud select { font: inherit; color: var(--fg); background: #0b0a1c; border: 1px solid #2c2950;
+                border-radius: 4px; padding: 2px 4px; }
   #quality button.active { color: var(--fg); }
   #quality.busy { opacity: 0.7; }
   /* the parameter drawer, on the right */
@@ -95,6 +98,9 @@
     <button data-scale="0.25">¼</button><button data-scale="0.5">½</button><button data-scale="1">1×</button>
   </span>
   <button id="music" type="button">♪ off</button>
+  <select id="platform" title="What he flies on">
+    <option value="0">Rock</option><option value="1">Ice</option><option value="2">Magic carpet</option>
+  </select>
   <span id="backend">
     <button data-backend="webgpu">WebGPU</button><button data-backend="webgl">WebGL</button>
   </span>
