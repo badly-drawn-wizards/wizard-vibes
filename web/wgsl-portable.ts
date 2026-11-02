@@ -7,7 +7,11 @@
 // 2. Specialise the remaining helpers that take storage/uniform/workgroup
 //    pointers. Such pointers can only point at module-scope variables, so
 //    `write_i8((&buf), i, v)` becomes `write_i8__buf(i, v)`, a copy of the
-//    helper with `buf` substituted for the pointer.
+//    helper with `buf` substituted for the pointer; and a pointer to an
+//    element, `atomic_read((&buf[k]), 0)`, becomes `atomic_read__buf_at(k,
+//    0)`, the index passed in its place.
+//
+// `only`: the entry points to keep (all of them if not given).
 
 import { F16_TYPE, stripComments, topLevelItems } from "./wgsl-f32.ts";
 
@@ -80,18 +84,23 @@ function paramName(decl: string): string {
   return /^\s*(?:@[^\s]+\s+)*(\w+)/.exec(decl)![1];
 }
 
-// `&x`, `(&x)` or `((&x))` -> `x`; anything else -> null.
-function addressedGlobal(arg: string): string | null {
+// `&x`, `(&x)` or `((&x))` -> x; `&x[k]` -> x at index k; else null.
+function addressedGlobal(arg: string): { g: string; index: string | null } | null {
   let a = arg.trim();
   while (a.startsWith("(") && matching(a, 0) === a.length - 1) a = a.slice(1, -1).trim();
-  return /^&\s*(\w+)$/.exec(a)?.[1] ?? null;
+  const whole = /^&\s*(\w+)$/.exec(a);
+  if (whole) return { g: whole[1], index: null };
+  const elem = /^&\s*(\w+)\s*\[/.exec(a);
+  if (!elem) return null;
+  const open = elem[0].length - 1;
+  return matching(a, open) === a.length - 1 ? { g: elem[1], index: a.slice(open + 1, -1) } : null;
 }
 
 function calledNames(body: string): string[] {
   return [...body.matchAll(/\b(\w+)\s*\(/g)].map((m) => m[1]);
 }
 
-export function makePortable(input: string): string {
+export function makePortable(input: string, only?: string[]): string {
   const code = stripComments(input);
   const directives: string[] = [];
   const others: string[] = [];
@@ -118,28 +127,34 @@ export function makePortable(input: string): string {
       const args = splitArgs(body.slice(open + 1, close));
       const globals = callee.ptrParams.map((i) => addressedGlobal(args[i] ?? ""));
       if (globals.some((g) => g === null)) continue; // leave it; the compiler will say why
-      const name = `${callee.name}__${globals.join("__")}`;
+      const name = `${callee.name}__${globals.map((x) => x!.g + (x!.index === null ? "" : "_at")).join("__")}`;
       if (!specialised.has(name)) {
         let specBody = callee.body;
         callee.ptrParams.forEach((pi, k) => {
           const p = paramName(callee.params[pi]);
-          const g = globals[k]!;
+          const { g, index } = globals[k]!;
+          const target = index === null ? g : `${g}[${p}_at]`;
           specBody = specBody
-            .replace(new RegExp(`\\(\\s*\\*\\s*${p}\\s*\\)`, "g"), g)
-            .replace(new RegExp(`\\*\\s*${p}\\b`, "g"), g)
-            .replace(new RegExp(`\\b${p}\\b`, "g"), `(&${g})`);
+            .replace(new RegExp(`\\(\\s*\\*\\s*${p}\\s*\\)`, "g"), target)
+            .replace(new RegExp(`\\*\\s*${p}\\b`, "g"), target)
+            .replace(new RegExp(`\\b${p}\\b`, "g"), `(&${target})`);
         });
-        const spec: Fn = {
-          ...callee,
-          name,
-          params: callee.params.filter((_, i) => !callee.ptrParams.includes(i)),
-          ptrParams: [],
-          body: "",
-        };
+        // (an element pointer's parameter becomes its index)
+        const params = callee.params.flatMap((decl, i) => {
+          const k = callee.ptrParams.indexOf(i);
+          if (k < 0) return [decl];
+          return globals[k]!.index === null ? [] : [`${paramName(decl)}_at: i32`];
+        });
+        const spec: Fn = { ...callee, name, params, ptrParams: [], body: "" };
         specialised.set(name, spec);
         spec.body = rewriteCalls(specBody); // after registering, for recursion through helpers
       }
-      const rest = args.filter((_, i) => !callee.ptrParams.includes(i)).map(rewriteCalls); // nested calls
+      const rest = args.flatMap((a, i) => {
+        const k = callee.ptrParams.indexOf(i);
+        if (k < 0) return [rewriteCalls(a)]; // (nested calls)
+        const index = globals[k]!.index;
+        return index === null ? [] : [`i32(${rewriteCalls(index)})`];
+      });
       out += body.slice(pos, m.index!) + `${name}(${rest.join(",")})`;
       pos = close + 1;
     }
@@ -151,7 +166,7 @@ export function makePortable(input: string): string {
   for (const [k, v] of specialised) all.set(k, v);
 
   const reachable = new Set<string>();
-  const work = [...all.values()].filter((f) => f.entry).map((f) => f.name);
+  const work = [...all.values()].filter((f) => (only ? only.includes(f.name) : f.entry)).map((f) => f.name);
   while (work.length) {
     const n = work.pop()!;
     if (reachable.has(n)) continue;

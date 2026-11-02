@@ -123,7 +123,8 @@ fn gl_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 `;
   const src = join(buildDir, "gl.wgsl");
   const out = join(buildDir, "gl.frag");
-  writeFileSync(src, wgsl + entry);
+  // (only what the fragment shader reaches: naga validates the whole module)
+  writeFileSync(src, makePortable(wgsl + entry, ["gl_main"]));
   execFileSync("naga", ["--compact", "--entry-point", "gl_main", "--profile", "es300", "--keep-coordinate-space", src, out], { stdio: ["ignore", "pipe", "pipe"] });
   const glsl = readFileSync(out, "utf8");
   const block = /uniform\s+(\w+)\s*\{/.exec(glsl)?.[1];
