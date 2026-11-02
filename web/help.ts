@@ -17,7 +17,7 @@ const menu = `<span class="glyph shoulder">≡</span>`;
 
 const ROWS: Record<Device, [string, string][]> = {
   keyboard: [
-    ["Free flight", key("F")],
+    ["Mode: fixed · flight · fight", key("F")],
     ["Fly", key("W") + key("A") + key("S") + key("D")],
     ["Climb / descend", key("E") + " / " + key("Q")],
     ["Boost", key("Shift")],
@@ -29,7 +29,7 @@ const ROWS: Record<Device, [string, string][]> = {
     ["Music", key("M")],
   ],
   pad: [
-    ["Free flight", face("Y") + " / " + menu],
+    ["Mode: fixed · flight · fight", face("Y") + " / " + menu],
     ["Fly", stickGlyph("L")],
     ["Camera", stickGlyph("R")],
     ["Climb / descend", shoulder("RT") + " / " + shoulder("LT")],

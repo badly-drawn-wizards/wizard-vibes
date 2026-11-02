@@ -110,6 +110,13 @@ export class Enemies {
     return out;
   }
 
+  // Back to full health (and up, if he was down).
+  refill(): void {
+    this.hp = PLAYER_HP;
+    this.down = -1;
+    this.onChange();
+  }
+
   // A spell of `kind` cast by `owner` hit `side`.
   hit(side: number, kind: number): void {
     const damage = DAMAGE[kind] ?? 0;

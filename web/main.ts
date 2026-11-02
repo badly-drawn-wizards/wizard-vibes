@@ -12,6 +12,7 @@ import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
 import { type Device, Help } from "./help.ts";
 import { Spells } from "./spells.ts";
 import { Combat } from "./combat.ts";
+import { Mode } from "./mode.ts";
 import { Music } from "./music.ts";
 import { AudioHub } from "./audio.ts";
 import { Sfx } from "./sfx.ts";
@@ -121,9 +122,21 @@ const ctx = (useGl ? null : canvas.getContext("webgpu"))!;
 const cam = loadCamera();
 attachCamera(cam, canvas);
 
-// Free flight (F toggles): fly in from behind him. Clicking the view takes
-// the keys back from the drawer's controls.
+// The mode (F cycles: see mode.ts): fixed on the flight path, free flight,
+// or free flight with the enemies (outside it the renderer gets none,
+// whatever the drawer says). Free flight starts from behind him. Clicking
+// the view takes the keys back from the drawer's controls.
 const flight = new FreeFlight();
+const mode = new Mode(document.getElementById("mode-note")!);
+const enemyCount = () => (mode.fight ? Math.min(6, Number(params.values.enemies ?? 0)) : 0);
+mode.onChange = () => {
+  flight.setActive(mode.free);
+  if (mode.fight) combat.enemies.refill();
+};
+flight.setActive(mode.free);
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(e)) mode.cycle();
+});
 canvas.addEventListener("pointerdown", () => (document.activeElement as HTMLElement | null)?.blur?.());
 flight.onToggle = (on) => {
   if (!on) return;
@@ -233,16 +246,17 @@ function frameSize(): { vw: number; h: number } {
 // frame's drive record. `canCast`: whether spells can be cast (not in the
 // WebGL fallback, which cannot draw them).
 function step(dt: number, canCast: boolean): Drive {
+  entries.override({ enemies: enemyCount() });
   if (!paused) time += dt;
   idle(cam, dt);
   const pad = readPad();
   padConnected = !!pad;
-  if (pad?.toggle) flight.toggle();
+  if (pad?.toggle) mode.cycle();
   if (pad?.active) device = "pad";
   if (pad?.spell != null) spells.select(pad.spell);
   combat.update({
     dt: paused ? 0 : dt, time, him: flight.where(time).pos, aim: castFrom(), drawn: canCast, able: canCast && !paused,
-    n: Math.min(6, Number(params.values.enemies ?? 0)), seed: Number(params.values.enemy_seed ?? 0),
+    n: enemyCount(), seed: Number(params.values.enemy_seed ?? 0),
     casting: casting || !!pad?.cast, shielding: !!pad?.shield,
   });
   spells.update(paused ? 0 : dt, casting || !!pad?.cast);
@@ -315,7 +329,7 @@ async function frame(i: FutInstance, dt: number): Promise<void> {
 function frameGl(r: GlRenderer, dt: number): void {
   const { vw, h } = frameSize();
   const d = step(dt, false);
-  r.draw(params.values, d, { vw, h, tm: time, yaw: cam.yaw, pitch: cam.pitch, dst: cam.dist });
+  r.draw(entries.values(), d, { vw, h, tm: time, yaw: cam.yaw, pitch: cam.pitch, dst: cam.dist });
 }
 
 function tick(now: number): void {
@@ -327,7 +341,7 @@ function tick(now: number): void {
     fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
     frameGl(glr, dt);
     quality.frame(!paused && !document.hidden);
-    setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : failure ? "WebGL fallback (WebGPU failed)" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`);
+    setStatus(`${glr.version!.slice(0, 8)} · ${hasWebGpu ? "WebGL" : failure ? "WebGL fallback (WebGPU failed)" : "WebGL fallback (no WebGPU)"}: no spells, collisions or anti-aliasing · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${mode.free ? ` · ${mode.name}` : ""}${padConnected ? " · controller" : ""}`);
     return;
   }
   if (!inst || inFlight) return;
@@ -337,7 +351,7 @@ function tick(now: number): void {
   const current = inst;
   inFlight = frame(current, dt)
     .then(() => quality.frame(!paused && !document.hidden))
-    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${flight.active ? " · free flight" : ""}${padConnected ? " · controller" : ""}`))
+    .then(() => setStatus(`${current.version.slice(0, 8)}${current.f32 ? " · f32" : ""}${current.portable ? " · portable" : ""} · ${canvas.width}×${canvas.height} · ${fps.toFixed(1)} fps${paused ? " · paused" : ""}${mode.free ? ` · ${mode.name}` : ""}${padConnected ? " · controller" : ""}`))
     .catch((e) => showError(`render failed: ${e?.stack ?? e}`))
     .finally(() => (inFlight = null));
 }

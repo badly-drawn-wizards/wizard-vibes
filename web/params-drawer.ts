@@ -11,7 +11,7 @@
 import { IS_STATIC } from "./static.ts";
 
 type Kind = "slider" | "int" | "color" | "checkbox" | "select" | "flags";
-type Value = number | boolean | number[];
+export type Value = number | boolean | number[];
 interface Param {
   id: string;
   label: string;

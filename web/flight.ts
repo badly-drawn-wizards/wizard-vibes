@@ -101,7 +101,6 @@ export class FreeFlight {
   constructor() {
     window.addEventListener("keydown", (e) => {
       if (isTyping(e)) return;
-      if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey) this.toggle();
       const k = KEYS[e.code];
       if (k && this.active) {
         this.held.add(k);
@@ -124,6 +123,11 @@ export class FreeFlight {
   // Called with the animation time when free flight is switched on.
   onToggle: (active: boolean) => void = () => {};
   private time = 0;
+
+  // Switches free flight on or off (see mode.ts).
+  setActive(on: boolean): void {
+    if (on !== this.active) this.toggle();
+  }
 
   toggle(): void {
     this.active = !this.active;

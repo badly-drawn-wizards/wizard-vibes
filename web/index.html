@@ -39,6 +39,10 @@
   #crosshair.locked { opacity: 1; }
   #crosshair.locked::before { border-color: #ff5a6a; border-radius: 3px; transform: rotate(45deg); }
   #crosshair.shielded { opacity: 0.3; }
+  #mode-note { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); pointer-events: none;
+               color: var(--fg); background: rgb(5 4 13 / 0.6); padding: 6px 14px; border-radius: 6px;
+               opacity: 0; transition: opacity 0.4s; }
+  #mode-note.on { opacity: 1; transition: opacity 0.1s; }
   #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0;
           background: radial-gradient(ellipse at center, transparent 45%, rgb(170 10 20 / 0.85)); }
   #hud select { font: inherit; color: var(--fg); background: #0b0a1c; border: 1px solid #2c2950;
@@ -135,6 +139,7 @@
   <div class="score"></div>
 </div>
 <div id="crosshair"></div>
+<div id="mode-note"></div>
 <div id="hurt"></div>
 <button id="drawer-toggle" type="button" title="Parameters">⚙</button>
 <aside id="drawer"><div id="params"></div></aside>

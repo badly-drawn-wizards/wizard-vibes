@@ -6,7 +6,7 @@
 
 import { buildRecord, type FutharkArray, type FutInstance } from "./futhark-loader.ts";
 import type { Drive } from "./flight.ts";
-import type { Params } from "./params-drawer.ts";
+import type { Params, Value } from "./params-drawer.ts";
 
 type Record_ = { ptr: number; free(): void };
 
@@ -18,22 +18,37 @@ export const takes = (i: FutInstance, entry: string, input: string): boolean =>
 const f32Array = (i: FutInstance, data: Float32Array): FutharkArray => i.fut.types["[]f32"].from_data(data, data.length);
 
 export class Entries {
-  private records = new WeakMap<FutInstance, { version: number; rec: Record_ }>();
+  private records = new WeakMap<FutInstance, { version: string; rec: Record_ }>();
   private params: Params;
+  private over: Record<string, Value> = {};
+  private overVersion = 0;
 
   constructor(params: Params) {
     this.params = params;
   }
 
+  // Values given the renderer in place of the drawer's (e.g. no enemies
+  // outside fight mode), and the uniforms as it gets them.
+  override(values: Record<string, Value>): void {
+    if (Object.entries(values).every(([k, v]) => this.over[k] === v) && Object.keys(values).length === Object.keys(this.over).length) return;
+    this.over = values;
+    this.overVersion++;
+  }
+
+  values(): Record<string, Value> {
+    return { ...this.params.values, ...this.over };
+  }
+
   // The uniforms as this build's params record.
   paramsRecord(i: FutInstance): Record_ {
+    const version = `${this.params.version}/${this.overVersion}`;
     const r = this.records.get(i);
-    if (r && r.version === this.params.version) return r.rec;
+    if (r && r.version === version) return r.rec;
     r?.rec.free();
     // (older builds may take as uniforms what are compile-time now: they
     // get the values in force)
-    const rec = buildRecord(i, "params", { ...this.params.compile, ...this.params.values });
-    this.records.set(i, { version: this.params.version, rec });
+    const rec = buildRecord(i, "params", { ...this.params.compile, ...this.values() });
+    this.records.set(i, { version, rec });
     return rec;
   }
 
