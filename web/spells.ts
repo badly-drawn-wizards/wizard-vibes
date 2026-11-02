@@ -5,16 +5,22 @@
 // it hits, a wind blade breaks up, and a lightning strike finds the ground
 // it hits. At most `limit` (a compile-time parameter) are out at once, and
 // casting has a short cooldown on top.
+//
+// The enemies cast them too (see enemies.ts). Each spell has a side: his
+// hit the enemies, theirs hit him, as spheres listed in `targets`; a hit is
+// reported to `onHit` (a bolt or blade where it strikes, a burst once for
+// each target in its blast, a strike once where it lands). His strikes
+// lock on to a target near where he aims.
 
 type V3 = [number, number, number];
 
 export const SPELL_NAMES = ["Fire bolt", "Lightning strike", "Wind blade"];
 
 // kinds, as in fut/spells.fut
-const FIRE = 0;
-const STRIKE = 1;
-const WIND = 2;
-const BURST = 3;
+export const FIRE = 0;
+export const STRIKE = 1;
+export const WIND = 2;
+export const BURST = 3;
 const GUST = 4; // a wind blade's burst into small blades
 const STRIDE = 10;
 
@@ -24,6 +30,18 @@ const COOLDOWN = [0.25, 0.5, 0.3]; // seconds before the next cast
 const STRIKE_RANGE = 45; // furthest a strike lands
 const STRIKE_HEIGHT = 25; // it comes down from this far above the orb
 const PROBE_HEIGHT = 60; // a strike's ground is probed from up here
+const BLAST = 2.6; // a burst's reach
+const STRIKE_REACH = 1.6; // a strike's
+const LOCK_ON = 0.12; // radians off his aim a strike still finds a target
+
+// Something spells can hit: a sphere, and whose it is (HIS, or an enemy's
+// number).
+export const HIS = -1;
+export interface Target {
+  c: V3;
+  r: number;
+  side: number;
+}
 
 interface Spell {
   id: number;
@@ -34,7 +52,21 @@ interface Spell {
   life: number; // seconds: it has faded out by then
   seed: number; // varies each one's look
   top: number; // a strike's top height
+  owner: number; // whose (HIS or an enemy's number)
+  done: boolean; // its blast (a burst's or a strike's) has been dealt
 }
+
+// A fire bolt bursting where it is.
+function burst(s: Spell): void {
+  s.kind = BURST;
+  s.age = 0;
+  s.life = LIFE[BURST];
+  s.vel = [0, 0, 0];
+}
+
+const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const dist = (a: V3, b: V3) => Math.hypot(...sub(a, b));
 
 // A wind blade bursting into small blades where it is (see spell_gust in
 // fut/spells.fut): it keeps its velocity, which aims the shards.
@@ -49,6 +81,8 @@ export class Spells {
   limit = 6;
   staff = 0; // how far the staff is held out (0..1)
   sinceCast = 10; // seconds
+  targets: Target[] = [];
+  onHit: (side: number, kind: number, owner: number) => void = () => {};
   private items: Spell[] = [];
   private cooldown = 0;
   private nextId = 1;
@@ -64,22 +98,76 @@ export class Spells {
   // Casts the selected spell from `origin` along the unit vector `dir`
   // (world space), unless cooling down or at the limit.
   cast(origin: V3, dir: V3): boolean {
-    if (this.cooldown > 0 || this.items.length >= this.limit) return false;
-    const kind = this.selected;
-    const s: Spell = { id: this.nextId++, kind, pos: [...origin], vel: [0, 0, 0], age: 0, life: LIFE[kind], seed: (Math.random() * 1e5) | 0, top: 0 };
+    if (this.cooldown > 0 || !this.launch(this.selected, origin, dir, HIS)) return false;
+    this.cooldown = COOLDOWN[this.selected];
+    this.sinceCast = 0;
+    return true;
+  }
+
+  // Casts a spell of `kind` for `owner` (no cooldown), unless at the limit.
+  // A strike lands at `at` if given; his lock on to a target near his aim,
+  // or else land where the view meets the ground.
+  launch(kind: number, origin: V3, dir: V3, owner: number, at?: V3): boolean {
+    if (this.items.length >= this.limit) return false;
+    const s: Spell = { id: this.nextId++, kind, pos: [...origin], vel: [0, 0, 0], age: 0, life: LIFE[kind],
+      seed: (Math.random() * 1e5) | 0, top: 0, owner, done: false };
     if (kind === STRIKE) {
-      // where the view meets sea level, within range; the probe then finds
-      // the actual ground beneath
-      const t = dir[1] < -0.05 ? Math.min(STRIKE_RANGE, origin[1] / -dir[1]) : STRIKE_RANGE;
-      s.pos = [origin[0] + dir[0] * t, 0, origin[2] + dir[2] * t];
-      s.top = origin[1] + STRIKE_HEIGHT;
+      const target = at ?? (owner === HIS ? this.lockOn(origin, dir) : null);
+      if (target) s.pos = [...target];
+      else {
+        // where the view meets sea level, within range; the probe then finds
+        // the actual ground beneath
+        const t = dir[1] < -0.05 ? Math.min(STRIKE_RANGE, origin[1] / -dir[1]) : STRIKE_RANGE;
+        s.pos = [origin[0] + dir[0] * t, 0, origin[2] + dir[2] * t];
+      }
+      s.top = Math.max(origin[1], s.pos[1]) + STRIKE_HEIGHT;
     } else {
       s.vel = dir.map((d) => d * SPEED[kind]) as V3;
     }
     this.items.push(s);
-    this.cooldown = COOLDOWN[kind];
-    this.sinceCast = 0;
     return true;
+  }
+
+  // The enemy target nearest his aim, within LOCK_ON of it and in range.
+  private lockOn(origin: V3, dir: V3): V3 | null {
+    let best: V3 | null = null;
+    let bestAngle = LOCK_ON;
+    for (const t of this.targets) {
+      if (t.side === HIS) continue;
+      const v = sub(t.c, origin);
+      const d = Math.hypot(...v);
+      if (d > STRIKE_RANGE * 1.5) continue;
+      const angle = Math.acos(Math.min(1, dot(v, dir) / d)) - Math.atan(t.r / d);
+      if (angle < bestAngle) {
+        bestAngle = angle;
+        best = t.c;
+      }
+    }
+    return best;
+  }
+
+  // Whether a spell of `owner`'s can hit target t.
+  private opposed(owner: number, t: Target): boolean {
+    return (owner === HIS) !== (t.side === HIS);
+  }
+
+  // Bolts and blades that fly into a target; bursts' and strikes' blasts.
+  private collide(): void {
+    for (const s of this.items) {
+      if (s.kind === FIRE || s.kind === WIND) {
+        const t = this.targets.find((t) => this.opposed(s.owner, t) && dist(s.pos, t.c) < t.r);
+        if (!t) continue;
+        this.onHit(t.side, s.kind, s.owner);
+        if (s.kind === FIRE) burst(s);
+        else gust(s);
+      } else if ((s.kind === BURST || (s.kind === STRIKE && s.pos[1] !== 0)) && !s.done) {
+        // (once per target: the nearest sphere of each)
+        s.done = true;
+        const reach = s.kind === BURST ? BLAST : STRIKE_REACH;
+        const sides = new Set(this.targets.filter((t) => this.opposed(s.owner, t) && dist(s.pos, t.c) < t.r + reach).map((t) => t.side));
+        for (const side of sides) this.onHit(side, s.kind, s.owner);
+      }
+    }
   }
 
   // `holding`: the cast button is down. The staff comes out quickly while
@@ -96,6 +184,7 @@ export class Spells {
       // a wind blade that flew its course bursts too
       if (s.kind === WIND && s.age >= s.life) gust(s);
     }
+    this.collide();
     this.items = this.items.filter((s) => s.age < s.life);
   }
 
@@ -120,10 +209,7 @@ export class Spells {
       if (!s || !(d < 1e5)) return;
       if (s.kind === FIRE && d < 0.15) {
         // burst where it hit
-        s.kind = BURST;
-        s.age = 0;
-        s.life = LIFE[BURST];
-        s.vel = [0, 0, 0];
+        burst(s);
       } else if (s.kind === WIND && d < 0.15) {
         // it bursts against the land into small blades
         gust(s);

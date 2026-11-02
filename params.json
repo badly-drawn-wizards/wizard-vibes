@@ -1080,7 +1080,7 @@
           "kind": "int",
           "min": 1,
           "max": 16,
-          "default": 6,
+          "default": 10,
           "compile": true
         }
       ]

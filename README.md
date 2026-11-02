@@ -51,7 +51,13 @@ circle). Other wizards fly round him (Enemies in the drawer: how many, and
 a seed for their looks): each has its own robe, hat, beard and skin, its
 own platform and circle colour, all hashed from the seed and its number
 (fut/enemies.fut). Where they are is a pure function of the time and his
-flight. They get a march of their own, over just the stretch of each ray
+flight. They fight: they cast fire bolts, wind blades and lightning at
+him, and his spells hit them (a lightning strike locks on to one near
+where he aims). The bar at the bottom is his health; an enemy takes three
+hits, falls burning, and another appears in its place, with new looks
+(web/enemies.ts works out where they are as the renderer does, and passes
+each one's state, its generation and phase, in the drive record). They
+get a march of their own, over just the stretch of each ray
 through their bounding spheres, so most rays only pay a ray-sphere test per
 enemy (about 0.4 ms a frame at 1080p for three).
 

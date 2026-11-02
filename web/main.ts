@@ -11,6 +11,7 @@ import { createDrawer, type Params } from "./params-drawer.ts";
 import { type Drive, FreeFlight, isTyping, ON_PATH } from "./flight.ts";
 import { type Device, Help } from "./help.ts";
 import { Spells } from "./spells.ts";
+import { Enemies, PLAYER_HP } from "./enemies.ts";
 import { Music } from "./music.ts";
 import { IS_STATIC } from "./static.ts";
 import { GlRenderer } from "./webgl.ts";
@@ -152,6 +153,21 @@ const musicPeriods = new WeakMap<FutInstance, number>();
 const sounds = new ProbeReader();
 if (useGl) music.disable("Music needs WebGPU: its samples come from a compute kernel");
 
+// The fight with the enemies (see enemies.ts): his health, how many he has
+// defeated, a red flash when he is hit, and a while out when defeated.
+const enemies = new Enemies();
+spells.onHit = (side, kind) => enemies.hit(side, kind);
+const combat = document.getElementById("combat")!;
+const hpBar = combat.querySelector<HTMLElement>(".hp span")!;
+const score = combat.querySelector<HTMLElement>(".score")!;
+const hurt = document.getElementById("hurt")!;
+function showCombat(n: number): void {
+  combat.hidden = n === 0;
+  hpBar.style.width = `${(100 * enemies.hp) / PLAYER_HP}%`;
+  score.textContent = enemies.down >= 0 ? "defeated!" : `${enemies.defeated} defeated`;
+  hurt.style.opacity = String(enemies.down >= 0 ? 0.8 : 0.7 * Math.exp(-4 * enemies.hurt));
+}
+
 // The orb, and the camera's view, in the world (for casting).
 function castFrom(): { origin: [number, number, number]; dir: [number, number, number] } {
   const { pos, heading } = flight.where(time);
@@ -230,10 +246,17 @@ function step(dt: number, canCast: boolean): Drive {
   if (pad?.toggle) flight.toggle();
   if (pad?.active) device = "pad";
   if (pad?.spell != null) spells.select(pad.spell);
-  if (canCast && !paused && (casting || pad?.cast)) {
+  if (canCast && !paused && enemies.down < 0 && (casting || pad?.cast)) {
     const { origin, dir } = castFrom();
     spells.cast(origin, dir);
   }
+  // the fight (only where spells can be drawn; not while he is down)
+  const n = canCast ? Math.min(6, Number(params.values.enemies ?? 0)) : 0;
+  const seed = Number(params.values.enemy_seed ?? 0);
+  const him = flight.where(time).pos;
+  spells.targets = enemies.targets(n, seed, time, him);
+  enemies.update(paused ? 0 : dt, n, seed, time, him, spells);
+  showCombat(n);
   spells.update(paused ? 0 : dt, casting || !!pad?.cast);
   help.update(device, spells.selected);
   // right stick: look right turns the view right (the camera's yaw is its
@@ -250,7 +273,7 @@ function step(dt: number, canCast: boolean): Drive {
 
   // casting, in his frame: along the camera's view
   const [sx, sy, sz] = viewDir(cam);
-  return { ...flight.drive(), staff: spells.staff, sx, sy, sz, flash: spells.sinceCast, spell: spells.selected };
+  return { ...flight.drive(), staff: spells.staff, sx, sy, sz, flash: spells.sinceCast, spell: spells.selected, ...enemies.foes() };
 }
 
 async function frame(i: FutInstance, dt: number): Promise<void> {
@@ -432,6 +455,10 @@ function reload(version: string): Promise<void> {
   flight,
   cam,
   spells,
+  enemies,
+  get time() {
+    return time;
+  },
   music,
   async readFrame(w: number, vw: number, h: number, t: number, yaw: number, pitch: number, dist: number) {
     const i = inst;

@@ -5,6 +5,12 @@
 -- are is a pure function of the time and his flight: each circles him in
 -- the world at its own distance, height and speed, turned to face him.
 --
+-- Their fights are run by the harness (web/enemies.ts), which passes each
+-- one's state as a float (see foe_of): how many times it has been
+-- replaced (which re-rolls its looks and its place), and whether it is
+-- appearing (growing in, flashing) or defeated (tumbling, falling, burnt
+-- out, shrinking away). 0 is one there from the start.
+--
 -- They are drawn in the layer layers_enemies, with materials m_enemy +
 -- enemy_parts * i + part (part_* below). A simpler figure than his: robe,
 -- arms, head and nose, beard, hat and band, staff and orb; one arm on the
@@ -33,25 +39,60 @@ def part_side : i32 = 8 -- the rest of the platform
 def enemy_centre : vec3 = vec 0 (-0.1) 0
 def enemy_radius : f32 = 2.8
 
--- Random number k (in [0, 1)) of enemy i.
-def enemy_rnd (seed: i32) (i: i32) (k: i32) : f32 = hash3 seed (i + 17) (k + 101)
+-- The states of the enemies, from the harness: per enemy, 16 times its
+-- generation (how many enemies have had its place before it) plus its
+-- phase: under 8, the seconds it has still to appear; 8 and over, 8 plus
+-- the seconds since it was defeated.
+type foes = (f32, f32, f32, f32, f32, f32)
+
+def foe_state (fs: foes) (i: i32) : f32 =
+  if i == 0 then fs.0 else if i == 1 then fs.1 else if i == 2 then fs.2
+  else if i == 3 then fs.3 else if i == 4 then fs.4 else fs.5
+
+def appear_time : f32 = 1.5 -- seconds an enemy takes to appear
+def fall_time : f32 = 3 -- and a defeated one to fall out of sight
+
+-- Random number k (in [0, 1)) of enemy i, generation g.
+def enemy_rnd (seed: i32) (g: i32) (i: i32) (k: i32) : f32 = hash3 (seed + 7919 * g) (i + 17) (k + 101)
 
 -- Where enemy i is (in the world) and which way it faces (a yaw: its +z
--- points that way).
-type enemy = {pos: vec3, yaw: f32}
+-- points that way); its generation; how far it has still to appear (0..1)
+-- and how long since it was defeated (or -1); its size, and how far it has
+-- tumbled over (radians, about its x axis through tumble_axis).
+type enemy = {pos: vec3, yaw: f32, gen: i32, appear: f32, dying: f32, size: f32, tumble: f32}
 
-def enemy_at (seed: i32) (i: i32) (secs: f32) (fl: flight) : enemy =
-  let r = enemy_rnd seed i
+def tumble_axis : vec3 = vec 0 0.5 0
+
+def enemy_at (seed: i32) (state: f32) (i: i32) (secs: f32) (fl: flight) : enemy =
+  let gf = f32.floor (state / 16)
+  let phase = state - 16 * gf
+  let gen = i32.f32 gf
+  let appear = if phase < 8 then saturate (phase / appear_time) else 0
+  let dying = if phase >= 8 then phase - 8 else -1
+  let r = enemy_rnd seed gen i
   let radius = 9 + 12 * r 0
   let speed = (0.04 + 0.06 * r 1) * (if r 2 < 0.5 then -1 else 1)
   -- (spread round him, then each drifting round at its own speed)
   let a = 2 * f32.pi * (f32.i32 i / f32.i32 max_enemies + 0.12 * r 3) + speed * secs
   let h = -1.5 + 4 * r 4 + 0.5 * f32.sin (0.6 * secs + 6.3 * r 5)
   let off = vec (radius * f32.sin a) h (radius * f32.cos a)
-  in {pos = fl.pos +^ off, yaw = f32.atan2 (-off.x) (-off.z)}
+  -- (a defeated one falls, faster and faster, tumbling over, and shrinks
+  -- away at the end; a new one grows in)
+  let fall = if dying >= 0 then 2.5 * dying * dying else 0
+  let size = if dying >= 0 then smoothstep fall_time (fall_time - 1) dying else 1 - 0.95 * appear * appear
+  in { pos = fl.pos +^ off -^ vec 0 fall 0, yaw = f32.atan2 (-off.x) (-off.z), gen, appear, dying, size
+     , tumble = if dying >= 0 then 1.4 * dying + 0.5 * dying * dying else 0 }
 
--- A point of his space in enemy e's.
-def enemy_space (fl: flight) (e: enemy) (p: vec3) : vec3 = yaw_inv e.yaw (to_world fl p -^ e.pos)
+-- Whether it is drawn at all.
+def shown (e: enemy) : bool = e.dying < fall_time
+
+-- A point of his space in enemy e's (where it is modelled at full size,
+-- upright), and how distances there scale back to his.
+def enemy_space (fl: flight) (e: enemy) (p: vec3) : vec3 =
+  let q = yaw_inv e.yaw (to_world fl p -^ e.pos) -^ tumble_axis
+  let (c, s) = (f32.cos e.tumble, f32.sin e.tumble)
+  let q = vec q.x (c * q.y + s * q.z) (c * q.z - s * q.y) +^ tumble_axis
+  in scale (1 / f32.max 0.02 e.size) q
 
 -- A colour from hue (0..1, round the wheel), saturation and value.
 def hsv (h: f32) (s: f32) (v: f32) : vec3 =
@@ -62,8 +103,8 @@ def hsv (h: f32) (s: f32) (v: f32) : vec3 =
 type looks = { kind: i32, robe: vec3, hat: vec3, beard: vec3, skin: vec3, circle: vec3, carpet: vec3
              , hem: f32, hat_h: f32, droop: f32, beard_len: f32, phase: f32 }
 
-def looks_of (seed: i32) (i: i32) : looks =
-  let r = enemy_rnd seed i
+def looks_of (seed: i32) (g: i32) (i: i32) : looks =
+  let r = enemy_rnd seed g i
   let robe_hue = r 10
   let hat_hue = if r 11 < 0.5 then robe_hue else fract (robe_hue + 0.35 + 0.3 * r 12)
   let b = r 13
@@ -109,36 +150,38 @@ def sd_enemy_figure (lk: looks) (secs: f32) (q: vec3) : (f32, i32) =
 
 -- The enemies near his space's point p (n of them; tagged materials).
 #[noinline]
-def enemies_dist (n: i32) (seed: i32) (secs: f32) (fl: flight) (p: vec3) : hit =
+def enemies_dist (n: i32) (seed: i32) (fs: foes) (secs: f32) (fl: flight) (p: vec3) : hit =
   tag layers_enemies <|
   loop best = nothing for i < i32.min n max_enemies do
-    let e = enemy_at seed i secs fl
+    let e = enemy_at seed (foe_state fs i) i secs fl
+    in if !(shown e) then best else
     let q = enemy_space fl e p
-    let bound = length (q -^ enemy_centre) - enemy_radius
+    let bound = e.size * (length (q -^ enemy_centre) - enemy_radius)
     let m = m_enemy + enemy_parts * i
     in if bound > f32.min 0.3 best.0 then umin best (bound, m) else
-    let lk = looks_of seed i
+    let lk = looks_of seed e.gen i
     let (pd, pm) = platform_exact lk.kind secs q
     let (fd, fpart) = sd_enemy_figure lk secs q
-    let h = if fd < pd then (fd, m + fpart) else (pd, m + if pm == m_ground then part_top else part_side)
+    let h = if fd < pd then (e.size * fd, m + fpart) else (e.size * pd, m + if pm == m_ground then part_top else part_side)
     in umin best h
 
 -- Sphere-traces the enemies alone along ro + t rd up to tmax: (distance,
 -- tagged material), or infinity. Only the stretch of the ray through their
 -- bounding spheres is marched (most rays miss them all, at the cost of a
 -- ray-sphere test each).
-def march_enemies (n: i32) (seed: i32) (secs: f32) (fl: flight) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
+def march_enemies (n: i32) (seed: i32) (fs: foes) (secs: f32) (fl: flight) (ro: vec3) (rd: vec3) (tmax: f32) : (f32, i32) =
   let (t0, t1) =
     loop (t0, t1) = (f32.inf, -f32.inf) for i < i32.min n max_enemies do
-      let e = enemy_at seed i secs fl
-      let c = to_local_dir fl (e.pos +^ enemy_centre -^ fl.pos)
-      let (a, b) = ray_sphere c enemy_radius ro rd
-      in if a > b || b < 0 then (t0, t1) else (f32.min t0 a, f32.max t1 b)
+      let e = enemy_at seed (foe_state fs i) i secs fl
+      -- (tumbling moves the centre round the axis: a wider sphere covers it)
+      let c = to_local_dir fl (e.pos +^ tumble_axis -^ fl.pos)
+      let (a, b) = ray_sphere c (e.size * enemy_radius + 0.6) ro rd
+      in if !(shown e) || a > b || b < 0 then (t0, t1) else (f32.min t0 a, f32.max t1 b)
   let t1 = f32.min t1 tmax
   in if t0 >= t1 then (f32.inf, 0) else
   let (t, _, hit, m) =
     loop (t, i, hit, m) = (f32.max 0.02 t0, 0i32, false, 0i32)
     while i < 128 && t < t1 && !hit do
-      let (d, mat) = enemies_dist n seed secs fl (ro +^ scale t rd)
+      let (d, mat) = enemies_dist n seed fs secs fl (ro +^ scale t rd)
       in if d < 0.0005 * t then (t, i + 1, true, mat) else (t + d, i + 1, false, m)
   in if hit then (t, m) else (f32.inf, 0)

@@ -302,14 +302,9 @@ def tree_material (trunk: vec3) (leaf: vec3) (needle: vec3) (m: i32) (w: vec3) :
 -- The enemies' materials (see enemies.fut), at point p of his space.
 def is_enemy (m: i32) : bool = m >= m_enemy && m < m_enemy + enemy_parts * max_enemies
 
-#[noinline]
-def enemy_material (seed: i32) (secs: f32) (tm: f32) (fl: flight) (rock: (vec3, vec3, vec3)) (moss: vec3)
-                   ((sheen, glow): (f32, f32)) (fp: f32) (m: i32) (p: vec3) : material =
-  let i = (m - m_enemy) / enemy_parts
-  let part = (m - m_enemy) % enemy_parts
-  let lk = looks_of seed i
-  let q = enemy_space fl (enemy_at seed i secs fl) p
-  in if part == part_robe then plain lk.robe with rim = false with sheen = sheen with ks = 0.03
+-- An enemy's part (in its space, q), before what happens to it.
+def enemy_surface (lk: looks) (sheen: f32) (glow: f32) (tm: f32) (rock: (vec3, vec3, vec3)) (moss: vec3) (fp: f32) (part: i32) (q: vec3) : material =
+  if part == part_robe then plain lk.robe with rim = false with sheen = sheen with ks = 0.03
   else if part == part_skin then plain lk.skin with ks = 0.15 with shininess = 16
   else if part == part_beard then plain lk.beard with ks = 0.05
   else if part == part_hat then plain lk.hat with ks = 0.05
@@ -323,6 +318,25 @@ def enemy_material (seed: i32) (secs: f32) (tm: f32) (fl: flight) (rock: (vec3, 
        in if part != part_top then mat
           else let halo = f32.exp (-(f32.max 0 (glyph_sdf (-tm) q.x q.z)) / 0.05)
                in mat with emission = scale ((0.25 + 0.06 * glow) * (5 * rune_paint (-tm) q + halo)) lk.circle
+
+#[noinline]
+def enemy_material (seed: i32) (fs: foes) (secs: f32) (tm: f32) (fl: flight) (rock: (vec3, vec3, vec3)) (moss: vec3)
+                   ((sheen, glow): (f32, f32)) (fp: f32) (m: i32) (p: vec3) : material =
+  let i = (m - m_enemy) / enemy_parts
+  let part = (m - m_enemy) % enemy_parts
+  let e = enemy_at seed (foe_state fs i) i secs fl
+  let lk = looks_of seed e.gen i
+  let q = enemy_space fl e p
+  let mat = enemy_surface lk sheen glow tm rock moss fp part q
+  -- appearing, it flashes in its circle's colour; defeated, it chars and
+  -- smoulders as it falls, its circle going out
+  in if e.appear > 0 then mat with emission = mat.emission +^ scale (2 * e.appear * e.appear) lk.circle
+     else if e.dying < 0 then mat
+     else let burnt = smoothstep 0 0.6 e.dying
+              let ember = smoothstep 0.62 0.85 (vnoise3 (scale 16 q +^ vec 0 (-4 * secs) 0))
+          in mat with albedo = scale (1 - 0.85 * burnt) mat.albedo
+                 with emission = scale (1 - burnt) mat.emission
+                                 +^ scale (0.9 * burnt * smoothstep fall_time 0.5 e.dying * ember) (vec 1 0.35 0.08)
 
 ---------------------------------------------------------------------
 -- Lighting
@@ -412,7 +426,7 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   let mat = if is_tree m
             then tree_material trunk_colour leaf_colour needle_colour m (to_world pose.fl p)
             else if is_enemy m
-            then enemy_material pose.prm.enemy_seed pose.secs pose.tm pose.fl
+            then enemy_material pose.prm.enemy_seed pose.foes pose.secs pose.tm pose.fl
                                 (pose.prm.rock_dark, pose.prm.rock_light, pose.prm.rock_top) pose.prm.moss_colour
                                 (pose.prm.sheen, pose.prm.rune_glow) fp m p
             else material pose g fp m p n
@@ -564,7 +578,7 @@ def follow (pose: pose) (g: glow) (ro0: vec3) (rd0: vec3) (w0: f32) : (vec3, ref
       -- rays skip: see march_enemies)
       let (t_terrain, m_land) =
         if inside || enters || !(has vis layers_enemies) || pose.prm.enemies <= 0 then (t_terrain, m_land)
-        else let (te, me) = march_enemies pose.prm.enemies pose.prm.enemy_seed pose.secs pose.fl ro rd (f32.min tmax t_terrain)
+        else let (te, me) = march_enemies pose.prm.enemies pose.prm.enemy_seed pose.foes pose.secs pose.fl ro rd (f32.min tmax t_terrain)
              in if te < t_terrain then (te, me) else (t_terrain, m_land)
       let local_end = f32.max 0 (ray_sphere occluder_centre local_radius ro rd).1
       let local_max = f32.min tmax (f32.min t_terrain local_end)

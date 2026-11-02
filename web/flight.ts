@@ -33,6 +33,13 @@ export interface Drive {
   sz: number;
   flash: number;
   spell: number;
+  // the enemies' states (see web/enemies.ts)
+  foe0: number;
+  foe1: number;
+  foe2: number;
+  foe3: number;
+  foe4: number;
+  foe5: number;
 }
 
 // Analog control, e.g. from a game controller: fwd and side along and across
@@ -45,7 +52,7 @@ export interface Stick {
 }
 
 export const ON_PATH: Drive = { free: false, x: 0, y: 0, z: 0, heading: 0, turn: 0, ax: 0, ay: 0, az: 0, climb: 0,
-  staff: 0, sx: 0, sy: 0, sz: 1, flash: 10, spell: 1 };
+  staff: 0, sx: 0, sy: 0, sz: 1, flash: 10, spell: 1, foe0: 0, foe1: 0, foe2: 0, foe3: 0, foe4: 0, foe5: 0 };
 
 // The automatic flight path (as in fut/world.fut), to take off from.
 const SPEED = 3;
@@ -217,7 +224,7 @@ export class FreeFlight {
     return {
       free: true, x: this.pos[0], y: this.pos[1], z: this.pos[2], heading: this.heading, turn: this.turn,
       ax: lx * amount, ay: wy * amount, az: lz * amount, climb: this.climb,
-      staff: 0, sx: 0, sy: 0, sz: 1, flash: 10, spell: 1,
+      staff: 0, sx: 0, sy: 0, sz: 1, flash: 10, spell: 1, foe0: 0, foe1: 0, foe2: 0, foe3: 0, foe4: 0, foe5: 0,
     };
   }
 
