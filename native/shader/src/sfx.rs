@@ -117,12 +117,9 @@ pub fn comb(d: usize, g: f32, x: &[f32]) -> Vec<f32> {
     y
 }
 
-// An allpass: y[i] = -g x[i] + x[i - d] + g y[i - d], meant. (But in the
-// Futhark, `-g * #[unsafe] x[i] + (..)` parses as `-g * (x[i] + (..))`:
-// the attribute takes the whole sum. Ported as it computes, so the sounds
-// match: y[i] = -g (x[i] + x[i - d]) + g y[i - d].)
+// An allpass: y[i] = -g x[i] + x[i - d] + g y[i - d].
 pub fn allpass(d: usize, g: f32, x: &[f32]) -> Vec<f32> {
-    let u: Vec<f32> = (0..x.len()).map(|i| -g * (x[i] + (if i >= d { x[i - d] } else { 0.0 }))).collect();
+    let u: Vec<f32> = (0..x.len()).map(|i| -g * x[i] + (if i >= d { x[i - d] } else { 0.0 })).collect();
     comb(d, g, &u)
 }
 
@@ -361,4 +358,14 @@ pub fn sfx_samples(k: i32, rate: f32, n: usize) -> Vec<f32> {
     let r: Vec<f32> = (0..n).map(|i| dr[i] + p.wet * wr[i]).collect();
     let loudest = l.iter().chain(&r).fold(f32::NEG_INFINITY, |m, v| m.max(v.abs())) + 1e-6;
     (0..2 * n).map(|j| p.peak / loudest * (if j % 2 == 0 { l[j / 2] } else { r[j / 2] })).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    // y[i] = -g x[i] + x[i - d] + g y[i - d], as Futhark computes it.
+    #[test]
+    fn allpass_is_the_textbook_one() {
+        let y = super::allpass(2, 0.5, &[1.0, 0.0, 0.0, 2.0, 0.0, -1.0, 0.0, 0.0]);
+        assert_eq!(y, [-0.5, 0.0, 0.75, -1.0, 0.375, 2.0, 0.1875, 0.0]);
+    }
 }

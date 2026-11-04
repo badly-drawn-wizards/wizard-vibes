@@ -8,7 +8,8 @@
 //   build/shader-<level> and kept up to date the same way. Builds run one at
 //   a time; a change during one queues one more.
 // - The web app (client, for wasm32, through wasm-bindgen into build/web):
-//   rebuilt when client/ changes, and the page reloaded. (Under
+//   rebuilt when client/ or the shader crate (which it runs on the CPU too)
+//   changes, and the page reloaded. (Under
 //   `dx serve --hotpatch`, Subsecond patches it instead: see README.md.)
 //
 // HTTP (port 8080, or --port N):
@@ -33,7 +34,7 @@ use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Router;
 use notify::{RecursiveMode, Watcher};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -164,20 +165,24 @@ async fn builder(s: Arc<Server>, mut jobs: mpsc::UnboundedReceiver<Job>) {
     }
 }
 
-// Which job a changed file calls for.
-fn job_for(root: &Path, p: &Path) -> Option<Job> {
-    let rel = p.strip_prefix(root).ok()?;
+// Which jobs a changed file calls for. (The web app runs the shader crate
+// on the CPU too: the sound effects, the collision probe.)
+fn jobs_for(root: &Path, p: &Path) -> Vec<Job> {
+    let Ok(rel) = p.strip_prefix(root) else { return vec![] };
     let s = rel.to_string_lossy();
     if s == "native/shader/src/generated.rs" || s.contains("/target/") {
-        return None;
+        return vec![];
     }
-    if s.starts_with("native/shader/src/") || s == "native/shader/Cargo.toml" || s.starts_with("native/shader-builder/src/") || s == "params.json" || s == "config.local.json" {
-        return Some(Job::Shader);
+    if s.starts_with("native/shader/src/") || s == "native/shader/Cargo.toml" {
+        return vec![Job::Shader, Job::Web];
+    }
+    if s.starts_with("native/shader-builder/src/") || s == "params.json" || s == "config.local.json" {
+        return vec![Job::Shader];
     }
     if s.starts_with("client/src/") || s == "client/Cargo.toml" {
-        return Some(Job::Web);
+        return vec![Job::Web];
     }
-    None
+    vec![]
 }
 
 async fn events(State(s): State<Arc<Server>>) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
@@ -185,7 +190,9 @@ async fn events(State(s): State<Arc<Server>>) -> Sse<impl futures::Stream<Item =
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-async fn config(State(s): State<Arc<Server>>, Json(changes): Json<serde_json::Map<String, serde_json::Value>>) -> Result<&'static str, (StatusCode, String)> {
+// (the body is parsed whatever its content type says)
+async fn config(State(s): State<Arc<Server>>, body: String) -> Result<&'static str, (StatusCode, String)> {
+    let changes: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&body).map_err(|e| (StatusCode::BAD_REQUEST, format!("not a JSON object: {e}")))?;
     let path = s.root.join("config.local.json");
     let mut saved: serde_json::Map<String, serde_json::Value> =
         std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
@@ -312,7 +319,7 @@ async fn main() {
                     }
                     continue;
                 }
-                if let Some(j) = job_for(&s.root, &p) {
+                for j in jobs_for(&s.root, &p) {
                     let _ = s.jobs.send(j);
                 }
             }

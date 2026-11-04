@@ -111,7 +111,8 @@ def comb [n] (d: i64) (g: f32) (x: [n]f32) : [n]f32 =
 -- An allpass: y[i] = -g x[i] + x[i - d] + g y[i - d] (smears without
 -- colouring).
 def allpass [n] (d: i64) (g: f32) (x: [n]f32) : [n]f32 =
-  comb d g (tabulate n (\i -> -g * #[unsafe] x[i] + (if i >= d then #[unsafe] x[i - d] else 0)))
+  -- (the attribute in parentheses: unbracketed, it takes the whole sum)
+  comb d g (tabulate n (\i -> -g * (#[unsafe] x[i]) + (if i >= d then #[unsafe] x[i - d] else 0)))
 
 -- A Schroeder reverb (the delays of Jezar's Freeverb, at its 44.1 kHz,
 -- scaled to `rate`): four combs in parallel, then two allpasses; the two

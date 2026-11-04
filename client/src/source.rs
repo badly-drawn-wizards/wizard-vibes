@@ -243,6 +243,9 @@ mod web {
         let init = web_sys::RequestInit::new();
         init.set_method("POST");
         init.set_body(&JsValue::from_str(&body));
+        let headers = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
+        let _ = headers.set("Content-Type", "application/json");
+        init.set_headers(&headers);
         let req = web_sys::Request::new_with_str_and_init(url, &init).map_err(|e| format!("{e:?}"))?;
         let resp = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req)).await.map_err(|e| format!("{url}: {e:?}"))?;
         let resp: web_sys::Response = resp.dyn_into().unwrap();
