@@ -37,7 +37,13 @@ pub struct App {
     scale: f32,
     drawer: bool,
     // the last error the device reported (validation of the shader, etc.)
-    device_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    // the GPU's errors, the first first (the cause; what follows from it is
+    // mostly "... is invalid"), and how many are shown
+    device_error: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    device_errors_shown: usize,
+    // why this GPU cannot run the app, if it cannot (in a browser without
+    // WebGPU, wgpu falls back to WebGL2, which has no compute shaders)
+    unsupported: Option<String>,
     game: Game,
     audio: Audio,
     info: BuildInfo,
@@ -67,12 +73,16 @@ impl App {
             sfx_rate: SFX_RATE,
             sfx_seconds: (0..n).map(wizard_shader::sfx::sfx_length).collect(),
         };
-        let device_error = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let device_error = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         if let Some(rs) = cc.wgpu_render_state.as_ref() {
             let slot = device_error.clone();
             rs.device.on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
-                log::error!("{e}");
-                *slot.lock().unwrap() = Some(e.to_string());
+                let e = e.to_string();
+                let mut all = slot.lock().unwrap();
+                if all.len() < 8 && !all.contains(&e) {
+                    log::error!("{e}");
+                    all.push(e);
+                }
             }));
         }
         App {
@@ -89,6 +99,21 @@ impl App {
             scale,
             drawer,
             device_error,
+            device_errors_shown: 0,
+            unsupported: cc.wgpu_render_state.as_ref().and_then(|rs| {
+                let caps = rs.adapter.get_downlevel_capabilities();
+                if caps.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS) {
+                    return None;
+                }
+                let info = rs.adapter.get_info();
+                Some(format!(
+                    "This browser gives the page no WebGPU, only {:?} ({}), which has no compute shaders: \
+                     the whole scene is drawn by them.\n\n\
+                     Try Chrome or Edge, Safari 26, or Firefox with WebGPU (on by default on Windows; \
+                     elsewhere set dom.webgpu.enabled in about:config, which on Android takes Firefox Nightly).",
+                    info.backend, info.name
+                ))
+            }),
             game: {
                 let mut g = Game::new(storage);
                 g.set_build(&info);
@@ -154,6 +179,11 @@ impl App {
 
     fn handle_events(&mut self, frame: &eframe::Frame) {
         let Some(rs) = frame.wgpu_render_state() else { return };
+        // (no compute shaders: no shader to build, nothing to draw)
+        if self.unsupported.is_some() {
+            while self.source.poll().is_some() {}
+            return;
+        }
         while let Some(ev) = self.source.poll() {
             match ev {
                 Event::Schema(s) => self.set_schema(s),
@@ -352,8 +382,12 @@ impl App {
             }
         }
 
-        if let Some(e) = self.device_error.lock().unwrap().take() {
-            self.error = Some(e);
+        {
+            let all = self.device_error.lock().unwrap();
+            if all.len() > self.device_errors_shown {
+                self.device_errors_shown = all.len();
+                self.error = Some(all.join("\n\n"));
+            }
         }
         self.top_bar(ui);
         if self.drawer {
@@ -375,7 +409,7 @@ impl App {
             let ppp = ctx.pixels_per_point();
             let vw = ((rect.width() * ppp * self.scale) as u32).max(1);
             let h = ((rect.height() * ppp * self.scale) as u32).max(1);
-            let (Some(rs), Some(p)) = (&rs, &self.params) else { return };
+            let (Some(rs), Some(p), None) = (&rs, &self.params, &self.unsupported) else { return };
             let mut values = p.values();
             let out = self.game.step(&ctx, &view, dt, &values);
             for (k, v) in &out.overrides {
@@ -405,7 +439,11 @@ impl App {
             }
         });
         self.game.ui(&ctx);
-        if let Some(e) = &self.error {
+        if let Some(e) = &self.unsupported {
+            egui::Window::new("No WebGPU").collapsible(false).default_width(420.0).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).show(&ctx, |ui| {
+                ui.label(e.as_str());
+            });
+        } else if let Some(e) = &self.error {
             egui::Window::new("Shader error").collapsible(true).default_width(700.0).show(&ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| ui.monospace(e.as_str()));
             });
