@@ -38,6 +38,9 @@ pub struct Entry {
     pub name: String,
     pub workgroup: [u32; 3],
     pub bindings: Vec<Binding>,
+    // its own WGSL file (the module cut down to it), if the build has one
+    #[serde(default)]
+    pub wgsl: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -65,6 +68,9 @@ pub struct ShaderFiles {
     pub meta: Meta,
     pub wgsl: String,
     pub spv: Option<Vec<u8>>,
+    // each entry point's own WGSL, by name (in the browser: some drivers
+    // cannot take a pipeline made from the whole module)
+    pub entry_wgsl: HashMap<String, String>,
 }
 
 pub enum Event {
@@ -88,7 +94,7 @@ fn version_of(text: &str) -> String {
 
 fn parse(meta_text: &str, wgsl: String, spv: Option<Vec<u8>>) -> Result<ShaderFiles, String> {
     let meta: Meta = serde_json::from_str(meta_text).map_err(|e| format!("shader.json: {e}"))?;
-    Ok(ShaderFiles { version: version_of(meta_text), meta, wgsl, spv })
+    Ok(ShaderFiles { version: version_of(meta_text), meta, wgsl, spv, entry_wgsl: HashMap::new() })
 }
 
 // The build directory for a quality preset (None: the drawer's settings).
@@ -271,8 +277,21 @@ mod web {
         wasm_bindgen_futures::spawn_local(async move {
             let r = async {
                 let meta = fetch_text(&format!("{base}/{dir}/shader.json")).await?;
-                let wgsl = fetch_text(&format!("{base}/{dir}/shader.wgsl")).await?;
-                parse(&meta, wgsl, None)
+                let mut files = parse(&meta, String::new(), None)?;
+                // with ?split=1, each entry point's own module where the
+                // build has them (for drivers that cannot take a pipeline
+                // made from the whole module; the shared code is then sent
+                // once per entry point), else the whole one
+                let names: Vec<(String, String)> = files.meta.entries.iter().filter_map(|e| Some((e.name.clone(), e.wgsl.clone()?))).collect();
+                if crate::app::url_param("split").is_some_and(|v| v == "1") && names.len() == files.meta.entries.len() {
+                    for (name, file) in names {
+                        let text = fetch_text(&format!("{base}/{dir}/{file}")).await?;
+                        files.entry_wgsl.insert(name, text);
+                    }
+                } else {
+                    files.wgsl = fetch_text(&format!("{base}/{dir}/shader.wgsl")).await?;
+                }
+                Ok(files)
             }
             .await;
             queue.borrow_mut().push_back(match r {
@@ -284,7 +303,10 @@ mod web {
     }
 
     impl Source {
-        // The dev server: ?server=URL, else the page's own origin.
+        // The dev server: ?server=URL, else the page's own origin. With
+        // ?level=low (med, high), that quality preset's shader first, not
+        // the drawer's (e.g. for a phone's GPU, which a bigger build may be
+        // too much for).
         pub fn new(ctx: egui::Context) -> Source {
             let window = web_sys::window().unwrap();
             let location = window.location();
@@ -313,7 +335,7 @@ mod web {
                     c.request_repaint();
                 });
             }
-            load(base.clone(), build_dir(None), queue.clone(), ctx.clone());
+            let level = search.trim_start_matches('?').split('&').find_map(|kv| kv.strip_prefix("level=")).map(String::from);
             // the dev server's events (a static site has none)
             let events = web_sys::EventSource::new(&format!("{base}/events")).ok();
             if let Some(es) = &events {
@@ -415,7 +437,12 @@ mod web {
                 es.set_onerror(Some(cb.as_ref().unchecked_ref()));
                 cb.forget();
             }
-            Source { base, queue, ctx, preset, _events: events, server }
+            let mut source = Source { base, queue, ctx, preset, _events: events, server };
+            match level {
+                Some(l) => source.follow(Some(&l)),
+                None => load(source.base.clone(), build_dir(None), source.queue.clone(), source.ctx.clone()),
+            }
+            source
         }
 
         pub fn poll(&mut self) -> Option<Event> {

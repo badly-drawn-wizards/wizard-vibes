@@ -64,7 +64,9 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, source: Source) -> App {
         let storage = cc.storage;
-        let scale = storage.and_then(|s| eframe::get_value(s, SCALE)).unwrap_or(1.0);
+        // (in the browser, ?scale=0.25 (0.5, 1) overrides the stored scale)
+        let scale = url_param("scale").and_then(|v| v.parse::<f32>().ok()).filter(|&v| v > 0.0 && v <= 1.0);
+        let scale = scale.or_else(|| storage.and_then(|s| eframe::get_value(s, SCALE))).unwrap_or(1.0);
         let drawer = storage.and_then(|s| eframe::get_value(s, DRAWER)).unwrap_or(false);
         let now = Instant::now();
         let n = wizard_shader::sfx::sfx_count;
@@ -76,6 +78,25 @@ impl App {
         let device_error = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         if let Some(rs) = cc.wgpu_render_state.as_ref() {
             let slot = device_error.clone();
+            // (what the GPU is, and if it is lost, why: after that its
+            // errors go unreported and what is made on it is invalid)
+            let info = rs.adapter.get_info();
+            let l = rs.device.limits();
+            log::info!(
+                "GPU: {} ({:?}, {}); buffers up to {} MB, storage bindings up to {} MB, {} storage buffers a stage",
+                info.name,
+                info.backend,
+                info.driver_info,
+                l.max_buffer_size >> 20,
+                l.max_storage_buffer_binding_size >> 20,
+                l.max_storage_buffers_per_shader_stage
+            );
+            let lost = device_error.clone();
+            rs.device.set_device_lost_callback(move |reason, msg| {
+                let e = format!("The GPU device was lost ({reason:?}): {msg}");
+                log::error!("{e}");
+                lost.lock().unwrap().push(e);
+            });
             rs.device.on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
                 let e = e.to_string();
                 let mut all = slot.lock().unwrap();
@@ -459,6 +480,20 @@ impl App {
         }
         self.game.save(storage);
         self.audio.save(storage);
+    }
+}
+
+// A parameter of the page's URL (?name=value), in the browser.
+pub fn url_param(name: &str) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let search = web_sys::window()?.location().search().ok()?;
+        search.trim_start_matches('?').split('&').find_map(|kv| kv.strip_prefix(name)?.strip_prefix('=')).map(String::from)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = name;
+        None
     }
 }
 

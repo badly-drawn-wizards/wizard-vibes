@@ -60,6 +60,23 @@ pub struct Shader {
     pub spirv: bool,
 }
 
+// The entry points not to make pipelines for: in the browser, ?skip=a,b (*
+// for all), to find which one a GPU's driver cannot take.
+fn skipped() -> Vec<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let search = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+        search
+            .trim_start_matches('?')
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("skip="))
+            .map(|v| v.split(',').filter(|k| !k.is_empty()).map(String::from).collect())
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    Vec::new()
+}
+
 // What the device can do with shaders here.
 pub fn passthrough(device: &wgpu::Device) -> bool {
     device.features().contains(wgpu::Features::PASSTHROUGH_SHADERS)
@@ -70,6 +87,14 @@ impl Shader {
         let spirv = files.spv.is_some() && passthrough(device);
         // (WGSL from naga: the checks wgpu would add are off, as for the
         // SPIR-V, which has none)
+        // (in the browser, each entry point's own module where there is one)
+        let wgsl_module = |label: &str, text: &str| unsafe {
+            device.create_shader_module_trusted(
+                wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(text.into()) },
+                wgpu::ShaderRuntimeChecks::unchecked(),
+            )
+        };
+        let own: HashMap<String, wgpu::ShaderModule> = if spirv { HashMap::new() } else { files.entry_wgsl.iter().map(|(n, t)| (n.clone(), wgsl_module(n, t))).collect() };
         let module = if spirv {
             let words: Vec<u32> = bytemuck::pod_collect_to_vec(files.spv.as_ref().unwrap());
             let eps = files
@@ -88,12 +113,7 @@ impl Shader {
             }
         } else {
             // (errors reach the device's uncaptured-error handler: see app.rs)
-            unsafe {
-                device.create_shader_module_trusted(
-                    wgpu::ShaderModuleDescriptor { label: Some("shader.wgsl"), source: wgpu::ShaderSource::Wgsl(files.wgsl.as_str().into()) },
-                    wgpu::ShaderRuntimeChecks::unchecked(),
-                )
-            }
+            wgsl_module("shader.wgsl", if own.is_empty() { files.wgsl.as_str() } else { "" })
         };
         let mut kinds: std::collections::BTreeMap<u32, String> = Default::default();
         for b in files.meta.entries.iter().flat_map(|e| &e.bindings).filter(|b| b.group == 0) {
@@ -122,11 +142,17 @@ impl Shader {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("shader"), entries: &entries });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("shader"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
         let mut kernels = HashMap::new();
+        let skip = skipped();
         for e in &files.meta.entries {
+            if skip.iter().any(|k| k == "*" || *k == e.name) {
+                log::warn!("not making the {} pipeline (?skip=)", e.name);
+                continue;
+            }
+            log::info!("making the {} pipeline", e.name);
             let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(&e.name),
                 layout: Some(&pl),
-                module: &module,
+                module: own.get(&e.name).unwrap_or(&module),
                 entry_point: Some(&e.name),
                 compilation_options: Default::default(),
                 cache: None,

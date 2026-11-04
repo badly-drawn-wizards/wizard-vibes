@@ -8,7 +8,8 @@
 // 3. fixes that up for naga (see fixup.rs) and has naga turn it into WGSL,
 //    which the browser runs (and which checks it).
 //
-// Writes into OUT (default build/shader): shader.spv, shader.wgsl and
+// Writes into OUT (default build/shader): shader.spv, shader.wgsl (and
+// entry-NAME.wgsl, each entry point's alone, which the browser uses) and
 // shader.json (the uniform block's fields, for the app to fill; the
 // workgroup size), each written to a temporary name and renamed into place,
 // shader.json last (so whoever watches it sees a whole build). Also copies
@@ -85,6 +86,26 @@ fn main() {
     eprintln!("naga: {} bytes of WGSL in {:.1} s", wgsl.len(), t.elapsed().as_secs_f32());
 
     std::fs::create_dir_all(&out).unwrap_or_else(|e| die(&format!("{}: {e}", out.display())));
+    // each entry point's own WGSL: the module cut down to what it reaches (a
+    // pipeline made from the whole module hands the driver all of it, and
+    // some drivers (Adreno's, under Firefox) fall over on that)
+    let t = std::time::Instant::now();
+    let mut entry_files = std::collections::HashMap::new();
+    for e in &module.entry_points {
+        let mut m = module.clone();
+        m.entry_points.retain(|x| x.name == e.name);
+        naga::compact::compact(&mut m, naga::compact::KeepUnused::No);
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
+            .validate(&m)
+            .unwrap_or_else(|err| die(&format!("naga rejects {} alone: {}", e.name, err.emit_to_string(""))));
+        let text = naga::back::wgsl::write_string(&m, &info, naga::back::wgsl::WriterFlags::empty())
+            .unwrap_or_else(|err| die(&format!("naga could not write {} as WGSL: {err}", e.name)));
+        let file = format!("entry-{}.wgsl", e.name);
+        write_atomic(&out.join(&file), text.as_bytes());
+        entry_files.insert(e.name.clone(), (file, text.len()));
+    }
+    let sizes: Vec<String> = module.entry_points.iter().map(|e| format!("{} {} kB", e.name, entry_files[&e.name].1 / 1000)).collect();
+    eprintln!("naga: each entry point's WGSL in {:.1} s ({})", t.elapsed().as_secs_f32(), sizes.join(", "));
     let fields: Vec<Value> = params::block(&schema).into_iter().map(|f| json!({ "name": f.name, "type": f.ty, "from": f.from })).collect();
     // each entry point's workgroup size and the bindings it uses: (group,
     // binding, "uniform" | "storage" | "storage-read"), for the app's
@@ -109,7 +130,7 @@ fn main() {
                 };
                 bindings.push(json!({ "group": rb.group, "binding": rb.binding, "kind": kind }));
             }
-            json!({ "name": e.name, "workgroup": e.workgroup_size, "bindings": bindings })
+            json!({ "name": e.name, "workgroup": e.workgroup_size, "bindings": bindings, "wgsl": entry_files[&e.name].0 })
         })
         .collect();
     // (the SPIR-V's hash: what tells builds apart, as their other metadata

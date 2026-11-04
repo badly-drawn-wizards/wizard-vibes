@@ -34,11 +34,22 @@ fn load(root: &Path, spv: bool) -> Result<ShaderFiles, String> {
     let d = root.join(build_dir(None));
     let read = |f: &str| std::fs::read_to_string(d.join(f)).map_err(|e| format!("{}: {e} (build the shader: see README.md)", d.join(f).display()));
     let meta = read("shader.json")?;
+    let meta: crate::source::Meta = serde_json::from_str(&meta).map_err(|e| format!("shader.json: {e}"))?;
+    // (as WGSL, each entry point's own module, as the browser has them)
+    let mut entry_wgsl = std::collections::HashMap::new();
+    if !spv {
+        for e in &meta.entries {
+            if let Some(f) = &e.wgsl {
+                entry_wgsl.insert(e.name.clone(), read(f)?);
+            }
+        }
+    }
     Ok(ShaderFiles {
         version: String::new(),
-        meta: serde_json::from_str(&meta).map_err(|e| format!("shader.json: {e}"))?,
+        meta,
         wgsl: read("shader.wgsl")?,
         spv: if spv { std::fs::read(d.join("shader.spv")).ok() } else { None },
+        entry_wgsl,
     })
 }
 
