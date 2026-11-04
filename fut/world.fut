@@ -87,6 +87,17 @@ def fbm2_lod (octaves: i32) (detail: f32) (x: f32) (z: f32) : f32 =
          , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3 )
   in sum / norm
 
+-- fbm2_lod given its first octave's noise, v0 = vnoise2 x z (for a caller
+-- that has it already).
+def fbm2_lod_from (octaves: i32) (detail: f32) (v0: f32) (x: f32) (z: f32) : f32 =
+  let (sum, norm, _, _, _) =
+    loop (sum, norm, amp, x, z) = (0f32, 0f32, 0.5f32, x, z) for i < octaves do
+      let k = saturate (detail - f32.i32 i)
+      let v = if k > 0 then mix1 0.5 (if i == 0 then v0 else vnoise2 x z) k else 0.5
+      in ( sum + amp * v, norm + amp, amp * 0.5
+         , 1.6 * x - 1.2 * z + 17.1, 1.2 * x + 1.6 * z - 9.3 )
+  in sum / norm
+
 -- vnoise2 with its gradient: (value, d/dx, d/dz). The smoothstep weight
 -- u = f^2 (3 - 2f) has derivative 6 f (1 - f).
 def vnoise2_grad (x: f32) (z: f32) : (f32, f32, f32) =
@@ -276,13 +287,17 @@ def carve (l: land) (h: f32) (hx: f32) (hz: f32) (m: f32) (mx: f32) (mz: f32) : 
 -- relief for 0.66 ms a frame at 1080p).
 def terrain_octaves : i32 = 4
 
--- `detail` in octaves (terrain_octaves = full); far-away terrain needs fewer.
--- (given the biome weights there: see biome)
-def terrain_height_in (l: land) (wd: f32) (wa: f32) (detail: f32) (x: f32) (z: f32) : f32 =
-  let n = fbm2_lod terrain_octaves detail (x * 0.035) (z * 0.035)
+-- The first octaves' noise of the terrain's two fbms (the main one and the
+-- ridges'), which terrain_upper needs as well.
+def terrain_first_octaves (x: f32) (z: f32) : (f32, f32) =
+  (vnoise2 (x * 0.035) (z * 0.035), vnoise2 (x * 0.02 + 5.2) (z * 0.02 - 1.7))
+
+-- terrain_height_in given terrain_first_octaves at (x, z).
+def terrain_height_from (l: land) (wd: f32) (wa: f32) (detail: f32) ((v0, r0): (f32, f32)) (x: f32) (z: f32) : f32 =
+  let n = fbm2_lod_from terrain_octaves detail v0 (x * 0.035) (z * 0.035)
   -- (the desert has no ridges)
   let ridge = if wd >= 1 then 0
-              else 1 - f32.abs (2 * fbm2_lod 3 (detail - 2) (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
+              else 1 - f32.abs (2 * fbm2_lod_from 3 (detail - 2) r0 (x * 0.02 + 5.2) (z * 0.02 - 1.7) - 1)
   let hm = 9 * n * n + 6 * ridge * ridge * ridge - 4
   let hd = if wd > 0 then (dune_height x z n 0 0).0 else 0
   let ha = if wa > 0 then (alpine_height hm).0 else 0
@@ -292,6 +307,11 @@ def terrain_height_in (l: land) (wd: f32) (wa: f32) (detail: f32) (x: f32) (z: f
   in if l.river <= 0 || h <= river_bed l then h else
   let f = fbm2_lod 2 2 (x * river_noise_scale + 31.7) (z * river_noise_scale - 12.3)
   in (carve l h 0 0 (river_weight l f).0 0 0).0
+
+-- `detail` in octaves (terrain_octaves = full); far-away terrain needs fewer.
+-- (given the biome weights there: see biome)
+def terrain_height_in (l: land) (wd: f32) (wa: f32) (detail: f32) (x: f32) (z: f32) : f32 =
+  terrain_height_from l wd wa detail (terrain_first_octaves x z) x z
 
 def terrain_height_lod (l: land) (detail: f32) (x: f32) (z: f32) : f32 =
   let (wd, wa) = biome x z
@@ -338,12 +358,12 @@ def terrain_lipschitz (wa: f32) : f32 = 0.6 - 0.1 * wa
 -- bounds it. (Refining the bound octave by octave was tried and is slower on
 -- the GPU: neighbouring pixels stop at different octaves and diverge.)
 -- (given the biome weights there)
-def terrain_upper (wd: f32) (wa: f32) (x: f32) (z: f32) : f32 =
+def terrain_upper_from (wd: f32) (wa: f32) ((v0, r0): (f32, f32)) : f32 =
   -- (the first octave has amplitude 0.5 of the total 1 - 0.5^octaves; the
   -- others together 0.5 - 0.5^octaves)
   let total = 1 - 0.5 ** f32.i32 terrain_octaves
-  let n_hi = (0.5 * vnoise2 (x * 0.035) (z * 0.035) + (total - 0.5)) / total
-  let f_lo = 0.5 * vnoise2 (x * 0.02 + 5.2) (z * 0.02 - 1.7) / 0.875
+  let n_hi = (0.5 * v0 + (total - 0.5)) / total
+  let f_lo = 0.5 * r0 / 0.875
   let f_hi = f_lo + 0.375 / 0.875
   let ridge_hi = if f_lo <= 0.5 && f_hi >= 0.5 then 1
                  else 1 - f32.min (f32.abs (2 * f_lo - 1)) (f32.abs (2 * f_hi - 1))
@@ -352,11 +372,16 @@ def terrain_upper (wd: f32) (wa: f32) (x: f32) (z: f32) : f32 =
   -- bounds each; the weights are the same, never negative and sum to at
   -- most 1, so the blend of the bounds bounds the blend)
   let hd = -0.5 + 3 * n_hi + 0.9
-  in hm + wd * (hd - hm) + wa * ((alpine_height hm).0 - hm)
+  -- (the alpine height, a tanh, only where it has weight)
+  in hm + wd * (hd - hm) + (if wa > 0 then wa * ((alpine_height hm).0 - hm) else 0)
 
--- (the march evaluates the biome once per step for the bound and this)
-def terrain_dist (l: land) (wd: f32) (wa: f32) (detail: f32) (w: vec3) : f32 =
-  terrain_lipschitz wa * (w.y - terrain_height_in l wd wa detail w.x w.z)
+def terrain_upper (wd: f32) (wa: f32) (x: f32) (z: f32) : f32 =
+  terrain_upper_from wd wa (terrain_first_octaves x z)
+
+-- The terrain's distance bound given terrain_first_octaves there (the march
+-- evaluates the biome and those once per step for the bound and this).
+def terrain_dist_from (l: land) (wd: f32) (wa: f32) (detail: f32) (o: (f32, f32)) (w: vec3) : f32 =
+  terrain_lipschitz wa * (w.y - terrain_height_from l wd wa detail o w.x w.z)
 
 ---------------------------------------------------------------------
 -- Structures: one cell of a 30-unit grid in every few holds a cottage, a
@@ -394,6 +419,18 @@ def structure_present (density: f32) (x: f32) (z: f32) : bool =
   let cx = i32.f32 (f32.floor (x / struct_cell))
   let cz = i32.f32 (f32.floor (z / struct_cell))
   in hash2 (cx * 31 + 11) (cz * 17 + 3) < density
+
+-- How far a ray from w along the unit direction d runs before leaving (in
+-- xz) the square cell of the given size that holds w. At least the
+-- distance to the cell's edge, so it can stand in for that in bounds that
+-- are only used along this ray (see march_terrain).
+def cell_exit (cell: f32) (w: vec3) (d: vec3) : f32 =
+  let fx = w.x - cell * f32.floor (w.x / cell)
+  let fz = w.z - cell * f32.floor (w.z / cell)
+  -- (|d.x| keeps a zero component, of either sign, at +inf)
+  let tx = (if d.x >= 0 then cell - fx else fx) / f32.abs d.x
+  let tz = (if d.z >= 0 then cell - fz else fz) / f32.abs d.z
+  in f32.min tx tz
 
 -- Distance from (x, z) to the edge of its cell.
 def cell_border (x: f32) (z: f32) : f32 =
@@ -471,6 +508,34 @@ def structures (l: land) (density: f32) (w: vec3) : (f32, i32) =
   -- (cells without a structure stop here, after one hash)
   in if density <= 0 || !(structure_present density w.x w.z) then (f32.max above far, part_wall) else
   let (kind, px, pz, yaw) = structure_candidate w.x w.z
+  let own = length2 (vec2 (w.x - px) (w.z - pz)) - struct_reach
+  let bound = f32.max above (f32.min far own)
+  in if bound > 0.3 then (bound, part_wall) else
+  let ground = terrain_height l px pz
+  let dry = ground > l.sea + 0.3 && ground < structure_ground_max
+  in if !dry then (f32.max above far, part_wall) else
+  let (d, part) = sd_structure kind (yaw_inv yaw (w -^ vec px ground pz))
+  in (f32.min d far, part)
+
+-- A structure cell's candidate, as structures_in takes it: (present, kind,
+-- centre x, z, yaw), without the ground under it (only needed close by).
+type structure_cell = (bool, i32, f32, f32, f32)
+
+def structure_cell_at (density: f32) (x: f32) (z: f32) : structure_cell =
+  let (kind, px, pz, yaw) = structure_candidate x z
+  in (density > 0 && structure_present density x z, kind, px, pz, yaw)
+
+-- The same along a ray, given the candidate of the cell holding w (which a
+-- march works out once per cell). `exit` is how far the ray runs before
+-- leaving the cell (see cell_exit): other cells' structures are at least
+-- that, plus the margin, along it. The result bounds the way along that
+-- ray only.
+#[noinline]
+def structures_in (l: land) (exit: f32) ((present, kind, px, pz, yaw): structure_cell) (w: vec3) : (f32, i32) =
+  let above = w.y - structure_top
+  in if above > 0.3 then (above, part_wall) else
+  let far = f32.max (cell_border w.x w.z) exit + (0.25 * struct_cell - struct_reach)
+  in if !present then (f32.max above far, part_wall) else
   let own = length2 (vec2 (w.x - px) (w.z - pz)) - struct_reach
   let bound = f32.max above (f32.min far own)
   in if bound > 0.3 then (bound, part_wall) else
@@ -585,29 +650,59 @@ def tree_cell_border (x: f32) (z: f32) : f32 =
   let fz = z - tree_cell * f32.floor (z / tree_cell)
   in f32.min (f32.min fx (tree_cell - fx)) (f32.min fz (tree_cell - fz))
 
+-- A tree cell's candidate (see tree_candidate), as `trees_in` takes it:
+-- whether a tree may stand there, and the ground under it, or NaN where
+-- that has not been worked out.
+type tree_cell = {present: bool, kind: i32, px: f32, pz: f32, size: f32, seed: f32, ground: f32}
+
+def tree_ground_ok (l: land) (ground: f32) : bool = ground > l.sea + 0.4 && ground < tree_line
+
+def tree_cell_at (density: f32) (x: f32) (z: f32) : tree_cell =
+  let (present, kind, px, pz, size, seed) = tree_candidate density x z
+  in {present, kind, px, pz, size, seed, ground = f32.nan}
+
+-- The same with its ground worked out (8 noise lookups), so whether the tree
+-- stands at all (most candidates fail on their ground) is known: for a
+-- march, which keeps it while it crosses the cell, so a cell without a tree
+-- need not hold it up, and nothing about the cell is worked out twice.
+def tree_cell_grounded (l: land) (density: f32) (x: f32) (z: f32) : tree_cell =
+  let c = tree_cell_at density x z
+  in if !c.present then c
+     else let g = terrain_height l c.px c.pz
+          in c with ground = g with present = tree_ground_ok l g
+
 -- The trees' distance at a world point: (distance, part), with the same
 -- kinds of bounds as the structures', and one more: a tree is no taller
 -- than its ground's cheap upper bound (capped by the tree line) plus its
 -- height, so the ground under it (8 noise lookups) is only needed close by.
 -- `grown` in [0, 1] scales every tree (towards the edge of where they are
 -- drawn at all: see land_built); shrinking only shortens distances. Where
--- none are drawn, `outside` is the distance to where they are.
+-- none are drawn, `outside` is the distance to where they are. `exit` is
+-- as for the structures; `c` is the tree cell holding w.
+#[noinline]
+def trees_in (l: land) (density: f32) (grown: f32) (outside: f32) (exit: f32) (c: tree_cell) (w: vec3) : (f32, i32) =
+  let above = f32.max (w.y - tree_top) outside
+  in if above > 0.3 then (above, part_trunk) else
+  let far = f32.max (tree_cell_border w.x w.z) exit + (tree_inset * tree_cell - tree_reach)
+  in if density <= 0 || grown <= 0 || !c.present then (f32.max above far, part_trunk) else
+  let known = !(f32.isnan c.ground)
+  let size = c.size * grown
+  let own = length2 (vec2 (w.x - c.px) (w.z - c.pz)) - tree_reach * size / tree_size_max
+  let b = f32.max above (f32.min far own)
+  in if b > 0.3 then (b, part_trunk) else
+  let top = if known then c.ground
+            else let (wd, wa) = biome c.px c.pz in f32.min (terrain_upper wd wa c.px c.pz) tree_line
+  let tall = w.y - (top + tree_tall * size / tree_size_max)
+  in if tall > 0.3 then (f32.max tall (f32.min far own), part_trunk) else
+  let ground = if known then c.ground else terrain_height l c.px c.pz
+  in if !(tree_ground_ok l ground) then (f32.max above far, part_trunk) else
+  let (d, part) = sd_tree c.kind c.seed (scale (1 / size) (yaw (6.28 * c.seed) (w -^ vec c.px ground c.pz)))
+  in (f32.min (d * size) far, part)
+
+-- trees_in for the tree cell holding w (its candidate is only worked out
+-- below the trees' tops).
 #[noinline]
 def trees (l: land) (density: f32) (grown: f32) (outside: f32) (w: vec3) : (f32, i32) =
   let above = f32.max (w.y - tree_top) outside
-  in if above > 0.3 then (above, part_trunk) else
-  let far = tree_cell_border w.x w.z + (tree_inset * tree_cell - tree_reach)
-  in if density <= 0 || grown <= 0 then (f32.max above far, part_trunk) else
-  let (present, kind, px, pz, size, seed) = tree_candidate density w.x w.z
-  in if !present then (f32.max above far, part_trunk) else
-  let size = size * grown
-  let own = length2 (vec2 (w.x - px) (w.z - pz)) - tree_reach * size / tree_size_max
-  let b = f32.max above (f32.min far own)
-  in if b > 0.3 then (b, part_trunk) else
-  let (wd, wa) = biome px pz
-  let tall = w.y - (f32.min (terrain_upper wd wa px pz) tree_line + tree_tall * size / tree_size_max)
-  in if tall > 0.3 then (f32.max tall (f32.min far own), part_trunk) else
-  let ground = terrain_height l px pz
-  in if ground <= l.sea + 0.4 || ground >= tree_line then (f32.max above far, part_trunk) else
-  let (d, part) = sd_tree kind seed (scale (1 / size) (yaw (6.28 * seed) (w -^ vec px ground pz)))
-  in (f32.min (d * size) far, part)
+  in if above > 0.3 then (above, part_trunk)
+     else trees_in l density grown outside 0 (tree_cell_at density w.x w.z) w

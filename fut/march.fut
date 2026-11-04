@@ -49,16 +49,16 @@ def normal (dist: dist_fn) (p: vec3) : vec3 =
 
 def shadow_k : f32 = 10
 
--- Penumbra-estimating shadow ray towards a light at distance tmax. The
--- penumbra term k*h/t saturates once h >= t/k, so that is all the accuracy
--- the distance needs.
-def soft_shadow (dist: dist_fn) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
+-- Penumbra-estimating shadow ray towards a light at distance tmax, starting
+-- at t0 (where nothing nearer could darken it). The penumbra term k*h/t
+-- saturates once h >= t/k, so that is all the accuracy the distance needs.
+def soft_shadow (dist: dist_fn) (ro: vec3) (rd: vec3) (t0: f32) (tmax: f32) : f32 =
   let k = shadow_k
   -- Improved penumbra (after Quilez): from the previous and current distance
   -- estimate where the ray passes closest to the occluder, rather than using
   -- the samples themselves, which bands at grazing angles.
   let (res, _, _, _) =
-    loop (res, t, ph, i) = (1f32, 0.02f32, 1e10f32, 0i32)
+    loop (res, t, ph, i) = (1f32, f32.max 0.02 t0, 1e10f32, 0i32)
     while i < shadow_steps && t < tmax && res > 0.002 do
       let h = dist (t / k) (ro +^ scale t rd)
       let y = h * h / (2 * ph)
@@ -83,6 +83,17 @@ def sphere_exit (c: vec3) (r: f32) (ro: vec3) (rd: vec3) : f32 =
   let oc = c -^ ro
   let b = dot oc rd
   in b + f32.sqrt (f32.max 0 (b * b - (dot oc oc - r * r)))
+
+-- Where a shadow ray of length tmax may start, for occluders lying inside
+-- the sphere (c, r): where it enters that sphere grown by tmax/k (or 0 from
+-- inside). Before that every point is over tmax/k >= t/k from them, so its
+-- penumbra term is at least 1, and the samples there changed nothing.
+-- (Rays that never enter it are already skipped, see shadow_misses.)
+def shadow_start (c: vec3) (r: f32) (ro: vec3) (rd: vec3) (tmax: f32) : f32 =
+  let R = r + tmax / shadow_k
+  let oc = c -^ ro
+  let b = dot oc rd
+  in b - f32.sqrt (f32.max 0 (b * b - (dot oc oc - R * R)))
 
 -- Probes along the normal; each probe counts only how far its distance falls
 -- short of its offset, so distances beyond the longest offset never matter.

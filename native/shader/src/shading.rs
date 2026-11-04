@@ -662,9 +662,11 @@ pub fn surface(pose: Pose, g: Glow, tagged: i32, p: Vec3, rd: Vec3, t: f32) -> V
         if casters == 0 || shadow_misses(occluder_centre, occluder_radius, po, l, tmax) {
             1.0
         } else {
-            // (and they end shortly after leaving that sphere: nothing lies
-            // beyond, and the shadow loop's steps are capped at 0.25)
-            soft_shadow(move |tol, q| shadow_scene(casters, pose, tol, q), po, l, tmax.minimum(sphere_exit(occluder_centre, occluder_radius, po, l) + 1.0))
+            // (and they start where they come near that sphere and end shortly
+            // after leaving it: nothing lies outside it, and the shadow loop's
+            // steps are capped at 0.25)
+            let tmax = tmax.minimum(sphere_exit(occluder_centre, occluder_radius, po, l) + 1.0);
+            soft_shadow(move |tol, q| shadow_scene(casters, pose, tol, q), po, l, shadow_start(occluder_centre, occluder_radius, po, l, tmax), tmax)
         }
     };
     // All the lights, in one loop so the lighting and shadow code is
@@ -687,7 +689,10 @@ pub fn surface(pose: Pose, g: Glow, tagged: i32, p: Vec3, rd: Vec3, t: f32) -> V
         let (lit2, moon_shadow2) = if atten < 0.01 || !(has(L.receivers, layer)) {
             (lit, moon_shadow)
         } else {
-            let sh = if !(has(L.shadowed_receivers, layer)) || d < L.radius {
+            // (nor where the light is behind the surface, past where the
+            // moon's sheen and hair light reach)
+            let facing = dot(n, l) > if k == 0 { -0.4 } else { 0.0 };
+            let sh = if !(has(L.shadowed_receivers, layer)) || d < L.radius || !facing {
                 1.0
             } else {
                 shadow(L.casters, l, if L.directional { 12.0 } else { d - L.radius - 0.15 })

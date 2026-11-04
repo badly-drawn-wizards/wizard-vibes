@@ -57,10 +57,12 @@ pub fn ground_at(mask: i32, fl: Flight, l: Land, p: Vec3) -> Hit {
         // the clouds; only close to the ground is the full terrain needed
         // (rivers only lower the ground, so it stays an upper bound)
         let (wd, wa) = biome(w.x, w.z);
-        let gap = w.y - terrain_upper(wd, wa, w.x, w.z);
+        // (the bound's noise is the full terrain's first octaves)
+        let o = terrain_first_octaves(w.x, w.z);
+        let gap = w.y - terrain_upper_from(wd, wa, o);
         tag(
             layers_terrain,
-            (if gap > 1.5 { terrain_lipschitz(wa) * gap } else { terrain_dist(l, wd, wa, detail, w) }, m_terrain),
+            (if gap > 1.5 { terrain_lipschitz(wa) * gap } else { terrain_dist_from(l, wd, wa, detail, o, w) }, m_terrain),
         )
     };
     let water = if has(mask, layers_water) { tag(layers_water, (w.y - l.sea, m_water)) } else { nothing };
@@ -107,6 +109,41 @@ pub fn land_trees(mask: i32, pose: Pose, p: Vec3) -> Hit {
     }
 }
 
+// The same along a ray (see structures_in in world.rs), given the structure
+// of the cell holding p.
+#[inline]
+pub fn land_structures_in(mask: i32, pose: Pose, exit: f32, c: StructureCell, p: Vec3) -> Hit {
+    if !(has(mask, layers_structures)) {
+        nothing
+    } else {
+        let (d, part) = structures_in(land_of(pose.prm), exit, c, to_world(pose.fl, p));
+        tag(layers_structures, (d, m_wall + part))
+    }
+}
+
+pub const no_tree_cell: TreeCell = TreeCell { present: false, kind: 0, px: 0.0, pz: 0.0, size: 0.0, seed: 0.0, ground: NAN };
+
+// The same along a ray (exit: see structures in world.rs), given the tree
+// cell holding p.
+#[inline]
+pub fn land_trees_in(mask: i32, pose: Pose, exit: f32, c: TreeCell, p: Vec3) -> Hit {
+    if !draw_trees || !(has(mask, layers_trees)) {
+        nothing
+    } else {
+        let r = length(p);
+        let (d, part) = trees_in(
+            land_of(pose.prm),
+            pose.prm.tree_density,
+            smoothstep(tree_far, tree_near, r),
+            r - tree_far,
+            exit,
+            c,
+            to_world(pose.fl, p),
+        );
+        tag(layers_trees, (d, m_trunk + part))
+    }
+}
+
 #[inline]
 pub fn land_built(mask: i32, pose: Pose, p: Vec3) -> Hit {
     umin(land_structures(mask, pose, p), land_trees(mask, pose, p))
@@ -146,7 +183,7 @@ pub fn shadow_scene(mask: i32, pose: Pose, tol: f32, p: Vec3) -> f32 {
             b
         } else {
             let hq = head_space(pose, p);
-            let x = smin(0.06, sd_robe(pose, body_space(pose, p)), sd_arms(pose, p));
+            let x = smin(0.06, sd_robe(pose, body_space(pose, p)), sd_arms_shadow(pose, p));
             let x = sd_sphere(hq - vec(0.0, 1.6, 0.02), 0.17).minimum(x);
             let x = sd_hat(pose, p).minimum(x);
             sd_capsule(hq, beard_top, beard_tip, 0.05).minimum(x)
@@ -188,15 +225,45 @@ pub fn dist(mask: i32, pose: Pose, tol: f32, p: Vec3) -> f32 {
 // jumps straight to that height before stepping.
 //
 // The structures are rarely the nearest thing, so their distance is not
-// evaluated at every step: a distance bound taken at t still bounds them at
-// t' (less the way travelled, t' - t), so it is only evaluated again once
-// that could be less than the ground's.
+// evaluated at every step: a bound taken at t still bounds them at t' > t
+// (less the way travelled, t' - t), so it is only evaluated again once that
+// could cut the step short. Their bounds are taken along the ray: where it
+// meets their tops' heights, and a cell with nothing near holds the ray up
+// only where it leaves the cell (see cell_exit), not wherever the cell's edge
+// is near; and what stands in a cell is worked out once per cell.
 //
 // The march is over-relaxed (Keinert et al. 2014, "Enhanced Sphere
 // Tracing"): each step goes terrain_relax times the safe distance, and
 // whenever the new point's bound shows that went too far (the two bounding
 // spheres do not overlap), it steps back and carries on unrelaxed.
 pub const terrain_relax: f32 = 1.4;
+
+// Along a ray from height y going up at dy (a unit direction's), how far it
+// is to the height `top` (0 if not above it, inf if never reaching it).
+#[inline]
+pub fn ray_to_plane(y: f32, dy: f32, top: f32) -> f32 {
+    if y <= top {
+        0.0
+    } else if dy >= 0.0 {
+        INF
+    } else {
+        (y - top) / -dy
+    }
+}
+
+// Along a ray from p along the unit d, how far it is into the sphere of
+// radius r round the origin (0 from inside, inf if it misses).
+#[inline]
+pub fn ray_sphere_entry(r: f32, p: Vec3, d: Vec3) -> f32 {
+    let b = dot(p, d);
+    let c = dot(p, p) - r * r;
+    if c <= 0.0 {
+        0.0
+    } else {
+        let disc = b * b - c;
+        if b >= 0.0 || disc < 0.0 { INF } else { -b - disc.sqrt() }
+    }
+}
 
 pub fn march_terrain(mask: i32, pose: Pose, ro: Vec3, rd: Vec3, tmax: f32) -> (f32, i32) {
     let wo = to_world(pose.fl, ro);
@@ -211,22 +278,49 @@ pub fn march_terrain(mask: i32, pose: Pose, ro: Vec3, rd: Vec3, tmax: f32) -> (f
     let (mut sd, mut st, mut sm) = (-1f32, 0f32, 0i32);
     let (mut td, mut tt, mut tm) = (-1f32, 0f32, 0i32);
     let (mut omega, mut prev, mut step) = (terrain_relax, 0f32, 0f32);
+    // (the structure and tree cells last seen, as (x, z, what is there),
+    // each worked out once)
+    let mut sc: (i32, i32, StructureCell) = (i32::MIN, 0, (false, 0, 0.0, 0.0, 0.0));
+    let mut tc: (i32, i32, TreeCell) = (i32::MIN, 0, no_tree_cell);
     while !hit && i < terrain_steps && t < tmax {
         let p = ro + scale(t, rd);
         let ground = land_ground(mask, pose, p);
         // the structures and the trees, each still bounded by what was found
         // for it at st (tt), or again
-        let (sd_n, st_n, sm_n) = if sd - (t - st) < ground.0 {
-            let (d, part) = land_structures(mask, pose, p);
-            (d, t, part)
-        } else {
+        let w = to_world(pose.fl, p);
+        let (sd_n, st_n, sm_n) = if sd - (t - st) >= omega * ground.0 {
             (sd, st, sm)
-        };
-        let (td_n, tt_n, tm_n) = if td - (t - tt) < ground.0 {
-            let (d, part) = land_trees(mask, pose, p);
-            (d, t, part)
         } else {
+            // (along the ray, how far it is to the roofs' height)
+            let over = ray_to_plane(w.y, wd.y, structure_top);
+            if over > 0.3 {
+                (over, t, sm)
+            } else {
+                let key = (ftoi((w.x / struct_cell).floor()), ftoi((w.z / struct_cell).floor()));
+                if !((key.0 == sc.0 && key.1 == sc.1) || !(has(mask, layers_structures))) {
+                    sc = (key.0, key.1, structure_cell_at(pose.prm.structure_density, w.x, w.z));
+                }
+                let (d, part) = land_structures_in(mask, pose, cell_exit(struct_cell, w, wd), sc.2, p);
+                (d, t, part)
+            }
+        };
+        let (td_n, tt_n, tm_n) = if td - (t - tt) >= omega * ground.0 {
             (td, tt, tm)
+        } else {
+            // (along the ray, how far it is to the trees' height and to where
+            // they are drawn round him)
+            let over = ray_to_plane(w.y, wd.y, tree_top).maximum(ray_sphere_entry(tree_far, p, rd));
+            if over > 0.3 {
+                (over, t, tm)
+            } else {
+                // (the cell's candidate and its ground, once per cell)
+                let key = (ftoi((w.x / tree_cell).floor()), ftoi((w.z / tree_cell).floor()));
+                if !((key.0 == tc.0 && key.1 == tc.1) || !draw_trees || !(has(mask, layers_trees))) {
+                    tc = (key.0, key.1, tree_cell_grounded(land_of(pose.prm), pose.prm.tree_density, w.x, w.z));
+                }
+                let (d, part) = land_trees_in(mask, pose, cell_exit(tree_cell, w, wd), tc.2, p);
+                (d, t, part)
+            }
         };
         let (built, bm) = umin((sd_n - (t - st_n), sm_n), (td_n - (t - tt_n), tm_n));
         let (d, mat) = umin(ground, (built, bm));
@@ -243,14 +337,17 @@ pub fn march_terrain(mask: i32, pose: Pose, ro: Vec3, rd: Vec3, tmax: f32) -> (f
         } else {
             (t + next, false, m, omega, safe, next)
         };
+        // (after stepping back, a bound taken further on says nothing of the
+        // way back: forget it)
+        let back = omega > 1.0 && safe + prev < step;
         t = t_n;
         i += 1;
         hit = hit_n;
         m = m_n;
-        sd = sd_n;
+        sd = if back && st_n > t_n { -1.0 } else { sd_n };
         st = st_n;
         sm = sm_n;
-        td = td_n;
+        td = if back && tt_n > t_n { -1.0 } else { td_n };
         tt = tt_n;
         tm = tm_n;
         omega = omega_n;

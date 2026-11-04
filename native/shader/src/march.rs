@@ -59,10 +59,10 @@ pub fn normal(dist: impl Fn(f32, Vec3) -> f32, p: Vec3) -> Vec3 {
 
 pub const shadow_k: f32 = 10.0;
 
-// Penumbra-estimating shadow ray towards a light at distance tmax.
-pub fn soft_shadow(dist: impl Fn(f32, Vec3) -> f32, ro: Vec3, rd: Vec3, tmax: f32) -> f32 {
+// Penumbra-estimating shadow ray towards a light at distance tmax, from t0.
+pub fn soft_shadow(dist: impl Fn(f32, Vec3) -> f32, ro: Vec3, rd: Vec3, t0: f32, tmax: f32) -> f32 {
     let k = shadow_k;
-    let (mut res, mut t, mut ph, mut i) = (1f32, 0.02f32, 1e10f32, 0i32);
+    let (mut res, mut t, mut ph, mut i) = (1f32, t0.maximum(0.02), 1e10f32, 0i32);
     while i < shadow_steps && t < tmax && res > 0.002 {
         let h = dist(t / k, ro + scale(t, rd));
         let y = h * h / (2.0 * ph);
@@ -91,6 +91,16 @@ pub fn sphere_exit(c: Vec3, r: f32, ro: Vec3, rd: Vec3) -> f32 {
     let oc = c - ro;
     let b = dot(oc, rd);
     b + (b * b - (dot(oc, oc) - r * r)).maximum(0.0).sqrt()
+}
+
+// Where a shadow ray of length tmax may start, for occluders inside (c, r):
+// where it enters that sphere grown by tmax/k (or 0 from inside).
+#[inline]
+pub fn shadow_start(c: Vec3, r: f32, ro: Vec3, rd: Vec3, tmax: f32) -> f32 {
+    let R = r + tmax / shadow_k;
+    let oc = c - ro;
+    let b = dot(oc, rd);
+    b - (b * b - (dot(oc, oc) - R * R)).maximum(0.0).sqrt()
 }
 
 // Probes along the normal.

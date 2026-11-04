@@ -446,11 +446,13 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
   let shadow (casters: i32) (l: vec3) (tmax: f32) =
     let casters = casters & vis & local_layers
     in if casters == 0 || shadow_misses occluder_centre occluder_radius po l tmax then 1
-    -- (and they end shortly after leaving that sphere: nothing lies beyond,
-    -- and the shadow loop's steps are capped at 0.25, so marching on to
-    -- tmax only crawled through empty space)
-    else soft_shadow (\tol q -> shadow_scene casters pose tol q) po l
-                     (f32.min tmax (sphere_exit occluder_centre occluder_radius po l + 1))
+    -- (and they end shortly after leaving that sphere, and start where
+    -- they come near it: nothing lies outside it, and the shadow loop's
+    -- steps are capped at 0.25, so marching the rest of the way only
+    -- crawled through empty space)
+    else let tmax = f32.min tmax (sphere_exit occluder_centre occluder_radius po l + 1)
+         in soft_shadow (\tol q -> shadow_scene casters pose tol q) po l
+                        (shadow_start occluder_centre occluder_radius po l tmax) tmax
   -- All the lights, in one loop so the lighting and shadow code is
   -- compiled once. The moon's shadow is kept for the cloth sheen.
   let (lit, moon_shadow) =
@@ -466,7 +468,11 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
                   else (if f32.isinf L.range then 1 else smoothstep L.range (0.6 * L.range) d) / (1 + L.falloff * d * d)
       -- (skipped where the light is negligible, e.g. the orb on the far terrain)
       in if atten < 0.01 || !(has L.receivers layer) then (lit, moon_shadow) else
-      let sh = if !(has L.shadowed_receivers layer) || d < L.radius then 1
+      -- (nor where the light is behind the surface: the light is then
+      -- nothing, and so is what the moon's shadow is kept for, the sheen
+      -- and hair lit round to 0.4 past the terminator)
+      let facing = dot n l > (if k == 0 then -0.4 else 0)
+      let sh = if !(has L.shadowed_receivers layer) || d < L.radius || !facing then 1
                else shadow L.casters l (if L.directional then 12 else d - L.radius - 0.15)
       let c = light mat n rd l sh (scale atten L.diffuse) (scale atten L.specular)
       in (lit +^ c, if k == 0 then sh else moon_shadow)

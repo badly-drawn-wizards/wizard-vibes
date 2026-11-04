@@ -74,3 +74,26 @@ The same shader runs about as fast natively as in Chrome: the GPU time is
 the shader's, and both reach the same driver through SPIR-V. wgpu's bounds
 checks (on WGSL) cost about 0.7 ms; rust-gpu's code, which has none, is
 about as fast as the checked WGSL.
+
+## Profiling
+
+On RADV, `native/rgp.sh NAME [args]` captures one 640x360 bench frame for
+the Radeon GPU Profiler into `build/rgp/NAME.rgp` (`native/rgp.sh wgsl`,
+`native/rgp.sh rust-gpu --rust-gpu`). nixpkgs' `rgp` 2.7 fails to build
+(patchelf crashes on AMD's binary), but its source tarball, AMD's Radeon
+Developer Tool Suite, runs unpatched through nix-ld given Qt's system
+libraries in `NIX_LD_LIBRARY_PATH` (libglvnd, fontconfig, libX11, libxcb
+and its utils, libxkbcommon, freetype, libpng, dbus, glib, wayland, zlib,
+libstdc++).
+Its instruction timing shows where each kernel's time goes in the ISA.
+`RADV_DEBUG=shaderstats,nocache` prints registers, spills and code size
+(without `nocache` a cached pipeline prints nothing): both kernels use 108
+SGPRs and 120 VGPRs at 12 waves a SIMD, spilling 234 (WGSL) and 213
+(rust-gpu) SGPRs and no VGPRs.
+In the WGSL's instruction timing (default view, 640x360) the terrain march
+took 45% of the time, the march near the wizard 29%, the clouds 7% and the
+shadow rays 7%; the code is ALU bound (memory waits 3%, SGPR spills under
+3%). The terrain march's trees and structures now bound it along the ray
+(their tops' heights, cell exits, and what stands in a cell worked out once
+per cell), which cut its steps by a quarter (and the rays that ran out of
+steps at the horizon from 31% to 9%) and the frame by about 1 ms.

@@ -106,6 +106,20 @@ pub fn sd_arms(pose: Pose, p: Vec3) -> f32 {
     sd_arm(pose.l_shoulder, pose.l_elbow, pose.l_wrist, p).minimum(sd_arm(pose.r_shoulder, pose.r_elbow, pose.r_wrist, p))
 }
 
+// The arms as they cast shadows, with no branch: the sleeve shrunk by 0.002,
+// with its opening always cut, by a capsule holding the real cut.
+#[inline]
+pub fn sd_arm_shadow(shoulder: Vec3, elbow: Vec3, wrist: Vec3, p: Vec3) -> f32 {
+    let d = normalise(wrist - elbow);
+    let fore = sd_round_cone_ab(p, elbow, wrist, 0.062, 0.076);
+    let sleeve = fore.maximum(-sd_capsule(p, wrist - scale(0.07, d), wrist + scale(0.06, d), 0.064));
+    smin(0.04, sd_capsule(p, shoulder, elbow, 0.075), sleeve)
+}
+
+pub fn sd_arms_shadow(pose: Pose, p: Vec3) -> f32 {
+    sd_arm_shadow(pose.l_shoulder, pose.l_elbow, pose.l_wrist, p).minimum(sd_arm_shadow(pose.r_shoulder, pose.r_elbow, pose.r_wrist, p))
+}
+
 // Cartoon hands: a thumb and three fingers.
 
 // A wrist: skin from inside the sleeve's cuff out to the palm.

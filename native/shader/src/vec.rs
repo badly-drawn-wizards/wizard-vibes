@@ -170,6 +170,13 @@ pub fn isinf(x: f32) -> bool {
     x.is_infinite()
 }
 
+pub const NAN: f32 = f32::NAN;
+
+#[inline]
+pub fn isnan(x: f32) -> bool {
+    x.is_nan()
+}
+
 // f32.round: to the nearest, ties to even (Rust's round goes away from 0).
 #[inline]
 pub fn round_even(x: f32) -> f32 {
