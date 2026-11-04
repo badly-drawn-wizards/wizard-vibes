@@ -1,8 +1,8 @@
 // Builds the shader crate (native/shader) for the app:
 //
-// 1. regenerates its parameters (src/generated.rs) from params.json, with
-//    the compile-time values in force (config.local.json's, or a quality
-//    preset's);
+// 1. with the compile-time values in force (config.local.json's, or a
+//    quality preset's: WIZARD_DEFAULTS and WIZARD_PRESET, for the crate's
+//    params!(), which reads params.json; see wizard-params-macro);
 // 2. compiles it to SPIR-V with rust-gpu (all its entry points in one
 //    module), which the native app runs as it is;
 // 3. fixes that up for naga (see fixup.rs) and has naga turn it into WGSL,
@@ -18,7 +18,8 @@
 // usage: cargo run --release -- [--out DIR] [--preset low|med|high] [--defaults]
 
 mod fixup;
-mod params;
+
+use wizard_params as params;
 
 use serde_json::{Map, Value, json};
 use spirv_builder::{SpirvBuilder, SpirvMetadata};
@@ -29,12 +30,6 @@ const WORKGROUP: u32 = 256;
 fn die(msg: &str) -> ! {
     eprintln!("shader-builder: {msg}");
     std::process::exit(1)
-}
-
-fn write_if_changed(path: &Path, text: &str) {
-    if std::fs::read_to_string(path).ok().as_deref() != Some(text) {
-        std::fs::write(path, text).unwrap_or_else(|e| die(&format!("{}: {e}", path.display())));
-    }
 }
 
 // Writes via a temporary file, so a reader never sees half of it.
@@ -60,15 +55,13 @@ fn main() {
     }
 
     let schema = params::Schema::load(&root).unwrap_or_else(|e| die(&e));
-    let overrides: Map<String, Value> = match &preset {
-        None => Map::new(),
-        Some(level) => match schema.quality.get(level) {
-            Some(Value::Object(m)) => m.clone(),
-            _ => die(&format!("no quality preset {level} in params.json")),
-        },
-    };
+    let overrides: Map<String, Value> = params::preset(&schema, preset.as_deref()).unwrap_or_else(|e| die(&e));
     let values = params::compile_values(&root, &schema, local, &overrides);
-    write_if_changed(&root.join("native/shader/src/generated.rs"), &params::generated_rs(&schema, &values));
+    // (for params!(), in the rust-gpu build this starts; safe: no threads yet)
+    unsafe {
+        std::env::set_var("WIZARD_PRESET", preset.as_deref().unwrap_or(""));
+        std::env::set_var("WIZARD_DEFAULTS", if local { "" } else { "1" });
+    }
 
     let t = std::time::Instant::now();
     let result = SpirvBuilder::new(root.join("native/shader"), "spirv-unknown-vulkan1.2")

@@ -7,7 +7,7 @@ every entry point, so a single bind group layout serves all of them:
 
 | binding | WGSL type                 | access     | holds |
 |---------|---------------------------|------------|-------|
-| 0       | uniform `Uniforms`        | uniform    | generated.rs's block (params `p_*`, drive `d_*`, args `a_*`) |
+| 0       | uniform `Uniforms`        | uniform    | the generated module's block (params `p_*`, drive `d_*`, args `a_*`) |
 | 1       | `array<u32>`              | read_write | out: the frame's pixels, BGRA8 packed as native_main packs them; `a_w * a_h`, rows `a_w` long, columns `>= a_vw` 0xff000000 |
 | 2       | `array<vec4<f32>>`        | read_write | colour: per image pixel (`a_vw * a_h`, pixel (x, y) at `y * a_vw + x`) its finished colour (rgb, after tone mapping) and in w the distance its ray sees (inf: the sky) |
 | 3       | `array<f32>`              | read       | spells: `spell_stride` (10) floats per slot (fut/spells.fut's layout), `a_n_spells` slots used (at most `max_spells`; clamped to the buffer's length) |
@@ -102,4 +102,4 @@ wrapped into [0, period) on the host in double precision), `a_m_rate`,
   interleaved; the app asks for `ceil(sfx_length(k) * rate)`). About
   5-75 ms each at 48 kHz in a release build.
 - Spells: `spell_stride` (10), the kinds `spell_fire` .. `spell_mark`
-  (spells.rs), `max_spells` (generated.rs).
+  (spells.rs), `max_spells` (the generated module, from params.json).

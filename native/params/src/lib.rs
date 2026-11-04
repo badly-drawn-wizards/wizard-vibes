@@ -1,8 +1,10 @@
 // params.json: every tweakable parameter, and how the drawer lays it out.
-// From it this writes the shader crate's generated.rs (the compile-time
+// From it come the shader crate's `generated` module (the compile-time
 // parameters and layer flags as constants, the uniforms as records and as
-// the flat block the app fills), and the block's layout for the app
-// (shader.json), so the app fills it whatever the build's parameters.
+// the flat block the app fills: wizard-params-macro's params!() writes it
+// as the crate compiles), and the block's layout for the app (shader.json,
+// which shader-builder writes), so the app fills it whatever the build's
+// parameters.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -51,6 +53,18 @@ impl Schema {
         let mut out = vec![];
         walk(&self.groups, &mut out);
         out
+    }
+}
+
+// The compile-time values a quality preset (params.json's "quality") sets,
+// or none.
+pub fn preset(s: &Schema, level: Option<&str>) -> Result<Map<String, Value>, String> {
+    match level {
+        None => Ok(Map::new()),
+        Some(level) => match s.quality.get(level) {
+            Some(Value::Object(m)) => Ok(m.clone()),
+            _ => Err(format!("no quality preset {level} in params.json")),
+        },
     }
 }
 
@@ -160,11 +174,11 @@ pub fn block(s: &Schema) -> Vec<Field> {
     out
 }
 
-// The shader crate's generated.rs.
+// The shader crate's generated module, as Rust source.
 pub fn generated_rs(s: &Schema, values: &Map<String, Value>) -> String {
     let all = s.params();
     let us = uniforms(s);
-    let mut o = String::from("// Generated from params.json by native/shader-builder; do not edit.\n// (fut/params.fut and fut/config.fut, for the Rust port)\n\nuse crate::prelude::*;\n");
+    let mut o = String::from("use crate::prelude::*;\n");
     for p in all.iter().filter(|p| p.kind == "flags") {
         let opts = p.options.as_deref().unwrap_or(&[]);
         o += &format!("\n// {}\n", p.label);

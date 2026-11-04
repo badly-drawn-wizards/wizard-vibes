@@ -3,7 +3,6 @@ build/
 dist/
 result
 config.local.json
-/native/shader/src/generated.rs
 /native/shader/target/
 /native/shader-builder/target/
 /native/shader.spv

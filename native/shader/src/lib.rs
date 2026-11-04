@@ -18,7 +18,10 @@ pub mod collide;
 pub mod enemies;
 pub mod figure;
 pub mod foes;
-pub mod generated;
+// (from params.json: see wizard-params-macro)
+pub mod generated {
+    wizard_params_macro::params!();
+}
 pub mod glass;
 pub mod hash;
 pub mod lightning;

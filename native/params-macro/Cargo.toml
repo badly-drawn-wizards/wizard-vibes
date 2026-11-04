@@ -1,0 +1,12 @@
+[package]
+name = "wizard-params-macro"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "params!(): the shader crate's parameters, from params.json at compile time"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+wizard-params = { path = "../params" }

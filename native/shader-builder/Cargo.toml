@@ -9,6 +9,7 @@ description = "Builds native/shader with rust-gpu to SPIR-V, and with naga to WG
 spirv-builder = "0.11"
 # (wgpu 30's)
 naga = { version = "30", features = ["spv-in", "wgsl-out"] }
+wizard-params = { path = "../params" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }

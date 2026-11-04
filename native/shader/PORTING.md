@@ -20,7 +20,7 @@ names.
   private (`fn`, not `pub fn`) in the module that uses it only itself.
 - Already ported: vec.rs (vec3.fut, plus helpers below), hash.rs, anim.rs,
   foes.rs, materials.rs, sdf.rs, march.rs, wizard.rs (shade_pixel and
-  finish_pixel), and generated.rs: `Params` (fut/params.fut's `params`
+  finish_pixel), and the generated module (params!()): `Params` (fut/params.fut's `params`
   record: colours are Vec3, checkboxes bool), `Drive` (rig.fut's `drive`,
   defined there, so do not define it again), the compile-time constants of
   fut/config.fut (`march_steps`, `full_enemies`, `leaf_colour`, ...: i32,

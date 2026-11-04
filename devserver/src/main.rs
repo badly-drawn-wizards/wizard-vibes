@@ -185,14 +185,10 @@ async fn builder(s: Arc<Server>, mut jobs: mpsc::UnboundedReceiver<Job>) {
     }
 }
 
-// The latest modification time of the files under a directory (but
-// generated.rs, which each build writes).
+// The latest modification time of the files under a directory.
 fn newest(dir: &Path) -> Option<std::time::SystemTime> {
     let mut out = None;
     for e in std::fs::read_dir(dir).ok()?.flatten() {
-        if e.file_name() == "generated.rs" {
-            continue;
-        }
         let m = if e.path().is_dir() { newest(&e.path()) } else { e.metadata().ok().and_then(|m| m.modified().ok()) };
         if m > out {
             out = m;
@@ -206,13 +202,14 @@ fn newest(dir: &Path) -> Option<std::time::SystemTime> {
 fn jobs_for(root: &Path, p: &Path) -> Vec<Job> {
     let Ok(rel) = p.strip_prefix(root) else { return vec![] };
     let s = rel.to_string_lossy();
-    if s == "native/shader/src/generated.rs" || s.contains("/target/") {
+    if s.contains("/target/") {
         return vec![];
     }
-    if s.starts_with("native/shader/src/") || s == "native/shader/Cargo.toml" {
+    // (the parameters too: the shader crate's params!() reads them)
+    if s.starts_with("native/shader/src/") || s == "native/shader/Cargo.toml" || s.starts_with("native/params") || s == "params.json" || s == "config.local.json" {
         return vec![Job::Shader, Job::Web];
     }
-    if s.starts_with("native/shader-builder/src/") || s == "params.json" || s == "config.local.json" {
+    if s.starts_with("native/shader-builder/src/") {
         return vec![Job::Shader];
     }
     if s.starts_with("client/src/") || s == "client/Cargo.toml" {
@@ -267,8 +264,6 @@ async fn build_static(root: &Path, dir: &Path) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("pkg")).map_err(|e| e.to_string())?;
     let builder = ["run", "--release", "--quiet", "--manifest-path", "native/shader-builder/Cargo.toml", "--", "--defaults", "--out"];
-    // (the levels first: the last build leaves generated.rs as the web app's
-    // host code should see it, at the defaults)
     for level in ["low", "med", "high"] {
         let out = dir.join(format!("build/shader-{level}"));
         let mut args = builder.to_vec();
@@ -281,7 +276,8 @@ async fn build_static(root: &Path, dir: &Path) -> Result<(), String> {
     args.push(out.to_str().unwrap());
     run(root, "cargo", &args).await?;
     log("shader built");
-    run(root, "cargo", &["build", "--release", "--quiet", "-p", "wizard", "--lib", "--target", "wasm32-unknown-unknown"]).await?;
+    // (the web app's own copy of the shader crate at the defaults too)
+    run(root, "cargo", &["build", "--release", "--quiet", "-p", "wizard", "--lib", "--target", "wasm32-unknown-unknown", "--config", "env.WIZARD_DEFAULTS=\"1\""]).await?;
     run(root, "wasm-bindgen", &["--target", "web", "--no-typescript", "--out-dir", dir.join("pkg").to_str().unwrap(), "target/wasm32-unknown-unknown/release/wizard.wasm"]).await?;
     log("web app built");
     for (from, to) in [("client/web/index.html", "index.html"), ("params.json", "params.json"), ("LICENSE", "LICENSE")] {
@@ -343,7 +339,7 @@ async fn main() {
         }
     })
     .expect("no file watcher");
-    for (dir, mode) in [("native/shader", RecursiveMode::Recursive), ("native/shader-builder/src", RecursiveMode::Recursive), ("client", RecursiveMode::Recursive), (".", RecursiveMode::NonRecursive), ("build", RecursiveMode::NonRecursive)] {
+    for (dir, mode) in [("native/shader", RecursiveMode::Recursive), ("native/shader-builder/src", RecursiveMode::Recursive), ("native/params/src", RecursiveMode::Recursive), ("native/params-macro/src", RecursiveMode::Recursive), ("client", RecursiveMode::Recursive), (".", RecursiveMode::NonRecursive), ("build", RecursiveMode::NonRecursive)] {
         std::fs::create_dir_all(root.join(dir)).ok();
         watcher.watch(&root.join(dir), mode).unwrap_or_else(|e| panic!("watching {dir}: {e}"));
     }
