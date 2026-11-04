@@ -460,8 +460,10 @@ def surface (pose: pose) (g: glow) (tagged: i32) (p: vec3) (rd: vec3) (t: f32) :
                    else let v = L.pos -^ p
                         let d = length v
                         in (scale (1 / d) v, d)
+      -- (an endless range does not fade: smoothstep of infinities would be
+      -- NaN, which GPUs' min and max resolve differently)
       let atten = if L.directional then 1
-                  else smoothstep L.range (0.6 * L.range) d / (1 + L.falloff * d * d)
+                  else (if f32.isinf L.range then 1 else smoothstep L.range (0.6 * L.range) d) / (1 + L.falloff * d * d)
       -- (skipped where the light is negligible, e.g. the orb on the far terrain)
       in if atten < 0.01 || !(has L.receivers layer) then (lit, moon_shadow) else
       let sh = if !(has L.shadowed_receivers layer) || d < L.radius then 1
