@@ -72,6 +72,9 @@ pub enum Event {
     Shader(ShaderFiles),
     Building,
     Error(String),
+    // a dev server other than the one seen so far (restarted): what follows
+    // is to be loaded afresh, even if it looks the same
+    ServerChanged,
 }
 
 fn version_of(text: &str) -> String {
@@ -138,7 +141,17 @@ mod native {
             std::thread::spawn(move || {
                 let mut seen_schema = None;
                 let mut seen: Option<(String, Option<SystemTime>)> = None;
+                // the dev server's id (it writes build/devserver-id as it starts)
+                let mut server: Option<String> = None;
                 loop {
+                    if let Ok(id) = std::fs::read_to_string(r.join("build/devserver-id")) {
+                        if server.as_ref().is_some_and(|s| *s != id) {
+                            log::info!("dev server restarted: reloading");
+                            (seen_schema, seen) = (None, None);
+                            let _ = tx.send(Event::ServerChanged);
+                        }
+                        server = Some(id);
+                    }
                     let schema_path = r.join("params.json");
                     let t = mtime(&schema_path);
                     if t != seen_schema {
@@ -309,6 +322,32 @@ mod web {
                     es.add_event_listener_with_callback(name, cb.as_ref().unchecked_ref()).unwrap();
                     cb.forget();
                 };
+                // a server other than the one first seen (restarted): reload,
+                // as what this page has may be stale; and reload when the app
+                // is rebuilt
+                let first: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+                add(
+                    "hello",
+                    Box::new(move |e: web_sys::MessageEvent| {
+                        let data = e.data().as_string().unwrap_or_default();
+                        let id = serde_json::from_str::<serde_json::Value>(&data).ok().and_then(|v| v["id"].as_str().map(String::from));
+                        let mut first = first.borrow_mut();
+                        match (&*first, id) {
+                            (Some(a), Some(b)) if *a != b => {
+                                log::info!("dev server restarted: reloading");
+                                let _ = web_sys::window().unwrap().location().reload();
+                            }
+                            (None, id) => *first = id,
+                            _ => {}
+                        }
+                    }),
+                );
+                add(
+                    "reload",
+                    Box::new(|_| {
+                        let _ = web_sys::window().unwrap().location().reload();
+                    }),
+                );
                 let (q, c) = (queue.clone(), ctx.clone());
                 add(
                     "building",

@@ -16,8 +16,10 @@
 //   GET  /                 the page (client/web/index.html), /pkg/* its wasm
 //   GET  /params.json      the parameters' schema
 //   GET  /build/shader*/*  the shader builds
-//   GET  /events           server-sent events: building, failed {message},
-//                          shader {preset}, params, reload
+//   GET  /events           server-sent events: hello {id} (first; the id is
+//                          new each run: build/devserver-id has it too),
+//                          building, failed {message}, shader {preset},
+//                          params, reload
 //   POST /config           compile-time parameter changes (JSON object),
 //                          saved to config.local.json (which rebuilds)
 //   POST /preset           a quality level ("low", "med", "high") to build;
@@ -58,6 +60,17 @@ struct Server {
     presets: Mutex<BTreeSet<String>>,
     // how many times each preset has been built (for /preset to wait on)
     built: watch::Sender<Vec<(String, u64)>>,
+    // this server's own id, new each time it starts (see `events`)
+    id: String,
+}
+
+// An id for this run of the server: random enough to tell runs apart.
+fn new_id() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    h.write_u32(std::process::id());
+    format!("{:016x}", h.finish())
 }
 
 #[derive(Debug, PartialEq)]
@@ -185,8 +198,13 @@ fn jobs_for(root: &Path, p: &Path) -> Vec<Job> {
     vec![]
 }
 
+// Each connection starts with `hello` {id}: a client reconnecting (as
+// EventSource does by itself) to a server with another id, a restarted one,
+// reloads, as what it has may be stale.
 async fn events(State(s): State<Arc<Server>>) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let stream = BroadcastStream::new(s.notes.subscribe()).filter_map(|n| n.ok()).map(|n| Ok(Event::default().event(n.name).data(n.data)));
+    let hello = Event::default().event("hello").data(serde_json::json!({ "id": s.id }).to_string());
+    let notes = BroadcastStream::new(s.notes.subscribe()).filter_map(|n| n.ok()).map(|n| Event::default().event(n.name).data(n.data));
+    let stream = tokio_stream::once(hello).chain(notes).map(Ok);
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
@@ -279,7 +297,10 @@ async fn main() {
     }
     let (jobs_tx, jobs_rx) = mpsc::unbounded_channel();
     let (notes, _) = broadcast::channel(64);
-    let s = Arc::new(Server { root: root.clone(), notes, jobs: jobs_tx, presets: Mutex::new(BTreeSet::new()), built: watch::channel(vec![]).0 });
+    let id = new_id();
+    // (for the native app, which reads the builds' files rather than the
+    // events: written once the server is up, below)
+    let s = Arc::new(Server { root: root.clone(), notes, jobs: jobs_tx, presets: Mutex::new(BTreeSet::new()), built: watch::channel(vec![]).0, id: id.clone() });
     tokio::spawn(builder(s.clone(), jobs_rx));
     let _ = s.jobs.send(Job::Shader);
     if !root.join("build/web/wizard_bg.wasm").exists() {
@@ -340,7 +361,8 @@ async fn main() {
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(s);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap_or_else(|e| panic!("port {port}: {e}"));
-    log(&format!("http://localhost:{port}"));
+    log(&format!("http://localhost:{port} (server {id})"));
+    let _ = std::fs::write(root.join("build/devserver-id"), &id);
     axum::serve(listener, app).await.unwrap();
     drop(watcher);
 }

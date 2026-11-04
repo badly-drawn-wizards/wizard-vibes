@@ -51,6 +51,8 @@ pub struct App {
     quality_loading: Option<Level>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     shot_asked: bool,
+    // load the next shader even if it looks the same (a restarted server)
+    reload: bool,
 }
 
 impl App {
@@ -100,6 +102,7 @@ impl App {
             quality_ready: false,
             quality_loading: None,
             shot_asked: false,
+            reload: false,
         }
     }
 
@@ -160,11 +163,13 @@ impl App {
                     self.building = false;
                     self.error = Some(e);
                 }
+                Event::ServerChanged => self.reload = true,
                 Event::Shader(files) => {
                     self.building = false;
-                    if self.shader.as_ref().is_some_and(|s| s.version == files.version) {
+                    if !self.reload && self.shader.as_ref().is_some_and(|s| s.version == files.version) {
                         continue;
                     }
+                    self.reload = false;
                     let t = Instant::now();
                     match Shader::new(&rs.device, &files) {
                         Ok(s) => {

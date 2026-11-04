@@ -13,10 +13,8 @@
 <canvas id="view"></canvas>
 <script type="module">
   import init from "./pkg/wizard.js";
+  // (the app listens to the dev server's events itself)
   await init();
-  // (the dev server reloads the page when the app is rebuilt; a static
-  // site has no events, and the 404 ends the stream)
-  new EventSource("events").addEventListener("reload", () => location.reload());
 </script>
 </body>
 </html>
