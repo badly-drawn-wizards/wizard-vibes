@@ -163,10 +163,14 @@ pub fn sd_left_hand(pose: Pose, p: Vec3) -> f32 {
 // The right hand, which points: a palm in a frame along the forearm, three
 // fingers of two straight segments side by side, and a thumb. At rest the
 // fingers are nearly straight with a slight bend; as he points into a turn
-// the index finger straightens and the others close.
+// the index finger straightens and the others close. Thumbing back over his
+// shoulder, all three close into a fist and the thumb sticks out backwards
+// (his -z) and up, over his shoulder.
 pub fn sd_right_hand(pose: Pose, p: Vec3) -> f32 {
     let f = normalise(pose.r_wrist - pose.r_elbow); // along the forearm
-    let side = normalise(cross(f, vec(0.0, 1.0, 0.0))); // away from the thumb
+    // away from the thumb (thumbing back, the forearm rises nearly upright:
+    // then square to his forward, not to up)
+    let side = normalise(cross(f, normalise(mix(vec(0.0, 1.0, 0.0), vec(0.0, 0.0, 1.0), pose.thumb))));
     let up = cross(side, f); // the back of the hand
     let centre = right_palm(pose);
     let q = p - centre;
@@ -182,13 +186,17 @@ pub fn sd_right_hand(pose: Pose, p: Vec3) -> f32 {
         sd_capsule(p, base, knuckle, 0.015).minimum(sd_capsule(p, knuckle, tip, 0.0145))
     };
     let pt = pose.point;
-    let index = finger(-0.025, mix1(0.15, 0.0, pt), mix1(0.2, 0.0, pt), 0.032, 0.028);
-    let middle = finger(0.0, mix1(0.2, 1.1, pt), mix1(0.25, 1.3, pt), 0.034, 0.028);
-    let ring = finger(0.025, mix1(0.25, 1.1, pt), mix1(0.3, 1.3, pt), 0.03, 0.025);
+    let th = pose.thumb;
+    let index = finger(-0.025, mix1(mix1(0.15, 0.0, pt), 1.1, th), mix1(mix1(0.2, 0.0, pt), 1.3, th), 0.032, 0.028);
+    // (the other two close to point, and to make the fist)
+    let closed = pt.max(th);
+    let middle = finger(0.0, mix1(0.2, 1.1, closed), mix1(0.25, 1.3, closed), 0.034, 0.028);
+    let ring = finger(0.025, mix1(0.25, 1.1, closed), mix1(0.3, 1.3, closed), 0.03, 0.025);
     // the thumb: from the inner side of the palm, along the index finger
     let tb = centre - scale(0.03, side) + scale(0.005, f);
-    let tdir = normalise(scale(0.85, f) - scale(0.4, side) - scale(0.2 + 0.25 * pt, up));
-    let thumb = sd_capsule(p, tb, tb + scale(0.042, tdir), 0.015);
+    let along = normalise(scale(0.85, f) - scale(0.4, side) - scale(0.2 + 0.25 * pt, up));
+    let tdir = normalise(mix(along, vec(-0.2, 0.8, -1.0), th));
+    let thumb = sd_capsule(p, tb, tb + scale(0.042 + 0.03 * th, tdir), 0.015 + 0.002 * th);
     let wrist = sd_wrist(pose.r_wrist, centre, p);
     smin(0.012, smin(0.02, palm, wrist), index.minimum(middle).minimum(ring.minimum(thumb)))
 }

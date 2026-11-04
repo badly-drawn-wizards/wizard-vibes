@@ -41,6 +41,8 @@ pub struct Drive {
     // his shield
     pub shield: f32,
     pub shield_hit: f32,
+    // flying backwards: 0 .. 1, as he thumbs over his shoulder
+    pub thumb: f32,
     // the enemies' states, and the point they circle
     pub arena_x: f32,
     pub arena_y: f32,
@@ -68,6 +70,7 @@ pub const ON_PATH: Drive = Drive {
     spell: 1.0,
     shield: 0.0,
     shield_hit: 10.0,
+    thumb: 0.0,
     arena_x: 0.0,
     arena_y: 12.0,
     arena_z: 12.0,
@@ -97,12 +100,51 @@ impl Drive {
             "spell" => self.spell,
             "shield" => self.shield,
             "shield_hit" => self.shield_hit,
+            "thumb" => self.thumb,
             "arena_x" => self.arena_x,
             "arena_y" => self.arena_y,
             "arena_z" => self.arena_z,
             f if f.starts_with("foe") => f[3..].parse::<usize>().ok().and_then(|i| self.foe.get(i).copied()).unwrap_or(0.0),
             _ => panic!("no drive field {id}"),
         }
+    }
+
+    // Sets a field by its name (as field() reads it); whether there is one.
+    pub fn set(&mut self, id: &str, v: f32) -> bool {
+        let f = match id {
+            "free" => {
+                self.free = v != 0.0;
+                return true;
+            }
+            "x" => &mut self.x,
+            "y" => &mut self.y,
+            "z" => &mut self.z,
+            "heading" => &mut self.heading,
+            "turn" => &mut self.turn,
+            "ax" => &mut self.ax,
+            "ay" => &mut self.ay,
+            "az" => &mut self.az,
+            "climb" => &mut self.climb,
+            "staff" => &mut self.staff,
+            "sx" => &mut self.sx,
+            "sy" => &mut self.sy,
+            "sz" => &mut self.sz,
+            "flash" => &mut self.flash,
+            "spell" => &mut self.spell,
+            "shield" => &mut self.shield,
+            "shield_hit" => &mut self.shield_hit,
+            "thumb" => &mut self.thumb,
+            "arena_x" => &mut self.arena_x,
+            "arena_y" => &mut self.arena_y,
+            "arena_z" => &mut self.arena_z,
+            f if f.starts_with("foe") => match f[3..].parse::<usize>().ok().and_then(|i| self.foe.get_mut(i)) {
+                Some(x) => x,
+                None => return false,
+            },
+            _ => return false,
+        };
+        *f = v;
+        true
     }
 }
 

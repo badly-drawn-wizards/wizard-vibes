@@ -2,7 +2,8 @@
 // --bench renders FRAMES frames at t0 + f / 30 (after one to warm up) and
 // reports the mean time per frame, and the GPU time per frame where the
 // device has timestamp queries. Both with the default parameters (as
-// --set changes them), the page's camera and on the flight path.
+// --set changes them), the page's camera and on the flight path (unless
+// --drive sets the drive record's fields: e.g. free=1 thumb=1).
 
 use crate::params::Schema;
 use crate::render::frame::Frame;
@@ -18,6 +19,9 @@ pub struct Options {
     pub size: (u32, u32),
     pub t0: f32,
     pub sets: Vec<(String, f64)>,
+    pub drive: Vec<(String, f32)>,
+    // --camera YAW,PITCH,DIST: the shot's camera, for the page's
+    pub camera: Option<crate::types::Camera>,
     pub wgsl: bool,
     // --music N: N frames of music from t0 on the GPU, checked against the
     // shader crate's own on the CPU
@@ -43,6 +47,13 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     let mut values: ParamValues = ParamValues(schema.params().iter().filter(|p| !p.compile).map(|p| (p.id.clone(), p.default.clone())).collect());
     // (outside fight mode there are no enemies)
     values.0.insert("enemies".into(), Value::Num(0.0));
+    let mut drive = ON_PATH;
+    for (k, v) in &o.drive {
+        if !drive.set(k, *v) {
+            return Err(format!("--drive: no field {k}"));
+        }
+    }
+    let drive = &drive;
     for (k, v) in &o.sets {
         if !values.0.contains_key(k) {
             return Err(format!("--set: no parameter {k}"));
@@ -115,7 +126,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     }
     if let Some(path) = &o.shot {
         let mut enc = device.create_command_encoder(&Default::default());
-        frame.record(&device, &queue, &mut enc, &shader, &values, &ON_PATH, &args(o.t0, PAGE_CAMERA), &[]);
+        frame.record(&device, &queue, &mut enc, &shader, &values, drive, &args(o.t0, o.camera.unwrap_or(PAGE_CAMERA)), &[]);
         let w = padded(vw);
         let size = w as u64 * h as u64 * 4;
         let read = device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });

@@ -79,6 +79,7 @@ pub struct Pose {
     pub head: Vec3, // offset of the head, beard and hat
     pub look: f32,  // head turn (radians, towards +x)
     pub point: f32, // 0 idle .. 1 pointing with the right hand
+    pub thumb: f32, // 0 .. 1 thumbing back over his right shoulder (flying backwards)
     pub pix: f32,   // angle one pixel spans (for texture filtering)
     pub blink: f32, // 0 eyes open .. 1 closed
     pub runes: f32, // the runes' brightness, relative to their glow parameters
@@ -132,6 +133,7 @@ pub const on_path: Drive = Drive {
     spell: 1.0,
     shield: 0.0,
     shield_hit: 10.0,
+    thumb: 0.0,
     arena_x: 0.0,
     arena_y: 12.0,
     arena_z: 12.0,
@@ -177,7 +179,10 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     // (in free flight he points the way he accelerates instead)
     let accel = vec(dr.ax, dr.ay, dr.az);
     let side = if dr.free { sgn(dr.ax) } else { sgn(fl.turn) };
-    let point = if dr.free { saturate(length(accel)) } else { smoothstep(0.03, 0.12, fl.turn.abs()) };
+    // Flying backwards, he jabs his right thumb back over his shoulder the
+    // way he goes instead.
+    let thumb = if dr.free { saturate(dr.thumb) } else { 0.0 };
+    let point = (1.0 - thumb) * if dr.free { saturate(length(accel)) } else { smoothstep(0.03, 0.12, fl.turn.abs()) };
     let lean = clamp(-0.15, 0.15, prm.lean * fl.turn);
     let shift = move |y: f32| vec(lean * 0f32.maximum(y - 0.45), 0.0, 0.0);
     // inhaling lifts the shoulders; the head rises and nods forward a little
@@ -259,7 +264,12 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         vec(0.5, 0.55, 0.9)
     };
     let aim = r_shoulder + scale(0.62, normalise(aim_dir));
-    let (r_elbow, r_wrist) = two_bone(r_shoulder, mix(rest, aim, point), 0.31, 0.27, vec(-0.6, -1.0, -0.5));
+    // (thumbing back: the elbow forward and low, the forearm rising to the
+    // fist, at his chin's height and out past the shoulder)
+    let jab = r_shoulder + vec(-0.24, 0.13, 0.1);
+    let target = mix(mix(rest, aim, point), jab, thumb);
+    let pole = normalise(mix(vec(-0.6, -1.0, -0.5), vec(-0.4, -0.6, 1.0), thumb));
+    let (r_elbow, r_wrist) = two_bone(r_shoulder, target, 0.31, 0.27, pole);
     let moon_world = moon_dir(prm.moon_azimuth, prm.moon_elevation);
     Pose {
         tm,
@@ -271,8 +281,10 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         breath: b,
         lean,
         head,
-        look: 0.45 * point * side * (if dr.free { 1f32.minimum(2.0 * dr.ax.abs()) } else { 1.0 }),
+        // (and thumbing back, he glances over that shoulder: his right, -x)
+        look: 0.45 * point * side * (if dr.free { 1f32.minimum(2.0 * dr.ax.abs()) } else { 1.0 }) - 0.4 * thumb,
         point,
+        thumb,
         pix: 0.0008,
         // doubling for every 4 units/s of climb
         runes: if dr.free { clamp(0.1, 3.0, 2f32.powf(dr.climb / 4.0)) } else { 1.0 },

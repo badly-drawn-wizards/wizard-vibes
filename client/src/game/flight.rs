@@ -3,15 +3,18 @@
 // drive record, and the probe reports the land round the rock (see
 // fut/collide.fut), which pushes it back out of anything it flies into.
 //
-//   W / S   accelerate the way the camera looks / brake
-//   A / D   accelerate left / right (of the camera)
+//   W / S   accelerate the way the camera looks / backwards
+//   A / D   accelerate left / right (of the camera): strafe
 //   E / Q   climb / descend           Shift   boost
 //
-// or a game controller (see gamepad.rs), which can also fly back towards
-// the camera.
+// or a game controller (see gamepad.rs).
 //
-// He always faces the way he travels (turning towards it gradually), banks
-// into turns, and points the way he accelerates: the harder, the more.
+// The camera stays where it is in the world (only the mouse or the right
+// stick turns it). Moving, he turns (gradually) to face the way it looks,
+// and part of the way towards where he drifts sideways, so strafing turns
+// him a little; flying backwards he still faces ahead, and thumbs back
+// over his shoulder. He banks into turns, and points the way he
+// accelerates: the harder, the more.
 
 use super::vec::V3;
 use crate::types::{Drive, ON_PATH};
@@ -51,10 +54,11 @@ pub fn path_dx(s: f32) -> f32 {
 const THRUST: f32 = 9.0; // units/s², forward
 const SIDE: f32 = 7.0; // sideways
 const CLIMB: f32 = 6.0;
-const BRAKE: f32 = 10.0;
+const BACK: f32 = 0.7; // backwards, of the thrust forwards
 const DRAG: f32 = 0.5; // per second: top speed is thrust / drag
 const BOOST: f32 = 2.5;
-const TURN_RATE: f32 = 2.5; // how fast the heading follows the velocity (1/s)
+const TURN_RATE: f32 = 2.5; // how fast the heading follows its aim (1/s)
+const DRIFT: f32 = 0.4; // how far he turns towards his sideways drift (of its angle)
 const MAX_TURN: f32 = 1.2; // rad/s
 const CEILING: f32 = 80.0;
 
@@ -149,22 +153,15 @@ impl FreeFlight {
         let b = |x: bool| if x { 1.0 } else { 0.0 };
         let k = |a: bool, c: bool| b(a) - b(c);
         let clamp1 = |x: f32| x.clamp(-1.0, 1.0);
-        let thrust = clamp1(b(h.fwd) + pad.map_or(0.0, |p| p.fwd)) * THRUST * boost;
+        let push = clamp1(b(h.fwd) - b(h.back) + pad.map_or(0.0, |p| p.fwd));
+        let thrust = push * if push < 0.0 { BACK } else { 1.0 } * THRUST * boost;
         let side = clamp1(k(h.right, h.left) + pad.map_or(0.0, |p| p.side)) * SIDE * boost;
         let mut a: V3 = [0.0; 3];
         for i in 0..3 {
             a[i] = fwd[i] * thrust + right[i] * side - DRAG * self.vel[i];
         }
         a[1] += clamp1(k(h.up, h.down) + pad.map_or(0.0, |p| p.up)) * CLIMB * boost;
-        if h.back {
-            // brake, down to a stop but not into reverse
-            let sp = super::vec::len(self.vel);
-            if sp > 1e-3 {
-                for i in 0..3 {
-                    a[i] -= (self.vel[i] / sp) * BRAKE.min(sp / dt);
-                }
-            }
-        }
+        let steering = (thrust / THRUST).abs().max((side / SIDE).abs());
         for i in 0..3 {
             self.vel[i] += a[i] * dt;
             self.pos[i] += self.vel[i] * dt;
@@ -174,14 +171,19 @@ impl FreeFlight {
             self.vel[1] = self.vel[1].min(0.0);
         }
 
-        // face the way he travels
+        // face the way the camera looks, turned part of the way towards
+        // where he drifts sideways (the drift's angle from the view, a
+        // backwards drift mirrored forwards: he does not turn round), as he
+        // moves or steers
+        let wrap = |d: f32| d.sin().atan2(d.cos());
         let hs = self.vel[0].hypot(self.vel[2]);
-        let mut turn = 0.0;
-        if hs > 0.5 {
-            let mut d = self.vel[0].atan2(self.vel[2]) - self.heading;
-            d = d.sin().atan2(d.cos());
-            turn = (d * TURN_RATE).clamp(-MAX_TURN, MAX_TURN);
+        let mut drift = if hs > 0.5 { wrap(self.vel[0].atan2(self.vel[2]) - view) } else { 0.0 };
+        if drift.abs() > std::f32::consts::FRAC_PI_2 {
+            drift = drift.signum() * std::f32::consts::PI - drift;
         }
+        let aim = view + DRIFT * drift * smoothstep(0.5, 3.0, hs);
+        let weight = smoothstep(0.5, 3.0, hs).max(steering);
+        let turn = (wrap(aim - self.heading) * TURN_RATE).clamp(-MAX_TURN, MAX_TURN) * weight;
         self.heading += turn * dt;
         self.turn += (turn - self.turn) * (1.0 - (-dt / 0.15).exp());
 
@@ -237,6 +239,8 @@ impl FreeFlight {
         let lz = wz * c + wx * s;
         let mag = (lx * lx + wy * wy + lz * lz).sqrt();
         let amount = smoothstep(1.5, 7.0, mag) / if mag == 0.0 { 1.0 } else { mag };
+        // flying backwards: his speed backwards along his facing
+        let back = -(self.vel[0] * s + self.vel[2] * c);
         Drive {
             free: true,
             x: self.pos[0],
@@ -248,6 +252,7 @@ impl FreeFlight {
             ay: wy * amount,
             az: lz * amount,
             climb: self.climb,
+            thumb: smoothstep(1.0, 4.0, back),
             ..ON_PATH
         }
     }
@@ -280,12 +285,28 @@ mod tests {
         // thrust / drag along +z, and facing it
         assert!((f.vel[2] - THRUST / DRAG).abs() < 0.01, "{:?}", f.vel);
         assert!(f.heading.abs() < 1e-3);
-        // braking stops him without reversing
+        // S: backwards, to its own top speed, still facing ahead, thumbing
         let held = Held { back: true, ..Default::default() };
-        for _ in 0..200 {
+        for _ in 0..2000 {
             f.update(0.02, 0.0, 0.0, &held, None);
         }
-        assert!(f.vel[2].abs() < 1e-3 && f.vel[2] >= -1e-6, "{:?}", f.vel);
+        assert!((f.vel[2] + BACK * THRUST / DRAG).abs() < 0.01, "{:?}", f.vel);
+        assert!(f.heading.abs() < 1e-3);
+        assert_eq!(f.drive().thumb, 1.0);
+    }
+
+    #[test]
+    fn strafing_turns_him_part_way() {
+        // D held, the view fixed along +z: he slides to the camera's right
+        // (-x), and turns only part of the way towards it, not round and round
+        let mut f = FreeFlight { active: true, vel: [0.0; 3], ..Default::default() };
+        let held = Held { right: true, ..Default::default() };
+        for _ in 0..2000 {
+            f.update(0.02, 0.0, 0.0, &held, None);
+        }
+        assert!((f.vel[0] + SIDE / DRAG).abs() < 0.01 && f.vel[2].abs() < 0.01, "{:?}", f.vel);
+        let want = -DRIFT * std::f32::consts::FRAC_PI_2;
+        assert!((f.heading - want).abs() < 1e-3, "{} not {want}", f.heading);
     }
 
     #[test]
