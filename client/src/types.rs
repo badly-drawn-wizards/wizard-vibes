@@ -163,12 +163,15 @@ pub struct SfxEvent {
 }
 
 // A chunk of music asked of the GPU: `frames` stereo frames from `t0`
-// seconds into the loop, at `rate` a second.
+// seconds into the song (wrapped into the loop by the renderer), at `rate`
+// a second. Chunks are asked for in order (`chunk` counts them from 0):
+// the soundboard's state carries from each to the next.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MusicRequest {
     pub t0: f32,
     pub rate: f32,
     pub frames: u32,
+    pub chunk: u32,
 }
 
 // The collision probe asked for this frame: after the six spheres round the

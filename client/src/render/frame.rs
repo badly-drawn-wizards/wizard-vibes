@@ -17,6 +17,9 @@ const EDGES: u32 = 4;
 const RAYS: u32 = 5;
 const ARGS: u32 = 6;
 const MUSIC: u32 = 7;
+const DRY: u32 = 8;
+const MODES: u32 = 9;
+const BOARD: u32 = 10;
 
 // The share of pixels that edge supersampling can take (typical frames
 // have 1-5% edge pixels; past this, edges keep their one sample).
@@ -91,22 +94,31 @@ impl Frame {
 
     // Starts computing a chunk of music (unless one is being read back:
     // then false, and it can be asked again later).
+    // (chunks must come in order, req.chunk counting them from 0: the
+    // soundboard's state, in two slots of its buffer, carries on from the
+    // last; see the soundboard entry point)
     pub fn music(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, shader: &Shader, params: &ParamValues, drive: &Drive, req: MusicRequest, period: f32) -> bool {
         use wgpu::BufferUsages as U;
-        if self.music_read.is_some() || !shader.has("music") {
+        if self.music_read.is_some() || !shader.has("music_mix") {
             return false;
         }
         // (the loop time, wrapped in double precision)
         let t0 = (req.t0 as f64).rem_euclid(period as f64) as f32;
-        let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: t0, m_rate: req.rate, m_n: req.frames };
+        let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: t0, m_rate: req.rate, m_n: req.frames, m_chunk: req.chunk };
         let data = shader.uniforms(params, drive, &args);
-        let n = 2 * req.frames as u64 * 4;
+        let frames = req.frames as u64;
+        let n = 2 * frames * 4;
         let m = &mut self.music;
         queue.write_buffer(m.get(device, UNIFORMS, data.len() as u64, U::UNIFORM | U::COPY_DST), 0, &data);
         m.get(device, MUSIC, n, U::STORAGE | U::COPY_SRC);
+        m.get(device, DRY, 3 * frames * 4, U::STORAGE);
+        m.get(device, MODES, wizard_shader::soundboard::modes as u64 * frames * 4, U::STORAGE);
+        m.get(device, BOARD, 2 * 2 * wizard_shader::soundboard::modes as u64 * 4, U::STORAGE);
         let read = device.create_buffer(&wgpu::BufferDescriptor { label: Some("music read"), size: n, usage: U::MAP_READ | U::COPY_DST, mapped_at_creation: false });
         let mut enc = device.create_command_encoder(&Default::default());
-        dispatch(device, &mut enc, shader, m, "music", 2 * req.frames);
+        dispatch(device, &mut enc, shader, m, "music", req.frames);
+        dispatch(device, &mut enc, shader, m, "soundboard", wizard_shader::soundboard::modes as u32);
+        dispatch(device, &mut enc, shader, m, "music_mix", req.frames);
         enc.copy_buffer_to_buffer(m.peek(MUSIC).unwrap(), 0, &read, 0, n);
         queue.submit([enc.finish()]);
         let done = self.music_done.clone();
@@ -138,7 +150,7 @@ pub fn host_records(shader: &Shader, params: &ParamValues, drive: &Drive) -> Opt
     if shader.meta.fields.len() * 4 != size {
         return None;
     }
-    let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0 };
+    let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0 };
     let bytes = shader.uniforms(params, drive, &args);
     // (Uniforms is repr(C), 4-byte scalars throughout, as the block)
     let u: wizard_shader::generated::Uniforms = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const _) };

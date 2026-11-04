@@ -34,6 +34,7 @@ pub mod sdf;
 #[cfg(not(target_arch = "spirv"))]
 pub mod sfx;
 pub mod shading;
+pub mod soundboard;
 pub mod spells;
 pub mod textures;
 pub mod vec;
@@ -272,11 +273,78 @@ pub fn pack_pixels(
 pub fn music(
     #[spirv(global_invocation_id)] gid: UVec3,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 7)] samples: &mut [f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
 ) {
-    let j = gid.x as i32;
-    if j >= 2 * u.a_m_n {
+    // (a thread a frame: the mix before the limit, and the harpsichord)
+    let i = gid.x as i32;
+    if i >= u.a_m_n {
         return;
     }
-    samples[j as usize] = music::sound_value(u.a_m_t0, u.a_m_rate, j);
+    let (l, r, h) = music::music_parts(u.a_m_rate, music::wrap(u.a_m_t0 + i as f32 / u.a_m_rate));
+    let k = 3 * i as usize;
+    dry[k] = l;
+    dry[k + 1] = r;
+    dry[k + 2] = h;
+}
+
+// The soundboard over a chunk: a thread a mode, through the chunk's
+// frames in turn, from the state the last chunk left in its slot (chunk
+// a_m_chunk reads slot (a_m_chunk - 1) % 2, writes slot a_m_chunk % 2, and
+// the first chunk starts from rest), so a chunk asked for again (its
+// readback lost) starts from the same state.
+#[spirv(compute(threads(256)))]
+pub fn soundboard(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 9)] modes_out: &mut [f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 10)] state: &mut [f32],
+) {
+    let m = gid.x as usize;
+    if m >= soundboard::modes {
+        return;
+    }
+    let (a1, a2, b, _, _) = soundboard::mode_coeffs(m, u.a_m_rate);
+    let slot = 2 * soundboard::modes;
+    let (inp, outp) = if srem(u.a_m_chunk, 2) == 0 { (slot, 0) } else { (0, slot) };
+    let (mut y1, mut y2) = if u.a_m_chunk == 0 { (0.0, 0.0) } else { (state[inp + 2 * m], state[inp + 2 * m + 1]) };
+    let n = u.a_m_n as usize;
+    let mut i = 0;
+    while i < n {
+        let y = a1 * y1 - a2 * y2 + b * dry[3 * i + 2];
+        y2 = y1;
+        y1 = y;
+        modes_out[m * n + i] = y;
+        i += 1;
+    }
+    state[outp + 2 * m] = y1;
+    state[outp + 2 * m + 1] = y2;
+}
+
+// The music's chunk: the mix, the soundboard's modes panned into it, then
+// the limit; interleaved stereo, a thread a frame.
+#[spirv(compute(threads(256)))]
+pub fn music_mix(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 7)] samples: &mut [f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 9)] modes_out: &mut [f32],
+) {
+    let i = gid.x as usize;
+    let n = u.a_m_n as usize;
+    if i >= n {
+        return;
+    }
+    let (mut l, mut r) = (dry[3 * i], dry[3 * i + 1]);
+    let mut m = 0;
+    while m < soundboard::modes {
+        let (_, _, _, pl, pr) = soundboard::mode_coeffs(m, u.a_m_rate);
+        let y = modes_out[m * n + i];
+        l += pl * y;
+        r += pr * y;
+        m += 1;
+    }
+    samples[2 * i] = music::soft(l);
+    samples[2 * i + 1] = music::soft(r);
 }

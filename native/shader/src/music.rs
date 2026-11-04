@@ -424,6 +424,20 @@ pub fn tune(t: f32) -> (f32, f32) {
 // The mix at time t (within the loop), softly limited.
 #[inline(never)]
 pub fn music_at(rate: f32, t: f32) -> (f32, f32) {
+    let (l, r, _) = music_parts(rate, t);
+    (soft(l), soft(r))
+}
+
+// The soft limit on the mix.
+#[inline]
+pub fn soft(x: f32) -> f32 {
+    (1.1 * x).tanh() / 1.1
+}
+
+// The mix at time t before the limit (left, right), and the harpsichord in
+// it (mono), which drives the soundboard (see soundboard.rs).
+#[inline]
+pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32) {
     let groove = if stopped(t) { 0.0 } else { 1.0 };
     let drums = groove * (kick(t) + clap(rate, t));
     let hh = groove * hats(rate, t);
@@ -433,8 +447,7 @@ pub fn music_at(rate: f32, t: f32) -> (f32, f32) {
     let harp = if section(t) >= 2 { 0.6 } else { 1.0 };
     let (sl, sr) = strings(t);
     let (ml, mr) = tune(t);
-    let soft = |x: f32| (1.1 * x).tanh() / 1.1;
-    (soft(drums + low + 0.6 * hh + harp * hl + sl + ml), soft(drums + low + hh + harp * hr + sr + mr))
+    (drums + low + 0.6 * hh + harp * hl + sl + ml, drums + low + hh + harp * hr + sr + mr, 0.5 * harp * (hl + hr))
 }
 
 // Value j of sound_chunk: sample j / 2 from time t0 at `rate` samples a
@@ -445,8 +458,27 @@ pub fn sound_value(t0: f32, rate: f32, j: i32) -> f32 {
     if srem(j, 2) == 0 { l } else { r }
 }
 
-// n stereo samples, interleaved (left, right), from time t0 (on the host).
+// n stereo samples, interleaved (left, right), from time t0 (on the host),
+// without the soundboard.
 #[cfg(not(target_arch = "spirv"))]
 pub fn sound_chunk(t0: f32, rate: f32, n: usize) -> Vec<f32> {
     (0..2 * n as i32).map(|j| sound_value(t0, rate, j)).collect()
+}
+
+// A chunk of the music as the GPU makes it (the music, soundboard and
+// music_mix entry points): n stereo frames from loop time t0 (wrapped),
+// with the soundboard carried on from `state` (modes * 2 floats; zeros
+// for the first chunk), which is left as at the chunk's end.
+#[cfg(not(target_arch = "spirv"))]
+pub fn render_chunk(t0: f32, rate: f32, n: usize, state: &mut [f32]) -> Vec<f32> {
+    let parts: Vec<(f32, f32, f32)> = (0..n).map(|i| music_parts(rate, wrap(t0 + i as f32 / rate))).collect();
+    let harp: Vec<f32> = parts.iter().map(|p| p.2).collect();
+    let mut wet = vec![0.0; 2 * n];
+    crate::soundboard::run(rate, &harp, state, &mut wet);
+    let mut out = Vec::with_capacity(2 * n);
+    for (i, (l, r, _)) in parts.iter().enumerate() {
+        out.push(soft(l + wet[2 * i]));
+        out.push(soft(r + wet[2 * i + 1]));
+    }
+    out
 }

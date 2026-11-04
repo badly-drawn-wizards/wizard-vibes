@@ -283,7 +283,7 @@ impl App {
             self.image = Some((tex, id));
         }
         let n_spells = (out.spells.len() / wizard_shader::spells::spell_stride as usize) as u32;
-        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0 };
+        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0 };
         let mut enc = device.create_command_encoder(&Default::default());
         self.frame.record(device, queue, &mut enc, shader, params, &out.drive, &args, &out.spells);
         let (tex, _) = self.image.as_ref().unwrap();

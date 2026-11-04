@@ -78,7 +78,6 @@ impl Mixer {
                     self.looping = Some(Looping { at, offset, data });
                 }
             }
-            Cmd::StopLoop => self.looping = None,
             Cmd::Clear => {
                 self.looping = None;
                 self.chunks.clear();

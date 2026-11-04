@@ -67,7 +67,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     eprintln!("shader: {} in {:.1} s", if shader.spirv { "SPIR-V" } else { "WGSL" }, t.elapsed().as_secs_f32());
     let (vw, h) = o.size;
     let mut frame = Frame::default();
-    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0 };
+    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0 };
     let timer = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
         (
             device.create_query_set(&wgpu::QuerySetDescriptor { label: None, ty: wgpu::QueryType::Timestamp, count: 2 }),
@@ -78,20 +78,32 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     let wait = || device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string());
 
     if let Some(n) = o.music {
-        let req = crate::types::MusicRequest { t0: o.t0, rate: 48000.0, frames: n };
-        if !frame.music(&device, &queue, &shader, &values, &ON_PATH, req, wizard_shader::music::period) {
-            return Err("the shader has no music entry point".into());
-        }
-        let data = loop {
-            let _ = device.poll(wgpu::PollType::wait_indefinitely());
-            if let Some((_, d)) = frame.music_ready() {
-                break d;
+        // (consecutive chunks of n frames from t0, through the soundboard
+        // carried from chunk to chunk, against the shader crate's own on
+        // the CPU; the drums' noise, hashed from the sample index, may take
+        // a neighbouring sample's value where t * rate rounds differently,
+        // so a few samples differ by up to ~0.1)
+        let (rate, chunks) = (48000.0, 8);
+        let mut state = vec![0.0; 2 * wizard_shader::soundboard::modes];
+        let (mut worst, mut sum, mut count) = (0f32, 0f64, 0usize);
+        for c in 0..chunks {
+            let t0 = o.t0 + (c * n) as f32 / rate;
+            let req = crate::types::MusicRequest { t0, rate, frames: n, chunk: c };
+            if !frame.music(&device, &queue, &shader, &values, &ON_PATH, req, wizard_shader::music::period) {
+                return Err("the shader has no music entry points".into());
             }
-        };
-        let cpu = wizard_shader::music::sound_chunk(o.t0, 48000.0, n as usize);
-        let worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
-        let rms = (data.iter().map(|v| v * v).sum::<f32>() / data.len() as f32).sqrt();
-        println!("music: {} values, rms {rms:.4}, max |GPU - CPU| {worst:.2e}", data.len());
+            let data = loop {
+                let _ = device.poll(wgpu::PollType::wait_indefinitely());
+                if let Some((_, d)) = frame.music_ready() {
+                    break d;
+                }
+            };
+            let cpu = wizard_shader::music::render_chunk(t0, rate, n as usize, &mut state);
+            worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(worst, f32::max);
+            sum += data.iter().map(|v| (v * v) as f64).sum::<f64>();
+            count += data.len();
+        }
+        println!("music: {chunks} chunks of {n} frames, rms {:.4}, max |GPU - CPU| {worst:.2e}", (sum / count as f64).sqrt());
         return Ok(());
     }
     if let Some(path) = &o.shot {

@@ -14,7 +14,14 @@ every entry point, so a single bind group layout serves all of them:
 | 4       | `array<u32>`              | read_write | edges: `[0]` how many edge pixels edge_mark found, then their indices into colour; `1 + a_vw * a_h` u32s for the worst case (fewer is fine, see capacity) |
 | 5       | `array<vec4<f32>>`        | read_write | rays: one colour per extra ray, 4 per edge pixel (w unused) |
 | 6       | `array<u32>`              | read_write | args: 6 u32s, indirect dispatch sizes: `[0..3]` edge_rays, `[3..6]` edge_resolve (usage STORAGE \| INDIRECT) |
-| 7       | `array<f32>`              | read_write | music: `2 * a_m_n` floats, interleaved left, right |
+| 7       | `array<f32>`              | read_write | music: `2 * a_m_n` floats, interleaved left, right (after the soundboard and the limit) |
+| 8       | `array<f32>`              | read_write | dry: 3 floats a frame: the mix's left, right (before the limit) and the harpsichord alone |
+| 9       | `array<f32>`              | read_write | modes: the soundboard's modes' outputs, `modes * a_m_n` (mode m's at `m * a_m_n`) |
+| 10      | `array<f32>`              | read_write | the soundboard's state: two slots of `modes * 2` floats, kept from chunk to chunk |
+
+Bindings must stay contiguous: the SPIR-V run as it is (wgpu's
+passthrough) silently did nothing in entry points using bindings past a
+gap (10-12 with 8 and 9 unused).
 
 Every storage binding but 3 is read_write in the layout
 (`Storage { read_only: false }`) even where an entry point only reads it;
@@ -35,7 +42,9 @@ the music when no frame buffers exist yet). Binding 4 is atomic in edge_mark
 | `edge_rays`    | `4 * edges` (indirect `args[0..3]`) | 0, 3, 4         | 5 |
 | `edge_resolve` | `edges` (indirect `args[3..6]`)     | 2, 4, 5         | 2 (edge pixels' colour: the mean of their 5 samples) |
 | `pack_pixels`  | `a_w * a_h`                | 0, 2                     | 1 (colour packed, and padding) |
-| `music`        | `2 * a_m_n`                | 0                        | 7 |
+| `music`        | `a_m_n`                    | 0                        | 8 |
+| `soundboard`   | `modes` (64)               | 0, 8, 10 (slot (a_m_chunk - 1) % 2; none for chunk 0) | 9, 10 (slot a_m_chunk % 2) |
+| `music_mix`    | `a_m_n`                    | 0, 8, 9                  | 7 |
 
 Dispatch `ceil(threads / 256)` workgroups; every entry point ignores
 threads beyond its count, so rounding up (or dispatching more) is safe.
@@ -66,7 +75,9 @@ wrapped into [0, period) on the host in double precision), `a_m_rate`,
     fine: edge pixels found beyond its capacity are left with their one
     sample (which ones is arbitrary: edge_mark appends in no fixed order).
     Typical frames have 1-5% edge pixels.
-- Music (independent of the frame): `music`, then read back binding 7.
+- Music (independent of the frame), a chunk at a time and in order
+  (`a_m_chunk` counting them from 0: the soundboard's state carries over):
+  `music`, `soundboard`, `music_mix`, then read back binding 7.
 
 ## Host API (the same crate, built as a normal Rust dependency)
 

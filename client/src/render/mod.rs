@@ -32,6 +32,7 @@ pub struct Args {
     pub m_t0: f32,
     pub m_rate: f32,
     pub m_n: u32,
+    pub m_chunk: u32,
 }
 
 struct Kernel {
@@ -175,6 +176,7 @@ impl Shader {
                     "m_t0" => a.m_t0 as f64,
                     "m_rate" => a.m_rate as f64,
                     "m_n" => a.m_n as f64,
+                    "m_chunk" => a.m_chunk as f64,
                     _ => 0.0,
                 },
             };
