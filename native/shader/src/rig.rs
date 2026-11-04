@@ -264,11 +264,12 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         vec(0.5, 0.55, 0.9)
     };
     let aim = r_shoulder + scale(0.62, normalise(aim_dir));
-    // (thumbing back: the elbow forward and low, the forearm rising to the
-    // fist, at his chin's height and out past the shoulder)
-    let jab = r_shoulder + vec(-0.24, 0.13, 0.1);
+    // (thumbing back, a thumbs-up tossed up and behind him: the elbow up,
+    // out and forward, the forearm rising to the fist, above and behind the
+    // shoulder and out clear of his hat's brim)
+    let jab = r_shoulder + vec(-0.27, 0.2, -0.08);
     let target = mix(mix(rest, aim, point), jab, thumb);
-    let pole = normalise(mix(vec(-0.6, -1.0, -0.5), vec(-0.4, -0.6, 1.0), thumb));
+    let pole = normalise(mix(vec(-0.6, -1.0, -0.5), vec(-1.0, 0.25, 0.6), thumb));
     let (r_elbow, r_wrist) = two_bone(r_shoulder, target, 0.31, 0.27, pole);
     let moon_world = moon_dir(prm.moon_azimuth, prm.moon_elevation);
     Pose {

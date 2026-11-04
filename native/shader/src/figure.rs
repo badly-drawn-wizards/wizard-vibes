@@ -164,13 +164,13 @@ pub fn sd_left_hand(pose: Pose, p: Vec3) -> f32 {
 // fingers of two straight segments side by side, and a thumb. At rest the
 // fingers are nearly straight with a slight bend; as he points into a turn
 // the index finger straightens and the others close. Thumbing back over his
-// shoulder, all three close into a fist and the thumb sticks out backwards
-// (his -z) and up, over his shoulder.
+// shoulder (a thumbs-up tossed up and behind him), all three close into a
+// fist, its palm to his head, and the thumb sticks out behind him (-z).
 pub fn sd_right_hand(pose: Pose, p: Vec3) -> f32 {
     let f = normalise(pose.r_wrist - pose.r_elbow); // along the forearm
     // away from the thumb (thumbing back, the forearm rises nearly upright:
-    // then square to his forward, not to up)
-    let side = normalise(cross(f, normalise(mix(vec(0.0, 1.0, 0.0), vec(0.0, 0.0, 1.0), pose.thumb))));
+    // then the thumb is behind, the back of the hand out to his right, -x)
+    let side = normalise(cross(f, normalise(mix(vec(0.0, 1.0, 0.0), vec(-1.0, 0.0, 0.0), pose.thumb))));
     let up = cross(side, f); // the back of the hand
     let centre = right_palm(pose);
     let q = p - centre;
@@ -195,7 +195,7 @@ pub fn sd_right_hand(pose: Pose, p: Vec3) -> f32 {
     // the thumb: from the inner side of the palm, along the index finger
     let tb = centre - scale(0.03, side) + scale(0.005, f);
     let along = normalise(scale(0.85, f) - scale(0.4, side) - scale(0.2 + 0.25 * pt, up));
-    let tdir = normalise(mix(along, vec(-0.2, 0.8, -1.0), th));
+    let tdir = normalise(mix(along, vec(0.0, 0.25, -1.0), th));
     let thumb = sd_capsule(p, tb, tb + scale(0.042 + 0.03 * th, tdir), 0.015 + 0.002 * th);
     let wrist = sd_wrist(pose.r_wrist, centre, p);
     smin(0.012, smin(0.02, palm, wrist), index.minimum(middle).minimum(ring.minimum(thumb)))
