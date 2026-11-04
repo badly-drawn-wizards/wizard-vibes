@@ -35,6 +35,8 @@ pub struct Frame {
     music_read: Option<(MusicRequest, wgpu::Buffer)>,
     // (the request read back: Ok, or Err if the readback failed)
     music_done: Arc<Mutex<Option<Result<MusicRequest, ()>>>>,
+    // the room's state (see wizard_shader::room), carried from chunk to chunk
+    room: Vec<f32>,
 }
 
 impl Frame {
@@ -107,17 +109,20 @@ impl Frame {
         let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: t0, m_rate: req.rate, m_n: req.frames, m_chunk: req.chunk };
         let data = shader.uniforms(params, drive, &args);
         let frames = req.frames as u64;
-        let n = 2 * frames * 4;
+        // (3 floats a frame back: see music_mix and music::finish_chunk)
+        let n = 3 * frames * 4;
         let m = &mut self.music;
         queue.write_buffer(m.get(device, UNIFORMS, data.len() as u64, U::UNIFORM | U::COPY_DST), 0, &data);
         m.get(device, MUSIC, n, U::STORAGE | U::COPY_SRC);
-        m.get(device, DRY, 3 * frames * 4, U::STORAGE);
+        m.get(device, DRY, 4 * frames * 4, U::STORAGE);
         m.get(device, MODES, wizard_shader::soundboard::modes as u64 * frames * 4, U::STORAGE);
         m.get(device, BOARD, 2 * 2 * wizard_shader::soundboard::modes as u64 * 4, U::STORAGE);
+
         let read = device.create_buffer(&wgpu::BufferDescriptor { label: Some("music read"), size: n, usage: U::MAP_READ | U::COPY_DST, mapped_at_creation: false });
         let mut enc = device.create_command_encoder(&Default::default());
         dispatch(device, &mut enc, shader, m, "music", req.frames);
         dispatch(device, &mut enc, shader, m, "soundboard", wizard_shader::soundboard::modes as u32);
+
         dispatch(device, &mut enc, shader, m, "music_mix", req.frames);
         enc.copy_buffer_to_buffer(m.peek(MUSIC).unwrap(), 0, &read, 0, n);
         queue.submit([enc.finish()]);
@@ -136,9 +141,13 @@ impl Frame {
         // (a failed readback is dropped: the audio asks for that chunk again)
         let Ok(req) = done else { return None };
         debug_assert_eq!(r, req);
-        let data: Vec<f32> = bytemuck::pod_collect_to_vec(&buf.slice(..).get_mapped_range().unwrap());
+        let mixed: Vec<f32> = bytemuck::pod_collect_to_vec(&buf.slice(..).get_mapped_range().unwrap());
         buf.unmap();
-        Some((req, data))
+        // (the room, on the CPU, carried on from the last chunk: in order)
+        if self.room.len() != 2 * wizard_shader::room::slot {
+            self.room = vec![0.0; 2 * wizard_shader::room::slot];
+        }
+        Some((req, wizard_shader::music::finish_chunk(&mixed, req.rate, req.chunk, &mut self.room)))
     }
 }
 

@@ -14,8 +14,8 @@ every entry point, so a single bind group layout serves all of them:
 | 4       | `array<u32>`              | read_write | edges: `[0]` how many edge pixels edge_mark found, then their indices into colour; `1 + a_vw * a_h` u32s for the worst case (fewer is fine, see capacity) |
 | 5       | `array<vec4<f32>>`        | read_write | rays: one colour per extra ray, 4 per edge pixel (w unused) |
 | 6       | `array<u32>`              | read_write | args: 6 u32s, indirect dispatch sizes: `[0..3]` edge_rays, `[3..6]` edge_resolve (usage STORAGE \| INDIRECT) |
-| 7       | `array<f32>`              | read_write | music: `2 * a_m_n` floats, interleaved left, right (after the soundboard and the limit) |
-| 8       | `array<f32>`              | read_write | dry: 3 floats a frame: the mix's left, right (before the limit) and the harpsichord alone |
+| 7       | `array<f32>`              | read_write | music: 3 floats a frame: the mix with the soundboard (left, right, before the limit) and the room's send; the host finishes it (music::finish_chunk: the room, then the limit) |
+| 8       | `array<f32>`              | read_write | dry: 4 floats a frame: the mix's left, right (before the limit), the harpsichord alone, the room's send |
 | 9       | `array<f32>`              | read_write | modes: the soundboard's modes' outputs, `modes * a_m_n` (mode m's at `m * a_m_n`) |
 | 10      | `array<f32>`              | read_write | the soundboard's state: two slots of `modes * 2` floats, kept from chunk to chunk |
 
@@ -77,7 +77,10 @@ wrapped into [0, period) on the host in double precision), `a_m_rate`,
     Typical frames have 1-5% edge pixels.
 - Music (independent of the frame), a chunk at a time and in order
   (`a_m_chunk` counting them from 0: the soundboard's state carries over):
-  `music`, `soundboard`, `music_mix`, then read back binding 7.
+  `music`, `soundboard`, `music_mix`, then read back binding 7 and finish
+  it on the host with `music::finish_chunk` (the room reverb, room.rs, whose
+  state carries over there; sequential through its delay lines, it took 30
+  ms a half-second chunk as GPU threads).
 
 ## Host API (the same crate, built as a normal Rust dependency)
 

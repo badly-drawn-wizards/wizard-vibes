@@ -187,42 +187,56 @@ pub fn harpsichord(rate: f32, t: f32) -> (f32, f32) {
 // ---------------------------------------------------------------------
 // Bass, drums
 
+// The pump: how far the kick ducks the bass, the strings and the
+// harpsichord, after each beat (the disco and house sidechain).
+#[inline]
+pub fn duck(t: f32, depth: f32) -> f32 {
+    let u = t - beat * (t / beat).floor();
+    1.0 - depth * smoothstep(0.0, 0.004, u) * (-u * 9.0).exp()
+}
+
 // The bass: the chord's root in eighths, low then an octave up; a
-// band-limited sawtooth through a closing filter and a soft clipper, over a
-// sine an octave below.
+// band-limited sawtooth through a closing resonant filter (its harmonics
+// near the cutoff raised: the wow), a soft clipper, over a sine an octave
+// below; pumped by the kick.
 #[inline]
 pub fn bass(t: f32) -> f32 {
     let e = ftoi((t / eighth).floor());
     let u = t - e as f32 * eighth;
     let root = chord_tone(chord_at(e as f32 * eighth), 0);
     let f = freq(root - 12.0 + (if imod(e, 2) == 1 { 12.0 } else { 0.0 }));
-    let env = (1.0 - (-u * 400.0).exp()) * (-u * 4.0).exp() * smoothstep(0.92 * eighth, 0.8 * eighth, u);
+    let env = (1.0 - (-u * 400.0).exp()) * (-u * 3.0).exp() * smoothstep(0.92 * eighth, 0.8 * eighth, u);
     // (the filter: harmonic k damped by how far it is above the cutoff,
-    // which falls from 30 to 6 times the note's frequency)
-    let cutoff = 6.0 + 24.0 * (-u * 18.0).exp();
+    // which falls from 30 to 3 times the note's frequency, with a peak there)
+    let cutoff = 3.0 + 27.0 * (-u * 12.0).exp();
     let mut saw = 0.0f32;
     let mut k = 0;
     while k < 24 {
         let kf = (k + 1) as f32;
-        let keep = if kf * f > 8000.0 { 0.0 } else { 1.0 / (1.0 + (kf / cutoff).powf(4.0)) };
+        let d = (kf - cutoff) / 1.5;
+        let keep = if kf * f > 8000.0 { 0.0 } else { 1.0 / (1.0 + (kf / cutoff).powf(4.0)) + 1.8 * (-d * d).exp() };
         saw = saw + keep * (tau * f * kf * u).sin() / kf;
         k += 1;
     }
-    let drive = 3.5f32;
+    let drive = 3.0f32;
     let crunch = (drive * saw).tanh() / drive.tanh();
     let sub = (tau * f * 0.5 * u).sin();
-    env * (0.13 * crunch + 0.12 * sub)
+    duck(t, 0.5) * env * (0.12 * crunch + 0.12 * sub)
 }
 
-// The kick on every beat: a sine falling from 150 to 50 Hz, with a click.
+// The kick on every beat: a sine swooping from 180 to 45 Hz, driven into
+// a soft clipper for punch, with a noisy click on top.
 #[inline]
-pub fn kick(t: f32) -> f32 {
+pub fn kick(rate: f32, t: f32) -> f32 {
     let u = t - beat * (t / beat).floor();
-    let p = tau * (50.0 * u + 100.0 / 25.0 * (1.0 - (-25.0 * u).exp()));
-    0.42 * (-u * 7.0).exp() * p.sin() + 0.05 * (-u * 300.0).exp()
+    let p = tau * (45.0 * u + 135.0 / 30.0 * (1.0 - (-30.0 * u).exp()));
+    let body = (2.0 * (-u * 6.0).exp() * p.sin()).tanh() / (2.0f32).tanh();
+    let click = (-u * 600.0).exp() * (0.5 + 0.5 * bright_noise(rate, t));
+    0.42 * body + 0.08 * click
 }
 
-// Claps on beats two and four: noise in three quick bursts, then a tail.
+// Claps on beats two and four: bright noise in three quick bursts, then a
+// tail (and much of it sent to the room).
 #[inline]
 pub fn clap(rate: f32, t: f32) -> f32 {
     let b = ftoi((t / beat).floor());
@@ -233,38 +247,66 @@ pub fn clap(rate: f32, t: f32) -> f32 {
     let flam = if u < 0.025 {
         if fract(u / 0.0085) < 0.45 { 1.0 } else { 0.25 }
     } else {
-        0.55 * (-(u - 0.025) * 14.0).exp()
+        0.55 * (-(u - 0.025) * 16.0).exp()
     };
-    0.11 * flam * noise(rate, t)
+    0.13 * flam * (0.4 * noise(rate, t) + 1.2 * bright_noise(rate, t))
 }
 
-// Hi-hats: open on the offbeat eighths, closed on the other sixteenths.
+// A metallic hat: six square waves at the 808's inharmonic frequencies,
+// differenced (a high-pass: their low end gone), at time t.
 #[inline]
-pub fn hats(rate: f32, t: f32) -> f32 {
+fn metal(rate: f32, t: f32) -> f32 {
+    let sq = |f: f32, t: f32| if fract(f * t) < 0.5 { 1.0 } else { -1.0 };
+    let m = |t: f32| sq(205.3 * 2.0, t) + sq(304.4 * 2.0, t) + sq(369.6 * 2.0, t) + sq(522.7 * 2.0, t) + sq(540.0 * 2.0, t) + sq(800.0 * 2.0, t);
+    (m(t) - m(t - 1.0 / rate)) / 12.0
+}
+
+// Hi-hats: open on the offbeat eighths, closed on the other sixteenths; the
+// 808's metal over a little noise; (left, right).
+#[inline]
+pub fn hats(rate: f32, t: f32) -> (f32, f32) {
     let n = ftoi((t / sixteenth).floor());
     let u = t - n as f32 * sixteenth;
-    let env = if imod(n, 4) == 2 {
-        0.09 * (-u * 9.0).exp()
+    let (env, pan) = if imod(n, 4) == 2 {
+        (0.08 * (-u * 8.0).exp(), 0.35)
     } else if imod(n, 2) == 1 {
-        0.035 * (-u * 70.0).exp()
+        (0.04 * (-u * 60.0).exp(), 0.65)
     } else {
-        0.0
+        (0.0, 0.5)
     };
-    env * bright_noise(rate, t)
+    if env <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let v = env * (0.7 * metal(rate, t) + 0.5 * bright_noise(rate, t));
+    (v * (1.0 - pan), v * pan)
 }
 
 // ---------------------------------------------------------------------
 // Strings
 
+// One chord of the pad: each tone an ensemble of sawtooths, slightly
+// apart in tune (two a side), softened, with a slow vibrato.
 #[inline]
 fn voice(ch: i32, tt: f32, amp: f32) -> (f32, f32) {
     let (mut l, mut r) = (0.0f32, 0.0f32);
+    // (the vibrato's phase offset, as a time warp: depth 0.25%, 5 Hz)
+    let vib = 0.0025 * smoothstep(0.3, 1.0, tt) / (tau * 5.0) * (1.0 - (tau * 5.0 * tt).cos());
     let mut k = 0;
     while k < 3 {
         let f = freq(chord_tone(imod(ch, chords), k) + 24.0);
-        let tone = |g: f32| (tau * g * tt).sin() + 0.45 * (2.0 * tau * g * tt).sin() + 0.2 * (3.0 * tau * g * tt).sin();
-        let nl = l + amp * tone(f * 1.004);
-        let nr = r + amp * tone(f * 0.996);
+        let saw = |g: f32| {
+            let mut s = 0.0f32;
+            let mut h = 0;
+            while h < 10 {
+                let hf = (h + 1) as f32;
+                let soft = 1.0 / (1.0 + (hf * g / 2200.0) * (hf * g / 2200.0));
+                s = s + soft * (tau * g * hf * (tt + vib)).sin() / hf;
+                h += 1;
+            }
+            s
+        };
+        let nl = l + amp * (saw(f * 0.9960) + saw(f * 1.0017));
+        let nr = r + amp * (saw(f * 1.0040) + saw(f * 0.9983));
         l = nl;
         r = nr;
         k += 1;
@@ -272,18 +314,17 @@ fn voice(ch: i32, tt: f32, amp: f32) -> (f32, f32) {
     (l, r)
 }
 
-// A string pad on the chord, two octaves up: each tone two detuned voices
-// (one per side), a few harmonics, swelling in; the previous chord fades
-// under the next.
+// A string pad on the chord, two octaves up, swelling in; the previous
+// chord fades under the next; pumped by the kick.
 #[inline]
 pub fn strings(t: f32) -> (f32, f32) {
     let c = ftoi((t / chord_len).floor());
     let lt = t - c as f32 * chord_len;
-    let (l1, r1) = voice(c, lt, 0.035 * smoothstep(0.0, 0.5, lt));
+    let (l1, r1) = voice(c, lt, 0.022 * smoothstep(0.0, 0.6, lt));
     let fade = (0.0f32).maximum(1.0 - lt / 0.4);
-    let (l0, r0) = if fade > 0.0 && c > 0 { voice(c - 1, lt + chord_len, 0.035 * fade) } else { (0.0, 0.0) };
+    let (l0, r0) = if fade > 0.0 && c > 0 { voice(c - 1, lt + chord_len, 0.022 * fade) } else { (0.0, 0.0) };
     // (in sections 2 and 4)
-    let g = in_sections(1, 1, 0.6, t) + in_sections(3, 3, 0.6, t);
+    let g = duck(t, 0.4) * (in_sections(1, 1, 0.6, t) + in_sections(3, 3, 0.6, t));
     (g * (l1 + l0), g * (r1 + r0))
 }
 
@@ -372,22 +413,27 @@ pub fn note_at(i: i32) -> (i32, i32, i32) {
 }
 
 // A synth lead: a square-ish wave (odd harmonics, 1/k), two voices a hair
-// apart, with vibrato growing in on long notes. tau_: time since the note
-// began; dur: how long it is held.
+// apart, with vibrato growing in on long notes, gliding in from the note
+// before (pf; f if none) over 40 ms. tau_: time since the note began; dur:
+// how long it is held.
 #[inline]
-pub fn lead_tone(f: f32, tau_: f32, dur: f32) -> f32 {
+pub fn lead_tone(f: f32, pf: f32, tau_: f32, dur: f32) -> f32 {
     let env = (1.0 - (-tau_ * 120.0).exp())
         * (0.75 + 0.25 * (-tau_ * 6.0).exp())
         * (if tau_ < dur { 1.0 } else { (-(tau_ - dur) * 30.0).exp() });
     let depth = 0.005 * smoothstep(0.15, 0.45, tau_);
     let wob = depth / (2.0 * PI * 5.5) * (1.0 - (2.0 * PI * 5.5 * tau_).cos());
-    let osc = |g: f32| {
+    // (the glide: frequency from pf to f linearly over g seconds, as a
+    // phase offset, the integral of the difference)
+    let g = 0.04f32;
+    let slid = (pf / f - 1.0) * (if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g });
+    let osc = |h: f32| {
         let mut s = 0.0f32;
         let mut k = 0;
         while k < 6 {
             let kf = (2 * k + 1) as f32;
-            if !(kf * g > 9000.0) {
-                s = s + (tau * g * kf * (tau_ + wob)).sin() / kf;
+            if !(kf * h > 9000.0) {
+                s = s + (tau * h * kf * (tau_ + wob + slid)).sin() / kf;
             }
             k += 1;
         }
@@ -397,9 +443,9 @@ pub fn lead_tone(f: f32, tau_: f32, dur: f32) -> f32 {
 }
 
 // The tune in sections 3 and 4, an octave up; in section 4 also a third
-// below (two scale degrees down).
+// below (two scale degrees down). (main, harmony), mono.
 #[inline]
-pub fn tune(t: f32) -> (f32, f32) {
+pub fn tune_dry(t: f32) -> (f32, f32) {
     let start = 16.0 * bar;
     if t < start {
         return (0.0, 0.0);
@@ -412,11 +458,37 @@ pub fn tune(t: f32) -> (f32, f32) {
     }
     let tau_ = (i - j) as f32 * eighth + u;
     let dur = (e - j + 1) as f32 * eighth - 0.02;
-    let main = 0.07 * lead_tone(freq(degree_midi(d) + 12.0), tau_, dur);
-    let harmony_degree = if d == 13 { 5 } else { d - 2 };
-    let second = if section(t) == 3 && harmony_degree >= 1 { 0.045 * lead_tone(freq(degree_midi(harmony_degree) + 12.0), tau_, dur) } else { 0.0 };
+    // (the note before, if it ran into this one: glided from)
+    let (pd, _, pe) = if j > 0 { note_at(j - 1) } else { (0, 0, 0) };
+    let joined = pd != 0 && pe == j - 1;
+    let f = freq(degree_midi(d) + 12.0);
+    let pf = if joined { freq(degree_midi(pd) + 12.0) } else { f };
+    let main = 0.07 * lead_tone(f, pf, tau_, dur);
+    let hd = if d == 13 { 5 } else { d - 2 };
+    let phd = if pd == 13 { 5 } else { pd - 2 };
+    let second = if section(t) == 3 && hd >= 1 {
+        let hf = freq(degree_midi(hd) + 12.0);
+        let hpf = if joined && phd >= 1 { freq(degree_midi(phd) + 12.0) } else { hf };
+        0.045 * lead_tone(hf, hpf, tau_, dur)
+    } else {
+        0.0
+    };
     let g = in_sections(2, 3, 0.05, t);
-    (g * (main + 0.7 * second), g * (0.8 * main + second))
+    (g * main, g * second)
+}
+
+// The tune with its echo: a dotted eighth, ping-ponging between the sides,
+// each repeat quieter (the lead itself, delayed: no state to carry).
+#[inline]
+pub fn tune(t: f32) -> (f32, f32) {
+    let (m, h) = tune_dry(t);
+    let d = 0.75 * beat;
+    let (e1m, e1h) = tune_dry(t - d);
+    let (e2m, e2h) = tune_dry(t - 2.0 * d);
+    let (e3m, e3h) = tune_dry(t - 3.0 * d);
+    let (a, b) = (m + 0.7 * h, 0.8 * m + h);
+    let (l1, l2, l3) = (e1m + e1h, e2m + e2h, e3m + e3h);
+    (a + 0.10 * l2, b + 0.32 * l1 + 0.04 * l3)
 }
 
 // ---------------------------------------------------------------------
@@ -424,7 +496,7 @@ pub fn tune(t: f32) -> (f32, f32) {
 // The mix at time t (within the loop), softly limited.
 #[inline(never)]
 pub fn music_at(rate: f32, t: f32) -> (f32, f32) {
-    let (l, r, _) = music_parts(rate, t);
+    let (l, r, _, _) = music_parts(rate, t);
     (soft(l), soft(r))
 }
 
@@ -434,20 +506,25 @@ pub fn soft(x: f32) -> f32 {
     (1.1 * x).tanh() / 1.1
 }
 
-// The mix at time t before the limit (left, right), and the harpsichord in
-// it (mono), which drives the soundboard (see soundboard.rs).
+// The mix at time t before the limit (left, right), the harpsichord in it
+// (mono), which drives the soundboard (see soundboard.rs), and what is sent
+// to the room (mono; see room.rs).
 #[inline]
-pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32) {
+pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32, f32) {
     let groove = if stopped(t) { 0.0 } else { 1.0 };
-    let drums = groove * (kick(t) + clap(rate, t));
-    let hh = groove * hats(rate, t);
+    let k = groove * kick(rate, t);
+    let cl = groove * clap(rate, t);
+    let (hhl, hhr) = hats(rate, t);
     let low = groove * bass(t);
-    // (the harpsichord steps back while the tune plays)
+    // (the harpsichord steps back while the tune plays, and pumps a little)
     let (hl, hr) = harpsichord(rate, t);
-    let harp = if section(t) >= 2 { 0.6 } else { 1.0 };
+    let harp = (if section(t) >= 2 { 0.6 } else { 1.0 }) * duck(t, 0.25);
     let (sl, sr) = strings(t);
     let (ml, mr) = tune(t);
-    (drums + low + 0.6 * hh + harp * hl + sl + ml, drums + low + hh + harp * hr + sr + mr, 0.5 * harp * (hl + hr))
+    let l = k + cl + low + groove * hhl + harp * hl + sl + ml;
+    let r = k + cl + low + groove * hhr + harp * hr + sr + mr;
+    let send = 0.9 * cl + 0.6 * (sl + sr) + 0.5 * (ml + mr) + 0.15 * harp * (hl + hr);
+    (l, r, 0.5 * harp * (hl + hr), send)
 }
 
 // Value j of sound_chunk: sample j / 2 from time t0 at `rate` samples a
@@ -465,20 +542,62 @@ pub fn sound_chunk(t0: f32, rate: f32, n: usize) -> Vec<f32> {
     (0..2 * n as i32).map(|j| sound_value(t0, rate, j)).collect()
 }
 
+// What carries from one chunk of the music to the next (on the host).
+#[cfg(not(target_arch = "spirv"))]
+pub struct State {
+    // the soundboard's modes (modes * 2 floats)
+    pub board: Vec<f32>,
+    // the room's two slots (see room.rs)
+    pub room: Vec<f32>,
+}
+
+#[cfg(not(target_arch = "spirv"))]
+impl State {
+    pub fn new() -> State {
+        State { board: vec![0.0; 2 * crate::soundboard::modes], room: vec![0.0; 2 * crate::room::slot] }
+    }
+}
+
+// The room's level in the mix.
+pub const room_level: f32 = 0.9;
+
 // A chunk of the music as the GPU makes it (the music, soundboard and
 // music_mix entry points): n stereo frames from loop time t0 (wrapped),
-// with the soundboard carried on from `state` (modes * 2 floats; zeros
-// for the first chunk), which is left as at the chunk's end.
+// chunk number `chunk` (from 0), carried on from `state`, which is left as
+// at the chunk's end.
 #[cfg(not(target_arch = "spirv"))]
-pub fn render_chunk(t0: f32, rate: f32, n: usize, state: &mut [f32]) -> Vec<f32> {
-    let parts: Vec<(f32, f32, f32)> = (0..n).map(|i| music_parts(rate, wrap(t0 + i as f32 / rate))).collect();
-    let harp: Vec<f32> = parts.iter().map(|p| p.2).collect();
+pub fn render_chunk(t0: f32, rate: f32, n: usize, chunk: u32, state: &mut State) -> Vec<f32> {
+    let mut dry = Vec::with_capacity(4 * n);
+    for i in 0..n {
+        let (l, r, h, s) = music_parts(rate, wrap(t0 + i as f32 / rate));
+        dry.extend_from_slice(&[l, r, h, s]);
+    }
+    let harp: Vec<f32> = (0..n).map(|i| dry[4 * i + 2]).collect();
     let mut wet = vec![0.0; 2 * n];
-    crate::soundboard::run(rate, &harp, state, &mut wet);
+    crate::soundboard::run(rate, &harp, &mut state.board, &mut wet);
+    let mixed: Vec<f32> = (0..n).flat_map(|i| [dry[4 * i] + wet[2 * i], dry[4 * i + 1] + wet[2 * i + 1], dry[4 * i + 3]]).collect();
+    finish_chunk(&mixed, rate, chunk, &mut state.room)
+}
+
+// The end of a chunk, on the host (after the GPU's music_mix, as its 3
+// floats a frame: left, right, the room's send): the room (its two slots
+// in `room`, carried on from the last chunk; see room.rs), then the limit;
+// interleaved stereo.
+#[cfg(not(target_arch = "spirv"))]
+pub fn finish_chunk(mixed: &[f32], rate: f32, chunk: u32, room: &mut [f32]) -> Vec<f32> {
+    let n = mixed.len() / 3;
+    let mut rows = vec![0.0; crate::room::combs * n];
+    for k in 0..crate::room::combs {
+        crate::room::comb_run(k, rate, n, chunk as i32, mixed, 3, 2, room, &mut rows);
+    }
+    let mut wet = vec![0.0; 2 * n];
+    for side in 0..2 {
+        crate::room::allpass_run(side, rate, n, chunk as i32, &rows, room, &mut wet);
+    }
     let mut out = Vec::with_capacity(2 * n);
-    for (i, (l, r, _)) in parts.iter().enumerate() {
-        out.push(soft(l + wet[2 * i]));
-        out.push(soft(r + wet[2 * i + 1]));
+    for i in 0..n {
+        out.push(soft(mixed[3 * i] + room_level * wet[2 * i]));
+        out.push(soft(mixed[3 * i + 1] + room_level * wet[2 * i + 1]));
     }
     out
 }

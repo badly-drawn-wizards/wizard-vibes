@@ -84,7 +84,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
         // a neighbouring sample's value where t * rate rounds differently,
         // so a few samples differ by up to ~0.1)
         let (rate, chunks) = (48000.0, 8);
-        let mut state = vec![0.0; 2 * wizard_shader::soundboard::modes];
+        let mut state = wizard_shader::music::State::new();
         let (mut worst, mut sum, mut count, mut gpu_ms) = (0f32, 0f64, 0usize, 0f64);
         for c in 0..chunks {
             let t0 = o.t0 + (c * n) as f32 / rate;
@@ -100,7 +100,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
                 }
             };
             gpu_ms += t.elapsed().as_secs_f64() * 1000.0;
-            let cpu = wizard_shader::music::render_chunk(t0, rate, n as usize, &mut state);
+            let cpu = wizard_shader::music::render_chunk(t0, rate, n as usize, c, &mut state);
             worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(worst, f32::max);
             sum += data.iter().map(|v| (v * v) as f64).sum::<f64>();
             count += data.len();

@@ -29,6 +29,7 @@ pub mod orbfx;
 pub mod platform;
 pub mod prelude;
 pub mod rig;
+pub mod room;
 pub mod scene;
 pub mod sdf;
 #[cfg(not(target_arch = "spirv"))]
@@ -275,16 +276,18 @@ pub fn music(
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
 ) {
-    // (a thread a frame: the mix before the limit, and the harpsichord)
+    // (a thread a frame: the mix before the limit, the harpsichord, and
+    // the room's send)
     let i = gid.x as i32;
     if i >= u.a_m_n {
         return;
     }
-    let (l, r, h) = music::music_parts(u.a_m_rate, music::wrap(u.a_m_t0 + i as f32 / u.a_m_rate));
-    let k = 3 * i as usize;
+    let (l, r, h, s) = music::music_parts(u.a_m_rate, music::wrap(u.a_m_t0 + i as f32 / u.a_m_rate));
+    let k = 4 * i as usize;
     dry[k] = l;
     dry[k + 1] = r;
     dry[k + 2] = h;
+    dry[k + 3] = s;
 }
 
 // The soundboard over a chunk: a thread a mode, through the chunk's
@@ -311,7 +314,7 @@ pub fn soundboard(
     let n = u.a_m_n as usize;
     let mut i = 0;
     while i < n {
-        let y = a1 * y1 - a2 * y2 + b * dry[3 * i + 2];
+        let y = a1 * y1 - a2 * y2 + b * dry[4 * i + 2];
         y2 = y1;
         y1 = y;
         modes_out[m * n + i] = y;
@@ -321,8 +324,10 @@ pub fn soundboard(
     state[outp + 2 * m + 1] = y2;
 }
 
-// The music's chunk: the mix, the soundboard's modes panned into it, then
-// the limit; interleaved stereo, a thread a frame.
+// The music's chunk: the mix with the soundboard's modes panned into it
+// (left, right, before the limit) and the room's send, 3 floats a frame, a
+// thread a frame. (The room, sequential through its delay lines, runs on
+// the host, which finishes the chunk: see music::finish_chunk.)
 #[spirv(compute(threads(256)))]
 pub fn music_mix(
     #[spirv(global_invocation_id)] gid: UVec3,
@@ -336,7 +341,7 @@ pub fn music_mix(
     if i >= n {
         return;
     }
-    let (mut l, mut r) = (dry[3 * i], dry[3 * i + 1]);
+    let (mut l, mut r) = (dry[4 * i], dry[4 * i + 1]);
     let mut m = 0;
     while m < soundboard::modes {
         let (_, _, _, pl, pr) = soundboard::mode_coeffs(m, u.a_m_rate);
@@ -345,6 +350,7 @@ pub fn music_mix(
         r += pr * y;
         m += 1;
     }
-    samples[2 * i] = music::soft(l);
-    samples[2 * i + 1] = music::soft(r);
+    samples[3 * i] = l;
+    samples[3 * i + 1] = r;
+    samples[3 * i + 2] = dry[4 * i + 3];
 }

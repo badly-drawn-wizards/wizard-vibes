@@ -1,13 +1,32 @@
 // One harpsichord note, for comparing with recordings: the left channel of
 // music::harp_note at frequency F, held H seconds, for S seconds at 48 kHz,
 // as raw f32 on stdout. With `arp S`: the music's harpsichord part alone
-// for S seconds, stereo (interleaved).
+// for S seconds, stereo (interleaved). With `mix S [T0]`: the whole music
+// from T0 (as the app hears it: through the soundboard, chunk by chunk).
 //
 // usage: cargo run --release --example harp -- F [H] [S] > note.f32
 //        cargo run --release --example harp -- arp S > arp.f32
+//        cargo run --release --example harp -- mix S [T0] > mix.f32
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("mix") {
+        let secs: f32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(32.0);
+        let t0: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let rate = 48000.0;
+        let n = 24000usize;
+        let mut state = wizard_shader::music::State::new();
+        let mut out = Vec::new();
+        let mut c = 0u32;
+        while (c as usize * n) < (secs * rate) as usize {
+            let chunk = wizard_shader::music::render_chunk(t0 + (c as usize * n) as f32 / rate, rate, n, c, &mut state);
+            out.extend(chunk.iter().flat_map(|v| v.to_le_bytes()));
+            c += 1;
+        }
+        use std::io::Write;
+        std::io::stdout().write_all(&out).unwrap();
+        return;
+    }
     if args.first().map(String::as_str) == Some("arp") {
         let secs: f32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(16.0);
         let rate = 48000.0;
