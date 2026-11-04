@@ -164,11 +164,18 @@ async fn builder(s: Arc<Server>, mut jobs: mpsc::UnboundedReceiver<Job>) {
         for j in todo {
             match j {
                 Job::Shader => {
+                    let started = std::time::SystemTime::now();
                     build_shader(&s, None).await;
                     // (the presets in use follow the sources too)
                     let presets: Vec<String> = s.presets.lock().await.iter().cloned().collect();
                     for p in presets {
                         build_shader(&s, Some(&p)).await;
+                    }
+                    // (a source changed while it built, whose change was
+                    // somehow missed: once seen, an edit left unbuilt; so
+                    // again, if any is newer than the build)
+                    if newest(&s.root.join("native/shader/src")).is_some_and(|m| m > started) {
+                        let _ = s.jobs.send(Job::Shader);
                     }
                 }
                 Job::Preset(p) => build_shader(&s, Some(&p)).await,
@@ -176,6 +183,22 @@ async fn builder(s: Arc<Server>, mut jobs: mpsc::UnboundedReceiver<Job>) {
             }
         }
     }
+}
+
+// The latest modification time of the files under a directory (but
+// generated.rs, which each build writes).
+fn newest(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut out = None;
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        if e.file_name() == "generated.rs" {
+            continue;
+        }
+        let m = if e.path().is_dir() { newest(&e.path()) } else { e.metadata().ok().and_then(|m| m.modified().ok()) };
+        if m > out {
+            out = m;
+        }
+    }
+    out
 }
 
 // Which jobs a changed file calls for. (The web app runs the shader crate

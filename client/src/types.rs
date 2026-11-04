@@ -146,8 +146,6 @@ impl ParamValues {
 pub struct BuildInfo {
     // how many spells may be in flight at once
     pub spell_limit: u32,
-    // the music's loop, in seconds
-    pub music_period: f32,
     // the sound effects' sample rate, and each effect's length in seconds
     pub sfx_rate: f32,
     pub sfx_seconds: Vec<f32>,
@@ -163,15 +161,16 @@ pub struct SfxEvent {
 }
 
 // A chunk of music asked of the GPU: `frames` stereo frames from `t0`
-// seconds into the song (wrapped into the loop by the renderer), at `rate`
-// a second. Chunks are asked for in order (`chunk` counts them from 0):
-// the soundboard's state carries from each to the next.
+// seconds into song `song` (wrapped into its loop by the renderer), at
+// `rate` a second. Chunks are asked for in order (`chunk` counts them from
+// 0): the soundboard's state carries from each to the next.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MusicRequest {
     pub t0: f32,
     pub rate: f32,
     pub frames: u32,
     pub chunk: u32,
+    pub song: u32,
 }
 
 // The collision probe asked for this frame: after the six spheres round the

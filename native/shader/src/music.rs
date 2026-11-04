@@ -631,6 +631,36 @@ pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32, f32) {
     (l, r, 0.5 * harp * (hl + hr), send)
 }
 
+// The songs: 0 this one (Wizard disco), 1 chip.rs's (Cracktro).
+pub const songs: i32 = 2;
+#[cfg(not(target_arch = "spirv"))]
+pub const song_names: [&str; 2] = ["Wizard disco", "Cracktro"];
+
+// A song's loop, in seconds.
+#[inline]
+pub fn song_period(song: i32) -> f32 {
+    if song == 1 { crate::chip::period } else { period }
+}
+
+// Wraps a time into song's loop.
+#[inline]
+pub fn song_wrap(song: i32, t: f32) -> f32 {
+    let p = song_period(song);
+    t - p * (t / p).floor()
+}
+
+// Song's music_parts: the mix before the limit (left, right), the
+// harpsichord in it (for the soundboard), the room's send.
+#[inline]
+pub fn song_parts(song: i32, rate: f32, t: f32) -> (f32, f32, f32, f32) {
+    if song == 1 {
+        let (l, r, s) = crate::chip::parts(rate, t);
+        (l, r, 0.0, s)
+    } else {
+        music_parts(rate, t)
+    }
+}
+
 // Value j of sound_chunk: sample j / 2 from time t0 at `rate` samples a
 // second, left (j even) or right.
 #[inline]
@@ -665,15 +695,15 @@ impl State {
 // The room's level in the mix.
 pub const room_level: f32 = 0.9;
 
-// A chunk of the music as the GPU makes it (the music, soundboard and
+// A chunk of song `song` as the GPU makes it (the music, soundboard and
 // music_mix entry points): n stereo frames from loop time t0 (wrapped),
 // chunk number `chunk` (from 0), carried on from `state`, which is left as
 // at the chunk's end.
 #[cfg(not(target_arch = "spirv"))]
-pub fn render_chunk(t0: f32, rate: f32, n: usize, chunk: u32, state: &mut State) -> Vec<f32> {
+pub fn render_chunk(song: i32, t0: f32, rate: f32, n: usize, chunk: u32, state: &mut State) -> Vec<f32> {
     let mut dry = Vec::with_capacity(4 * n);
     for i in 0..n {
-        let (l, r, h, s) = music_parts(rate, wrap(t0 + i as f32 / rate));
+        let (l, r, h, s) = song_parts(song, rate, song_wrap(song, t0 + i as f32 / rate));
         dry.extend_from_slice(&[l, r, h, s]);
     }
     let harp: Vec<f32> = (0..n).map(|i| dry[4 * i + 2]).collect();

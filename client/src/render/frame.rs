@@ -99,14 +99,15 @@ impl Frame {
     // (chunks must come in order, req.chunk counting them from 0: the
     // soundboard's state, in two slots of its buffer, carries on from the
     // last; see the soundboard entry point)
-    pub fn music(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, shader: &Shader, params: &ParamValues, drive: &Drive, req: MusicRequest, period: f32) -> bool {
+    pub fn music(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, shader: &Shader, params: &ParamValues, drive: &Drive, req: MusicRequest) -> bool {
         use wgpu::BufferUsages as U;
         if self.music_read.is_some() || !shader.has("music_mix") {
             return false;
         }
         // (the loop time, wrapped in double precision)
+        let period = wizard_shader::music::song_period(req.song as i32);
         let t0 = (req.t0 as f64).rem_euclid(period as f64) as f32;
-        let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: t0, m_rate: req.rate, m_n: req.frames, m_chunk: req.chunk };
+        let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: t0, m_rate: req.rate, m_n: req.frames, m_chunk: req.chunk, m_song: req.song };
         let data = shader.uniforms(params, drive, &args);
         let frames = req.frames as u64;
         // (3 floats a frame back: see music_mix and music::finish_chunk)
@@ -159,7 +160,7 @@ pub fn host_records(shader: &Shader, params: &ParamValues, drive: &Drive) -> Opt
     if shader.meta.fields.len() * 4 != size {
         return None;
     }
-    let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0 };
+    let args = Args { vw: 1, h: 1, tm: 0.0, camera: crate::types::PAGE_CAMERA, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
     let bytes = shader.uniforms(params, drive, &args);
     // (Uniforms is repr(C), 4-byte scalars throughout, as the block)
     let u: wizard_shader::generated::Uniforms = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const _) };

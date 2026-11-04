@@ -70,6 +70,8 @@ pub struct Music {
     play: Option<Play>,
     resume: usize,       // where in the loop to carry on, turned on again
     stop_at: Option<f64>,
+    song: u32,           // the song computed
+    kept: Vec<(u32, u32, Arc<[f32]>)>, // other songs' loops, complete: (song, rate, second lap)
 }
 
 impl Default for Music {
@@ -97,6 +99,8 @@ impl Music {
             play: None,
             resume: 0,
             stop_at: None,
+            song: 0,
+            kept: Vec::new(),
         }
     }
 
@@ -132,6 +136,7 @@ impl Music {
 
     // A new build: its music may differ, and its soundboard has no state.
     pub fn reset(&mut self, now: f64, _rate: u32, out: &mut Vec<Cmd>) {
+        self.kept.clear();
         self.restart(now, out);
     }
 
@@ -178,17 +183,32 @@ impl Music {
 
     // What to compute next, if anything: the chunk after the last, as soon
     // as the last is back, until the loop is complete; or the one still
-    // unanswered, again, after a while. `period` is the loop's length in
-    // seconds, `rate` the output's.
-    pub fn want(&mut self, now: f64, rate: u32, period: f32, out: &mut Vec<Cmd>) -> Option<MusicRequest> {
+    // unanswered, again, after a while. `song` is the song to compute,
+    // `period` its loop's length in seconds, `rate` the output's. A new
+    // song is computed from its start (and plays from there), unless its
+    // loop was completed before: then that plays at once.
+    pub fn want(&mut self, now: f64, rate: u32, song: u32, period: f32, out: &mut Vec<Cmd>) -> Option<MusicRequest> {
         if period <= 0.0 || rate == 0 {
             return None;
         }
         let lap = (period as f64 * rate as f64).round() as usize;
-        if lap != self.lap || rate != self.rate {
+        if lap != self.lap || rate != self.rate || song != self.song {
+            if let Some(data) = self.looped.take() {
+                self.kept.retain(|k| k.0 != self.song);
+                self.kept.push((self.song, self.rate, data));
+            }
             self.lap = lap;
             self.rate = rate;
+            self.song = song;
             self.restart(now, out);
+            if let Some((_, _, data)) = self.kept.iter().find(|k| k.0 == song && k.1 == rate && k.2.len() == 2 * lap) {
+                self.next = 2 * lap;
+                if let Some(p) = &mut self.play {
+                    out.push(Cmd::Loop { at: p.start, offset: 0, data: data.clone() });
+                    p.loop_at = Some(p.start);
+                }
+                self.looped = Some(data.clone());
+            }
         }
         if self.looped.is_some() {
             return None;
@@ -202,7 +222,7 @@ impl Music {
         }
         let frames = ((CHUNK * rate as f64) as usize).min(2 * lap - self.next);
         let t0 = ((self.next as f64 / rate as f64) % period as f64) as f32;
-        let req = MusicRequest { t0, rate: rate as f32, frames: frames as u32, chunk: self.chunks };
+        let req = MusicRequest { t0, rate: rate as f32, frames: frames as u32, chunk: self.chunks, song };
         self.pending = Some((req, now));
         Some(req)
     }
@@ -288,7 +308,7 @@ mod tests {
                 }
             }
             m.tick(*t, RATE, &mut out);
-            held = m.want(*t, RATE, PERIOD, &mut out);
+            held = m.want(*t, RATE, 0, PERIOD, &mut out);
             *t += 1.0 / 60.0;
         }
         out
@@ -309,21 +329,21 @@ mod tests {
         let mut out = vec![];
         m.set_on(true, t, RATE, &mut out);
         assert!(out.iter().any(|c| matches!(c, Cmd::Loop { offset: 0, .. })));
-        assert!(m.want(t, RATE, PERIOD, &mut out).is_none());
+        assert!(m.want(t, RATE, 0, PERIOD, &mut out).is_none());
     }
 
     #[test]
     fn requests_are_half_seconds_numbered_in_order() {
         let mut m = Music::new();
         let mut out = vec![];
-        let a = m.want(0.0, RATE, PERIOD, &mut out).unwrap();
+        let a = m.want(0.0, RATE, 0, PERIOD, &mut out).unwrap();
         assert_eq!((a.chunk, a.frames), (0, RATE / 2));
         // (unanswered: nothing more, until it is asked again)
-        assert!(m.want(0.1, RATE, PERIOD, &mut out).is_none());
-        let again = m.want(EXPIRE + 0.1, RATE, PERIOD, &mut out).unwrap();
+        assert!(m.want(0.1, RATE, 0, PERIOD, &mut out).is_none());
+        let again = m.want(EXPIRE + 0.1, RATE, 0, PERIOD, &mut out).unwrap();
         assert_eq!(again, a);
         m.take(a, &compute(a, 0), EXPIRE + 0.1, &mut out);
-        let b = m.want(EXPIRE + 0.2, RATE, PERIOD, &mut out).unwrap();
+        let b = m.want(EXPIRE + 0.2, RATE, 0, PERIOD, &mut out).unwrap();
         assert_eq!((b.chunk, b.t0), (1, 0.5));
     }
 
@@ -365,6 +385,28 @@ mod tests {
     }
 
     #[test]
+    fn a_new_song_starts_from_chunk_0_and_the_old_is_kept() {
+        let mut m = Music::new();
+        let mut t = 0.0;
+        session(&mut m, &mut t, 1.0, false, Some(0.0));
+        assert!(m.looping());
+        // song 1: from its start, the first loop's playing cleared
+        let mut out = vec![];
+        let r = m.want(t, RATE, 1, 2.0 * PERIOD, &mut out).unwrap();
+        assert_eq!((r.chunk, r.song, r.t0), (0, 1, 0.0));
+        assert!(matches!(out.first(), Some(Cmd::Clear)));
+        assert_eq!(m.cached(), 0.0);
+        // and back to song 0: its loop plays at once, nothing to compute
+        let mut out = vec![];
+        assert!(m.want(t + 0.1, RATE, 0, PERIOD, &mut out).is_none());
+        assert!(m.looping());
+        assert!(out.iter().any(|c| matches!(c, Cmd::Loop { offset: 0, .. })));
+        // (an answer to song 1's request, come late: not ours)
+        m.take(r, &compute(r, 0), t + 0.2, &mut out);
+        assert!(m.looping());
+    }
+
+    #[test]
     fn a_new_build_starts_from_chunk_0() {
         let mut m = Music::new();
         let mut t = 0.0;
@@ -372,7 +414,7 @@ mod tests {
         let mut out = vec![];
         m.reset(t, RATE, &mut out);
         assert!(matches!(out.last(), Some(Cmd::Clear)));
-        let r = m.want(t, RATE, PERIOD, &mut out).unwrap();
+        let r = m.want(t, RATE, 0, PERIOD, &mut out).unwrap();
         assert_eq!(r.chunk, 0);
         assert_eq!(m.cached(), 0.0);
     }

@@ -7,9 +7,10 @@
 // usage: cargo run --release --example harp -- F [H] [S] > note.f32
 //        cargo run --release --example harp -- arp S > arp.f32
 //        cargo run --release --example harp -- mix S [T0] > mix.f32
+// (SONG=1 in the environment: the mix of song 1)
 //        cargo run --release --example harp -- part NAME S [T0] > part.f32
 // (`part`: one voice alone, mono: kick, clap, hats, bass, keys, strings,
-// tune)
+// tune; of the cracktro: chip-arp, chip-bass, chip-drums, chip-tune)
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,7 +23,8 @@ fn main() {
         let mut out = Vec::new();
         let mut c = 0u32;
         while (c as usize * n) < (secs * rate) as usize {
-            let chunk = wizard_shader::music::render_chunk(t0 + (c as usize * n) as f32 / rate, rate, n, c, &mut state);
+            let song: i32 = std::env::var("SONG").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let chunk = wizard_shader::music::render_chunk(song, t0 + (c as usize * n) as f32 / rate, rate, n, c, &mut state);
             out.extend(chunk.iter().flat_map(|v| v.to_le_bytes()));
             c += 1;
         }
@@ -48,6 +50,10 @@ fn main() {
                 "keys" => mono(keys(t)),
                 "strings" => mono(strings(t)),
                 "tune" => mono(tune(t)),
+                "chip-arp" => wizard_shader::chip::arpeggio(rate, t),
+                "chip-bass" => wizard_shader::chip::bass(rate, t),
+                "chip-drums" => wizard_shader::chip::drums(rate, t),
+                "chip-tune" => mono(wizard_shader::chip::tune(rate, t)),
                 _ => panic!("no part {name}"),
             };
             out.extend_from_slice(&v.to_le_bytes());

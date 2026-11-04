@@ -22,6 +22,8 @@ pub struct Options {
     // --music N: N frames of music from t0 on the GPU, checked against the
     // shader crate's own on the CPU
     pub music: Option<u32>,
+    // --song K: which song (see wizard_shader::music::songs)
+    pub song: u32,
 }
 
 fn load(root: &Path, spv: bool) -> Result<ShaderFiles, String> {
@@ -67,7 +69,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     eprintln!("shader: {} in {:.1} s", if shader.spirv { "SPIR-V" } else { "WGSL" }, t.elapsed().as_secs_f32());
     let (vw, h) = o.size;
     let mut frame = Frame::default();
-    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0 };
+    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
     let timer = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
         (
             device.create_query_set(&wgpu::QuerySetDescriptor { label: None, ty: wgpu::QueryType::Timestamp, count: 2 }),
@@ -90,8 +92,8 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
         let (mut worst, mut sum, mut diff, mut count, mut gpu_ms) = (0f32, 0f64, 0f64, 0usize, 0f64);
         for c in 0..chunks {
             let t0 = o.t0 + (c * n) as f32 / rate;
-            let req = crate::types::MusicRequest { t0, rate, frames: n, chunk: c };
-            if !frame.music(&device, &queue, &shader, &values, &ON_PATH, req, wizard_shader::music::period) {
+            let req = crate::types::MusicRequest { t0, rate, frames: n, chunk: c, song: o.song };
+            if !frame.music(&device, &queue, &shader, &values, &ON_PATH, req) {
                 return Err("the shader has no music entry points".into());
             }
             let t = Instant::now();
@@ -102,7 +104,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
                 }
             };
             gpu_ms += t.elapsed().as_secs_f64() * 1000.0;
-            let cpu = wizard_shader::music::render_chunk(t0, rate, n as usize, c, &mut state);
+            let cpu = wizard_shader::music::render_chunk(o.song as i32, t0, rate, n as usize, c, &mut state);
             worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(worst, f32::max);
             sum += data.iter().map(|v| (v * v) as f64).sum::<f64>();
             diff += data.iter().zip(&cpu).map(|(a, b)| ((a - b) * (a - b)) as f64).sum::<f64>();

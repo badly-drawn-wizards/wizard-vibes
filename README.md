@@ -21,7 +21,9 @@ edit the app and it is patched where it runs.
   groves, and alpine mountains with towers, with rivers, clouds and fog.
 - A glass orb that refracts and reflects, with lightning inside it; potions,
   a tome, runes that glow with his flight.
-- Music computed as a pure function of time, and synthesised sound effects.
+- Two songs, computed as pure functions of time: a disco (its voices
+  modelled on a reference track's stems, its harpsichord on measurements
+  of a 1709 instrument) and a chiptune cracktro. Synthesised sound effects.
 - A drawer with every parameter (uniforms apply at once; shader settings
   rebuild it), quality levels with an automatic one, FXAA or edge
   supersampling, debug views, a game controller.

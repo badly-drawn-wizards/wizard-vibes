@@ -13,6 +13,7 @@
 #![allow(non_upper_case_globals, non_snake_case, clippy::too_many_arguments, clippy::excessive_precision)]
 
 pub mod anim;
+pub mod chip;
 pub mod collide;
 pub mod enemies;
 pub mod figure;
@@ -282,7 +283,7 @@ pub fn music(
     if i >= u.a_m_n {
         return;
     }
-    let (l, r, h, s) = music::music_parts(u.a_m_rate, music::wrap(u.a_m_t0 + i as f32 / u.a_m_rate));
+    let (l, r, h, s) = music::song_parts(u.a_m_song, u.a_m_rate, music::song_wrap(u.a_m_song, u.a_m_t0 + i as f32 / u.a_m_rate));
     let k = 4 * i as usize;
     dry[k] = l;
     dry[k + 1] = r;

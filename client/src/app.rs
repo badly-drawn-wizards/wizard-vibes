@@ -64,7 +64,6 @@ impl App {
         let n = wizard_shader::sfx::sfx_count;
         let info = BuildInfo {
             spell_limit: wizard_shader::generated::max_spells as u32,
-            music_period: wizard_shader::music::period,
             sfx_rate: SFX_RATE,
             sfx_seconds: (0..n).map(wizard_shader::sfx::sfx_length).collect(),
         };
@@ -283,7 +282,7 @@ impl App {
             self.image = Some((tex, id));
         }
         let n_spells = (out.spells.len() / wizard_shader::spells::spell_stride as usize) as u32;
-        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0 };
+        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
         let mut enc = device.create_command_encoder(&Default::default());
         self.frame.record(device, queue, &mut enc, shader, params, &out.drive, &args, &out.spells);
         let (tex, _) = self.image.as_ref().unwrap();
@@ -399,7 +398,7 @@ impl App {
                 self.audio.music_chunk(req, &data);
             }
             if let (Some(sh), Some(req)) = (&self.shader, self.audio.music_request()) {
-                self.frame.music(&rs.device, &rs.queue, sh, &values, &out.drive, req, self.info.music_period);
+                self.frame.music(&rs.device, &rs.queue, sh, &values, &out.drive, req);
             }
             if let Some((_, id)) = &self.image {
                 ui.painter().image(*id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);

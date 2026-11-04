@@ -26,6 +26,7 @@ use music::{Cmd, Music};
 use output::Output;
 
 const STORE_SFX: &str = "wizard-sfx";
+const STORE_SONG: &str = "wizard-song";
 
 pub struct Audio {
     out: Option<Output>,
@@ -33,9 +34,9 @@ pub struct Audio {
     failed: Option<String>,
     music: Music,
     sfx_on: bool,
-    // the build's music loop (seconds) and effects (interleaved stereo at
-    // sfx_rate, and at the output's rate)
-    period: f32,
+    // the song playing (see wizard_shader::music::songs), and the build's
+    // effects (interleaved stereo at sfx_rate, and at the output's rate)
+    song: u32,
     sfx_rate: f32,
     sfx_src: Vec<Vec<f32>>,
     sfx: Vec<Arc<[f32]>>,
@@ -45,13 +46,14 @@ pub struct Audio {
 impl Audio {
     pub fn new(storage: Option<&dyn eframe::Storage>) -> Audio {
         let sfx_on = storage.and_then(|s| s.get_string(STORE_SFX)).is_none_or(|v| v != "0");
+        let song = storage.and_then(|s| s.get_string(STORE_SONG)).and_then(|v| v.parse().ok()).filter(|&k: &u32| (k as i32) < wizard_shader::music::songs).unwrap_or(0);
         #[allow(unused_mut)]
         let mut audio = Audio {
             out: None,
             failed: None,
             music: Music::new(),
             sfx_on,
-            period: 0.0,
+            song,
             sfx_rate: 0.0,
             sfx_src: Vec::new(),
             sfx: Vec::new(),
@@ -64,6 +66,7 @@ impl Audio {
 
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
         storage.set_string(STORE_SFX, if self.sfx_on { "1" } else { "0" }.into());
+        storage.set_string(STORE_SONG, self.song.to_string());
     }
 
     // Call each frame: starts the output on the first user input, and stops
@@ -91,7 +94,6 @@ impl Audio {
 
     // A new build: its music and effects.
     pub fn set_build(&mut self, info: &BuildInfo, sfx: Vec<Vec<f32>>) {
-        self.period = info.music_period;
         self.sfx_rate = info.sfx_rate;
         self.sfx_src = sfx;
         self.sfx.clear();
@@ -111,7 +113,7 @@ impl Audio {
     pub fn music_request(&mut self) -> Option<MusicRequest> {
         let out = self.out.as_mut()?;
         let now = out.now();
-        let req = self.music.want(now, out.rate, self.period, &mut self.cmds);
+        let req = self.music.want(now, out.rate, self.song, wizard_shader::music::song_period(self.song as i32), &mut self.cmds);
         self.flush();
         req
     }
@@ -164,6 +166,15 @@ impl Audio {
         if r.clicked() {
             self.toggle_music();
         }
+        // (the songs: a switch computes the new one from its start, unless
+        // its loop is kept from before)
+        let mut song = self.song;
+        egui::ComboBox::from_id_salt("song").selected_text(wizard_shader::music::song_names[song as usize]).show_ui(ui, |ui| {
+            for (k, name) in wizard_shader::music::song_names.iter().enumerate() {
+                ui.selectable_value(&mut song, k as u32, *name);
+            }
+        });
+        self.song = song;
         let on = self.sfx_on && off.is_none();
         let r = ui.add_enabled(off.is_none(), egui::Button::new(if on { "fx on" } else { "fx off" }).selected(on));
         let r = match &off {
