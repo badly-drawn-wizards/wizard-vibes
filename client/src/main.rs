@@ -21,7 +21,7 @@ fn main() -> eframe::Result {
     let root = wizard::root().unwrap_or_else(|e| die(&e));
     // (under `dx serve --hotpatch`: take its patches to the app's code)
     dioxus_devtools::connect_subsecond();
-    let mut o = wizard::headless::Options { shot: None, bench: None, size: (1920, 1080), t0: 0.0, sets: vec![], wgsl: false };
+    let mut o = wizard::headless::Options { shot: None, bench: None, size: (1920, 1080), t0: 0.0, sets: vec![], wgsl: false, music: None };
     let mut it = std::env::args().skip(1).peekable();
     while let Some(arg) = it.next() {
         let mut value = || it.next().unwrap_or_else(|| die(&format!("{arg} needs a value")));
@@ -39,11 +39,12 @@ fn main() -> eframe::Result {
                 o.sets.push((k.to_string(), x.parse().unwrap_or_else(|_| die("--set: a number"))));
             }
             "--wgsl" => o.wgsl = true,
+            "--music" => o.music = Some(value().parse().unwrap_or_else(|_| die("--music: a number of frames"))),
             "--bench" => o.bench = Some(if it.peek().is_some_and(|n| n.parse::<u32>().is_ok()) { it.next().unwrap().parse().unwrap() } else { 60 }),
             _ => die(&format!("unknown argument {arg}")),
         }
     }
-    if o.shot.is_some() || o.bench.is_some() {
+    if o.shot.is_some() || o.bench.is_some() || o.music.is_some() {
         wizard::headless::run(&root, &o).unwrap_or_else(|e| die(&e));
         return Ok(());
     }

@@ -19,6 +19,9 @@ pub struct Options {
     pub t0: f32,
     pub sets: Vec<(String, f64)>,
     pub wgsl: bool,
+    // --music N: N frames of music from t0 on the GPU, checked against the
+    // shader crate's own on the CPU
+    pub music: Option<u32>,
 }
 
 fn load(root: &Path, spv: bool) -> Result<ShaderFiles, String> {
@@ -74,6 +77,23 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     });
     let wait = || device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string());
 
+    if let Some(n) = o.music {
+        let req = crate::types::MusicRequest { t0: o.t0, rate: 48000.0, frames: n };
+        if !frame.music(&device, &queue, &shader, &values, &ON_PATH, req, wizard_shader::music::period) {
+            return Err("the shader has no music entry point".into());
+        }
+        let data = loop {
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            if let Some((_, d)) = frame.music_ready() {
+                break d;
+            }
+        };
+        let cpu = wizard_shader::music::sound_chunk(o.t0, 48000.0, n as usize);
+        let worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
+        let rms = (data.iter().map(|v| v * v).sum::<f32>() / data.len() as f32).sqrt();
+        println!("music: {} values, rms {rms:.4}, max |GPU - CPU| {worst:.2e}", data.len());
+        return Ok(());
+    }
     if let Some(path) = &o.shot {
         let mut enc = device.create_command_encoder(&Default::default());
         frame.record(&device, &queue, &mut enc, &shader, &values, &ON_PATH, &args(o.t0, PAGE_CAMERA), &[]);

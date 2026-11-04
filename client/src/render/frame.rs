@@ -30,7 +30,8 @@ pub struct Frame {
     music: Buffers,
     // a chunk being read back, and the one read
     music_read: Option<(MusicRequest, wgpu::Buffer)>,
-    music_done: Arc<Mutex<Option<MusicRequest>>>,
+    // (the request read back: Ok, or Err if the readback failed)
+    music_done: Arc<Mutex<Option<Result<MusicRequest, ()>>>>,
 }
 
 impl Frame {
@@ -110,9 +111,7 @@ impl Frame {
         queue.submit([enc.finish()]);
         let done = self.music_done.clone();
         read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            if r.is_ok() {
-                *done.lock().unwrap() = Some(req);
-            }
+            *done.lock().unwrap() = Some(r.map(|_| req).map_err(|_| ()));
         });
         self.music_read = Some((req, read));
         true
@@ -120,8 +119,10 @@ impl Frame {
 
     // The chunk of music read back, once there is one.
     pub fn music_ready(&mut self) -> Option<(MusicRequest, Vec<f32>)> {
-        let req = self.music_done.lock().unwrap().take()?;
+        let done = self.music_done.lock().unwrap().take()?;
         let (r, buf) = self.music_read.take()?;
+        // (a failed readback is dropped: the audio asks for that chunk again)
+        let Ok(req) = done else { return None };
         debug_assert_eq!(r, req);
         let data: Vec<f32> = bytemuck::pod_collect_to_vec(&buf.slice(..).get_mapped_range().unwrap());
         buf.unmap();

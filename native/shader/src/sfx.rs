@@ -363,6 +363,20 @@ pub fn sfx_samples(k: i32, rate: f32, n: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     // y[i] = -g x[i] + x[i - d] + g y[i - d], as Futhark computes it.
+    // Every effect is finite and peaks where its patch says, not silent.
+    #[test]
+    fn effects_are_sound() {
+        for k in 0..super::sfx_count {
+            let n = (super::sfx_length(k) * 48000.0).ceil() as usize;
+            let y = super::sfx_samples(k, 48000.0, n);
+            assert!(y.iter().all(|v| v.is_finite()), "effect {k} is not finite");
+            let peak = y.iter().fold(0f32, |m, v| m.max(v.abs()));
+            let rms = (y.iter().map(|v| v * v).sum::<f32>() / y.len() as f32).sqrt();
+            eprintln!("effect {k}: peak {peak:.3}, rms {rms:.4}");
+            assert!(peak > 0.01 && peak <= 1.0, "effect {k} peaks at {peak}");
+        }
+    }
+
     #[test]
     fn allpass_is_the_textbook_one() {
         let y = super::allpass(2, 0.5, &[1.0, 0.0, 0.0, 2.0, 0.0, -1.0, 0.0, 0.0]);

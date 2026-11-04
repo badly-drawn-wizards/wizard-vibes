@@ -50,8 +50,10 @@ pub struct Shader {
     layout: wgpu::BindGroupLayout,
     bindings: Vec<u32>,
     // bound where a pass has no buffer of its own (and in place of the
-    // indirect dispatch's arguments, which may not be bound as storage then)
-    dummy: wgpu::Buffer,
+    // indirect dispatch's arguments, which may not be bound as storage
+    // then): one per binding, as one buffer may not be bound both read-only
+    // and writable in a dispatch
+    dummies: HashMap<u32, wgpu::Buffer>,
     // whether it runs as SPIR-V (else WGSL)
     pub spirv: bool,
 }
@@ -129,14 +131,20 @@ impl Shader {
             });
             kernels.insert(e.name.clone(), Kernel { pipeline, workgroup: e.workgroup[0].max(1) });
         }
-        let dummy = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("dummy"),
-            size: 256,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM,
-            mapped_at_creation: false,
-        });
+        let dummies = kinds
+            .keys()
+            .map(|&b| {
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("dummy {b}")),
+                    size: 256,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM,
+                    mapped_at_creation: false,
+                });
+                (b, buf)
+            })
+            .collect();
         let bindings = kinds.keys().copied().collect();
-        Ok(Shader { version: files.version.clone(), meta: files.meta.clone(), kernels, layout, bindings, dummy, spirv })
+        Ok(Shader { version: files.version.clone(), meta: files.meta.clone(), kernels, layout, bindings, dummies, spirv })
     }
 
     pub fn has(&self, entry: &str) -> bool {
@@ -208,7 +216,7 @@ fn bind_group(device: &wgpu::Device, shader: &Shader, bufs: &Buffers, label: &st
         .iter()
         .map(|&b| {
             let buf = if Some(b) == except { None } else { bufs.peek(b) };
-            wgpu::BindGroupEntry { binding: b, resource: buf.unwrap_or(&shader.dummy).as_entire_binding() }
+            wgpu::BindGroupEntry { binding: b, resource: buf.unwrap_or(&shader.dummies[&b]).as_entire_binding() }
         })
         .collect();
     device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(label), layout: &shader.layout, entries: &entries })
