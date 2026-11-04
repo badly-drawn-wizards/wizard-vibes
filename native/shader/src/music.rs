@@ -3,15 +3,17 @@
 // time (the `music` entry point in lib.rs, as sound_chunk).
 //
 // Wizard disco: 32 bars at 120 beats a minute in D minor, on the chords
-// Dm, Gm, Bb, A (i iv VI V, two bars each). Throughout: a four-on-the-floor
-// kick, open hi-hats on the offbeats and closed ones on the sixteenths,
-// claps on two and four, a crunchy octave-jumping bass and a harpsichord
-// playing sixteenth arpeggios. In four sections of eight bars, each after a
-// one-beat stop:
+// Dm, Gm, Bb, A (i iv VI V, two bars each). Its voices are modelled on
+// those of Louie Zong's WIZARD DISCO (measured on its stems, as split by
+// Demucs). Throughout: a four-on-the-floor kick with a snap of noise on
+// every beat, open hi-hats on the offbeats and closed ones on the
+// sixteenths, claps on two and four, a plucked bass in a syncopated
+// octave figure and a harpsichord playing sixteenth arpeggios. In four
+// sections of eight bars, each after a one-beat stop:
 //   1  the groove;
-//   2  with a string pad;
-//   3  a synth lead plays the tune;
-//   4  the tune again, with a harmony a third below, and the strings.
+//   2  with a pad and electric piano stabs;
+//   3  a whistling synth lead plays the tune;
+//   4  the tune again, with a harmony a third below, the pad and the stabs.
 //
 // Times are within the loop (the app wraps them in double precision), and
 // every oscillator's phase is measured from the start of its note, so it
@@ -195,44 +197,83 @@ pub fn duck(t: f32, depth: f32) -> f32 {
     1.0 - depth * smoothstep(0.0, 0.004, u) * (-u * 9.0).exp()
 }
 
-// The bass: the chord's root in eighths, low then an octave up; a
-// band-limited sawtooth through a closing resonant filter (its harmonics
-// near the cutoff raised: the wow), a soft clipper, over a sine an octave
-// below; pumped by the kick.
+// The bass's figure, a bar of sixteenths: whether a note starts on
+// sixteenth s (0..15), how many semitones over the low root, and how many
+// sixteenths it is held. Octave jumps, syncopated (as funk's and disco's).
+#[inline]
+pub fn bass_step(s: i32) -> (bool, f32, f32) {
+    if s == 0 || s == 8 {
+        (true, 0.0, 2.0)
+    } else if s == 3 || s == 11 {
+        (true, 12.0, 1.0)
+    } else if s == 4 {
+        (true, 0.0, 1.0)
+    } else if s == 6 {
+        (true, 12.0, 2.0)
+    } else if s == 12 {
+        (true, 7.0, 1.0)
+    } else if s == 14 {
+        (true, 12.0, 1.5)
+    } else {
+        (false, 0.0, 0.0)
+    }
+}
+
+// The bass: the chord's root (and its octave and fifth) in the figure
+// above, from the octave of D3 (over the kick, which has 60-120 Hz); a band-limited sawtooth through a resonant filter that snaps shut
+// (bright for its first 20 ms, round by 60 ms, as WIZARD DISCO's
+// plucked bass measures), a soft clipper, over a little sine on its
+// fundamental (its weight in 60-250 Hz, its second harmonic strongest; as
+// loud as the drums); pumped by the kick.
 #[inline]
 pub fn bass(t: f32) -> f32 {
-    let e = ftoi((t / eighth).floor());
-    let u = t - e as f32 * eighth;
-    let root = chord_tone(chord_at(e as f32 * eighth), 0);
-    let f = freq(root - 12.0 + (if imod(e, 2) == 1 { 12.0 } else { 0.0 }));
-    let env = (1.0 - (-u * 400.0).exp()) * (-u * 3.0).exp() * smoothstep(0.92 * eighth, 0.8 * eighth, u);
+    // (the note sounding: the latest to start, up to three sixteenths back)
+    let n = ftoi((t / sixteenth).floor());
+    let mut start = n;
+    let mut k = 0;
+    while k < 3 && !bass_step(imod(start, 16)).0 {
+        start -= 1;
+        k += 1;
+    }
+    let (on, semis, len) = bass_step(imod(start, 16));
+    if !on {
+        return 0.0;
+    }
+    let u = t - start as f32 * sixteenth;
+    let held = len * sixteenth - 0.02;
+    let root = chord_tone(chord_at(start as f32 * sixteenth), 0);
+    let f = freq(root + semis);
+    let env = (1.0 - (-u * 400.0).exp()) * (-u * 2.5).exp() * smoothstep(held + 0.015, held, u);
     // (the filter: harmonic k damped by how far it is above the cutoff,
-    // which falls from 30 to 3 times the note's frequency, with a peak there)
-    let cutoff = 3.0 + 27.0 * (-u * 12.0).exp();
+    // which falls from 8 to 2 times the note's frequency, with a peak there)
+    let cutoff = 2.0 + 6.0 * (-u * 40.0).exp();
     let mut saw = 0.0f32;
     let mut k = 0;
     while k < 24 {
         let kf = (k + 1) as f32;
-        let d = (kf - cutoff) / 1.5;
-        let keep = if kf * f > 8000.0 { 0.0 } else { 1.0 / (1.0 + (kf / cutoff).powf(4.0)) + 1.8 * (-d * d).exp() };
+        let d = (kf - cutoff) / 1.2;
+        let keep = if kf * f > 8000.0 { 0.0 } else { 1.0 / (1.0 + (kf / cutoff).powf(4.0)) + 0.9 * (-d * d).exp() };
         saw = saw + keep * (tau * f * kf * u).sin() / kf;
         k += 1;
     }
-    let drive = 3.0f32;
+    let drive = 1.5f32;
     let crunch = (drive * saw).tanh() / drive.tanh();
-    let sub = (tau * f * 0.5 * u).sin();
-    duck(t, 0.5) * env * (0.12 * crunch + 0.12 * sub)
+    let fundamental = (tau * f * u).sin();
+    duck(t, 0.5) * env * (0.36 * crunch + 0.05 * fundamental)
 }
 
-// The kick on every beat: a sine swooping from 180 to 45 Hz, driven into
-// a soft clipper for punch, with a noisy click on top.
+// The kick on every beat, as WIZARD DISCO's (Louie Zong's) measures: a
+// body near 120 Hz for its first 30 ms, settling to a 58 Hz tail that
+// rings some 250 ms (its weight in 60-250 Hz, little below), driven into a soft clipper for punch; a short click;
+// and over it a snap of bright noise (1-12 kHz, some 100 ms), on every beat.
 #[inline]
 pub fn kick(rate: f32, t: f32) -> f32 {
     let u = t - beat * (t / beat).floor();
-    let p = tau * (45.0 * u + 135.0 / 30.0 * (1.0 - (-30.0 * u).exp()));
-    let body = (2.0 * (-u * 6.0).exp() * p.sin()).tanh() / (2.0f32).tanh();
-    let click = (-u * 600.0).exp() * (0.5 + 0.5 * bright_noise(rate, t));
-    0.42 * body + 0.08 * click
+    let p = tau * (58.0 * u + 100.0 / 22.0 * (1.0 - (-22.0 * u).exp()));
+    let body = (2.2 * (-u * 7.0).exp() * p.sin()).tanh() / (2.2f32).tanh();
+    let click = (-u * 900.0).exp() * (0.5 + 0.5 * bright_noise(rate, t));
+    let snap = smoothstep(0.0, 0.002, u) * (-u * 28.0).exp() * (noise(rate, t) + 0.3 * bright_noise(rate, t));
+    0.42 * body + 0.08 * click + 0.35 * snap
 }
 
 // Claps on beats two and four: bright noise in three quick bursts, then a
@@ -249,7 +290,7 @@ pub fn clap(rate: f32, t: f32) -> f32 {
     } else {
         0.55 * (-(u - 0.025) * 16.0).exp()
     };
-    0.13 * flam * (0.4 * noise(rate, t) + 1.2 * bright_noise(rate, t))
+    0.22 * flam * (0.4 * noise(rate, t) + 1.2 * bright_noise(rate, t))
 }
 
 // A metallic hat: six square waves at the 808's inharmonic frequencies,
@@ -268,9 +309,9 @@ pub fn hats(rate: f32, t: f32) -> (f32, f32) {
     let n = ftoi((t / sixteenth).floor());
     let u = t - n as f32 * sixteenth;
     let (env, pan) = if imod(n, 4) == 2 {
-        (0.08 * (-u * 8.0).exp(), 0.35)
+        (0.24 * (-u * 8.0).exp(), 0.35)
     } else if imod(n, 2) == 1 {
-        (0.04 * (-u * 60.0).exp(), 0.65)
+        (0.16 * (-u * 60.0).exp(), 0.65)
     } else {
         (0.0, 0.5)
     };
@@ -284,8 +325,11 @@ pub fn hats(rate: f32, t: f32) -> (f32, f32) {
 // ---------------------------------------------------------------------
 // Strings
 
-// One chord of the pad: each tone an ensemble of sawtooths, slightly
-// apart in tune (two a side), softened, with a slow vibrato.
+// One chord of the pad: each tone an ensemble of voices slightly apart in
+// tune (two a side), softened, with a slow vibrato. Each voice's even
+// harmonics are strong and its odd ones weak (the octave above loud, the
+// twelfth 16 dB down), as WIZARD DISCO's pad measures: hollow and organ-like
+// more than a sawtooth's buzz.
 #[inline]
 fn voice(ch: i32, tt: f32, amp: f32) -> (f32, f32) {
     let (mut l, mut r) = (0.0f32, 0.0f32);
@@ -293,14 +337,15 @@ fn voice(ch: i32, tt: f32, amp: f32) -> (f32, f32) {
     let vib = 0.0025 * smoothstep(0.3, 1.0, tt) / (tau * 5.0) * (1.0 - (tau * 5.0 * tt).cos());
     let mut k = 0;
     while k < 3 {
-        let f = freq(chord_tone(imod(ch, chords), k) + 24.0);
+        let f = freq(chord_tone(imod(ch, chords), k) + 12.0);
         let saw = |g: f32| {
             let mut s = 0.0f32;
             let mut h = 0;
             while h < 10 {
                 let hf = (h + 1) as f32;
                 let soft = 1.0 / (1.0 + (hf * g / 2200.0) * (hf * g / 2200.0));
-                s = s + soft * (tau * g * hf * (tt + vib)).sin() / hf;
+                let weight = if h == 0 { 1.0 } else if imod(h, 2) == 1 { 1.1 } else { 0.5 };
+                s = s + soft * weight * (tau * g * hf * (tt + vib)).sin() / hf;
                 h += 1;
             }
             s
@@ -314,18 +359,83 @@ fn voice(ch: i32, tt: f32, amp: f32) -> (f32, f32) {
     (l, r)
 }
 
-// A string pad on the chord, two octaves up, swelling in; the previous
+// The pad on the chord, an octave up, swelling in; the previous
 // chord fades under the next; pumped by the kick.
 #[inline]
 pub fn strings(t: f32) -> (f32, f32) {
     let c = ftoi((t / chord_len).floor());
     let lt = t - c as f32 * chord_len;
-    let (l1, r1) = voice(c, lt, 0.022 * smoothstep(0.0, 0.6, lt));
+    let (l1, r1) = voice(c, lt, 0.03 * smoothstep(0.0, 0.6, lt));
     let fade = (0.0f32).maximum(1.0 - lt / 0.4);
-    let (l0, r0) = if fade > 0.0 && c > 0 { voice(c - 1, lt + chord_len, 0.022 * fade) } else { (0.0, 0.0) };
+    let (l0, r0) = if fade > 0.0 && c > 0 { voice(c - 1, lt + chord_len, 0.03 * fade) } else { (0.0, 0.0) };
     // (in sections 2 and 4)
     let g = duck(t, 0.4) * (in_sections(1, 1, 0.6, t) + in_sections(3, 3, 0.6, t));
     (g * (l1 + l0), g * (r1 + r0))
+}
+
+// ---------------------------------------------------------------------
+// Electric piano
+
+// Whether an electric piano stab starts on sixteenth s (0..15) of a bar,
+// and how many sixteenths it is held: off the beat (the "and" of one and
+// three, the last sixteenth of two, the "and" of four), as disco's
+// rhythm parts play.
+#[inline]
+pub fn stab_step(s: i32) -> f32 {
+    if s == 2 || s == 10 {
+        1.5
+    } else if s == 7 {
+        1.0
+    } else if s == 14 {
+        2.0
+    } else {
+        0.0
+    }
+}
+
+// One tine of an electric piano, struck at u = 0 and let go at `held`:
+// two-operator FM (a Rhodes as the DX7 does it), its modulator on the
+// carrier's frequency, its index falling fast, so the note is bright as
+// it is struck (the second and third harmonics up with the first) and
+// near a sine by 100 ms, as WIZARD DISCO's keys measure; and a faint
+// metallic ping (the tine's own, some 14 times up).
+#[inline]
+pub fn tine(f: f32, u: f32, held: f32) -> f32 {
+    let index = 0.35 + 2.2 * (-u * 30.0).exp();
+    let p = tau * f * u;
+    let env = (1.0 - (-u * 1500.0).exp()) * (-u * 3.0).exp() * smoothstep(held + 0.04, held, u);
+    let ping = if 14.0 * f > 10000.0 { 0.0 } else { 0.12 * (-u * 80.0).exp() * (14.0 * p).sin() };
+    env * ((p + index * p.sin()).sin() + ping)
+}
+
+// The stabs: the chord in the octave above the bass's, each stab's three
+// tones (and the root an octave up) struck together; with the electric
+// piano's stereo tremolo, left and right swapping at 4 Hz (left, right).
+#[inline]
+pub fn keys(t: f32) -> (f32, f32) {
+    let n = ftoi((t / sixteenth).floor());
+    let mut start = n;
+    let mut k = 0;
+    while k < 3 && stab_step(imod(start, 16)) == 0.0 {
+        start -= 1;
+        k += 1;
+    }
+    let len = stab_step(imod(start, 16));
+    if len == 0.0 {
+        return (0.0, 0.0);
+    }
+    let u = t - start as f32 * sixteenth;
+    let c = chord_at(start as f32 * sixteenth);
+    let held = len * sixteenth - 0.02;
+    let mut s = 0.0f32;
+    let mut j = 0;
+    while j < 4 {
+        s = s + tine(freq(chord_tone(c, j) + 12.0), u, held);
+        j += 1;
+    }
+    let pan = 0.5 + 0.3 * (tau * 4.0 * t).sin();
+    let g = 0.03 * (in_sections(1, 1, 0.05, t) + in_sections(3, 3, 0.05, t));
+    (g * s * (1.0 - pan), g * s * pan)
 }
 
 // ---------------------------------------------------------------------
@@ -412,8 +522,9 @@ pub fn note_at(i: i32) -> (i32, i32, i32) {
     (melody_code(j), j, e)
 }
 
-// A synth lead: a square-ish wave (odd harmonics, 1/k), two voices a hair
-// apart, with vibrato growing in on long notes, gliding in from the note
+// A synth lead: near a sine, its octave 8 dB down and its twelfth 22 dB
+// (as WIZARD DISCO's whistling lead measures), two voices a hair apart,
+// with vibrato growing in on long notes, gliding in from the note
 // before (pf; f if none) over 40 ms. tau_: time since the note began; dur:
 // how long it is held.
 #[inline]
@@ -428,16 +539,8 @@ pub fn lead_tone(f: f32, pf: f32, tau_: f32, dur: f32) -> f32 {
     let g = 0.04f32;
     let slid = (pf / f - 1.0) * (if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g });
     let osc = |h: f32| {
-        let mut s = 0.0f32;
-        let mut k = 0;
-        while k < 6 {
-            let kf = (2 * k + 1) as f32;
-            if !(kf * h > 9000.0) {
-                s = s + (tau * h * kf * (tau_ + wob + slid)).sin() / kf;
-            }
-            k += 1;
-        }
-        s
+        let p = tau * h * (tau_ + wob + slid);
+        p.sin() + 0.4 * (2.0 * p).sin() + 0.08 * (3.0 * p).sin()
     };
     env * (osc(f) + 0.6 * osc(f * 1.003))
 }
@@ -521,9 +624,11 @@ pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32, f32) {
     let harp = (if section(t) >= 2 { 0.6 } else { 1.0 }) * duck(t, 0.25);
     let (sl, sr) = strings(t);
     let (ml, mr) = tune(t);
-    let l = k + cl + low + groove * hhl + harp * hl + sl + ml;
-    let r = k + cl + low + groove * hhr + harp * hr + sr + mr;
-    let send = 0.9 * cl + 0.6 * (sl + sr) + 0.5 * (ml + mr) + 0.15 * harp * (hl + hr);
+    let (el, er) = keys(t);
+    let (el, er) = (groove * duck(t, 0.3) * el, groove * duck(t, 0.3) * er);
+    let l = k + cl + low + groove * hhl + harp * hl + sl + ml + el;
+    let r = k + cl + low + groove * hhr + harp * hr + sr + mr + er;
+    let send = 0.9 * cl + 0.6 * (sl + sr) + 0.5 * (ml + mr) + 0.15 * harp * (hl + hr) + 0.3 * (el + er);
     (l, r, 0.5 * harp * (hl + hr), send)
 }
 

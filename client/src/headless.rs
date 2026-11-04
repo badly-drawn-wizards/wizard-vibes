@@ -82,10 +82,12 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
         // carried from chunk to chunk, against the shader crate's own on
         // the CPU; the drums' noise, hashed from the sample index, may take
         // a neighbouring sample's value where t * rate rounds differently,
-        // so a few samples differ by up to ~0.1)
+        // so a few samples differ by as much as the noise is loud (the
+        // kick's snap: up to ~0.8); what matters is that they differ in
+        // few samples: the difference's rms)
         let (rate, chunks) = (48000.0, 8);
         let mut state = wizard_shader::music::State::new();
-        let (mut worst, mut sum, mut count, mut gpu_ms) = (0f32, 0f64, 0usize, 0f64);
+        let (mut worst, mut sum, mut diff, mut count, mut gpu_ms) = (0f32, 0f64, 0f64, 0usize, 0f64);
         for c in 0..chunks {
             let t0 = o.t0 + (c * n) as f32 / rate;
             let req = crate::types::MusicRequest { t0, rate, frames: n, chunk: c };
@@ -103,9 +105,10 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
             let cpu = wizard_shader::music::render_chunk(t0, rate, n as usize, c, &mut state);
             worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(worst, f32::max);
             sum += data.iter().map(|v| (v * v) as f64).sum::<f64>();
+            diff += data.iter().zip(&cpu).map(|(a, b)| ((a - b) * (a - b)) as f64).sum::<f64>();
             count += data.len();
         }
-        println!("music: {chunks} chunks of {n} frames, {:.1} ms each (GPU and readback), rms {:.4}, max |GPU - CPU| {worst:.2e}", gpu_ms / chunks as f64, (sum / count as f64).sqrt());
+        println!("music: {chunks} chunks of {n} frames, {:.1} ms each (GPU and readback), rms {:.4}, GPU - CPU: rms {:.2e}, max {worst:.2e}", gpu_ms / chunks as f64, (sum / count as f64).sqrt(), (diff / count as f64).sqrt());
         return Ok(());
     }
     if let Some(path) = &o.shot {

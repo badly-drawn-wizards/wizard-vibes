@@ -7,6 +7,9 @@
 // usage: cargo run --release --example harp -- F [H] [S] > note.f32
 //        cargo run --release --example harp -- arp S > arp.f32
 //        cargo run --release --example harp -- mix S [T0] > mix.f32
+//        cargo run --release --example harp -- part NAME S [T0] > part.f32
+// (`part`: one voice alone, mono: kick, clap, hats, bass, keys, strings,
+// tune)
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,6 +25,32 @@ fn main() {
             let chunk = wizard_shader::music::render_chunk(t0 + (c as usize * n) as f32 / rate, rate, n, c, &mut state);
             out.extend(chunk.iter().flat_map(|v| v.to_le_bytes()));
             c += 1;
+        }
+        use std::io::Write;
+        std::io::stdout().write_all(&out).unwrap();
+        return;
+    }
+    if args.first().map(String::as_str) == Some("part") {
+        use wizard_shader::music::*;
+        let name = args[1].clone();
+        let secs: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(16.0);
+        let t0: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let rate = 48000.0;
+        let mut out = Vec::new();
+        for i in 0..(secs * rate) as usize {
+            let t = wrap(t0 + i as f32 / rate);
+            let mono = |(l, r): (f32, f32)| 0.5 * (l + r);
+            let v = match name.as_str() {
+                "kick" => kick(rate, t),
+                "clap" => clap(rate, t),
+                "hats" => mono(hats(rate, t)),
+                "bass" => bass(t),
+                "keys" => mono(keys(t)),
+                "strings" => mono(strings(t)),
+                "tune" => mono(tune(t)),
+                _ => panic!("no part {name}"),
+            };
+            out.extend_from_slice(&v.to_le_bytes());
         }
         use std::io::Write;
         std::io::stdout().write_all(&out).unwrap();
