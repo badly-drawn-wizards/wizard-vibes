@@ -11,15 +11,19 @@
 // round (its start already rings with its end's tail), and the GPU makes no
 // more. A new build starts it afresh.
 //
+// The computing goes on in the background from the start, whether the
+// music is on or not, a chunk (half a second) as soon as the last is back,
+// so the loop is usually complete before anyone asks for music. Turned on
+// before then, it plays the chunks as they come, from the next.
+//
 // Times: `now` is the mixer's clock in seconds; places on it are frames.
 
 use std::sync::Arc;
 
 use crate::types::MusicRequest;
 
-pub const FRAMES: usize = 4096; // frames a chunk (~85 ms at 48 kHz)
-const AHEAD: f64 = 4.0; // seconds computed ahead of the clock, at most
-const START: f64 = 0.15; // seconds from starting to the first chunk's place
+const CHUNK: f64 = 0.5; // seconds a chunk
+const START: f64 = 0.15; // seconds from turning on to the first chunk's place
 const EXPIRE: f64 = 3.0; // seconds after which an unanswered request is asked again
 const STOP_AFTER: f64 = 0.2; // seconds from turning off (the fade) to stopping
 pub const GAIN: f32 = 0.8;
@@ -44,15 +48,26 @@ pub struct Stats {
     pub late: u32,
 }
 
+// Playing: the clock's frame at which song frame `from` plays (chunks from
+// there on are placed by it), and once the loop plays, the clock's frame
+// at which it began (its frame 0).
+struct Play {
+    start: u64,
+    from: usize,
+    loop_at: Option<u64>,
+}
+
 pub struct Music {
     pub on: bool,
     pub stats: Stats,
     lap: usize,          // frames in the loop (0: not known yet)
+    rate: u32,           // the rate the song is computed at
     next: usize,         // song frames computed so far: the next request starts here
-    start: Option<u64>,  // the clock's frame that song frame 0 plays at
+    chunks: u32,         // chunks computed so far
     pending: Option<(MusicRequest, f64)>, // the request out, and when it was made
     second: Vec<f32>,    // the second lap, as far as computed (interleaved)
-    looped: Option<(u64, Arc<[f32]>)>, // the second lap complete: from which clock frame it loops
+    looped: Option<Arc<[f32]>>, // the second lap, complete
+    play: Option<Play>,
     resume: usize,       // where in the loop to carry on, turned on again
     stop_at: Option<f64>,
 }
@@ -69,7 +84,20 @@ fn frame_at(t: f64, rate: u32) -> u64 {
 
 impl Music {
     pub fn new() -> Music {
-        Music { on: false, stats: Stats::default(), lap: 0, next: 0, start: None, pending: None, second: Vec::new(), looped: None, resume: 0, stop_at: None }
+        Music {
+            on: false,
+            stats: Stats::default(),
+            lap: 0,
+            rate: 0,
+            next: 0,
+            chunks: 0,
+            pending: None,
+            second: Vec::new(),
+            looped: None,
+            play: None,
+            resume: 0,
+            stop_at: None,
+        }
     }
 
     // How much of the kept (second) lap is there (0..1).
@@ -88,20 +116,23 @@ impl Music {
         self.looped.is_some()
     }
 
-    // From the start of the song: nothing computed, nothing placed.
-    fn restart(&mut self) {
+    // The song's computing from the start (and its playing from there, if on).
+    fn restart(&mut self, now: f64, out: &mut Vec<Cmd>) {
         self.next = 0;
-        self.start = None;
+        self.chunks = 0;
         self.pending = None;
         self.second.clear();
         self.looped = None;
         self.resume = 0;
+        if self.play.is_some() {
+            out.push(Cmd::Clear);
+            self.play = Some(Play { start: frame_at(now + START, self.rate), from: 0, loop_at: None });
+        }
     }
 
     // A new build: its music may differ, and its soundboard has no state.
-    pub fn reset(&mut self, _now: f64, _rate: u32, out: &mut Vec<Cmd>) {
-        out.push(Cmd::Clear);
-        self.restart();
+    pub fn reset(&mut self, now: f64, _rate: u32, out: &mut Vec<Cmd>) {
+        self.restart(now, out);
     }
 
     pub fn set_on(&mut self, on: bool, now: f64, rate: u32, out: &mut Vec<Cmd>) {
@@ -109,23 +140,24 @@ impl Music {
             return;
         }
         self.on = on;
-        if on {
-            out.push(Cmd::Gain { target: GAIN, tau: 0.05 });
-            // (still fading out: carry on with what is queued)
-            if self.stop_at.take().is_some() {
-                return;
-            }
-            if let Some((_, data)) = &self.looped {
-                let at = frame_at(now + 0.05, rate);
-                out.push(Cmd::Loop { at, offset: self.resume, data: data.clone() });
-                self.looped = Some((at - self.resume as u64, data.clone()));
-            } else {
-                self.restart();
-            }
-        } else {
+        if !on {
             // fade out, then stop
             out.push(Cmd::Gain { target: 0.0, tau: 0.03 });
             self.stop_at = Some(now + STOP_AFTER);
+            return;
+        }
+        out.push(Cmd::Gain { target: GAIN, tau: 0.05 });
+        // (still fading out: carry on with what is queued)
+        if self.stop_at.take().is_some() && self.play.is_some() {
+            return;
+        }
+        if let Some(data) = &self.looped {
+            let at = frame_at(now + 0.05, rate);
+            out.push(Cmd::Loop { at, offset: self.resume, data: data.clone() });
+            self.play = Some(Play { start: 0, from: 0, loop_at: Some(at - self.resume as u64) });
+        } else {
+            // (from the next chunk to come)
+            self.play = Some(Play { start: frame_at(now + START, rate), from: self.next, loop_at: None });
         }
     }
 
@@ -134,27 +166,29 @@ impl Music {
         if self.stop_at.is_some_and(|t| now >= t) && !self.on {
             self.stop_at = None;
             out.push(Cmd::Clear);
-            match &self.looped {
-                // (where the loop got to, to carry on from there)
-                Some((from, _)) if self.lap > 0 => self.resume = (frame_at(now, rate).saturating_sub(*from) % self.lap as u64) as usize,
-                Some(_) => {}
-                // (half computed: it starts afresh next time)
-                None => self.restart(),
+            // (where the loop got to, to carry on from there)
+            if let Some(Play { loop_at: Some(at), .. }) = self.play {
+                if self.lap > 0 {
+                    self.resume = (frame_at(now, rate).saturating_sub(at) % self.lap as u64) as usize;
+                }
             }
+            self.play = None;
         }
     }
 
-    // What to compute next, if anything: the chunk after the last, once the
-    // clock is near enough; or the one still unanswered, again, after a
-    // while. `period` is the loop's length in seconds, `rate` the output's.
-    pub fn want(&mut self, now: f64, rate: u32, period: f32, _out: &mut Vec<Cmd>) -> Option<MusicRequest> {
-        if !self.on || self.stop_at.is_some() || period <= 0.0 || rate == 0 {
+    // What to compute next, if anything: the chunk after the last, as soon
+    // as the last is back, until the loop is complete; or the one still
+    // unanswered, again, after a while. `period` is the loop's length in
+    // seconds, `rate` the output's.
+    pub fn want(&mut self, now: f64, rate: u32, period: f32, out: &mut Vec<Cmd>) -> Option<MusicRequest> {
+        if period <= 0.0 || rate == 0 {
             return None;
         }
         let lap = (period as f64 * rate as f64).round() as usize;
-        if lap != self.lap {
+        if lap != self.lap || rate != self.rate {
             self.lap = lap;
-            self.restart();
+            self.rate = rate;
+            self.restart(now, out);
         }
         if self.looped.is_some() {
             return None;
@@ -166,21 +200,17 @@ impl Music {
             *asked = now;
             return Some(*req);
         }
-        let start = *self.start.get_or_insert(frame_at(now + START, rate));
-        if start + self.next as u64 > frame_at(now + AHEAD, rate) {
-            return None;
-        }
-        let frames = FRAMES.min(2 * lap - self.next);
+        let frames = ((CHUNK * rate as f64) as usize).min(2 * lap - self.next);
         let t0 = ((self.next as f64 / rate as f64) % period as f64) as f32;
-        let req = MusicRequest { t0, rate: rate as f32, frames: frames as u32, chunk: (self.next / FRAMES) as u32 };
+        let req = MusicRequest { t0, rate: rate as f32, frames: frames as u32, chunk: self.chunks };
         self.pending = Some((req, now));
         Some(req)
     }
 
-    // A chunk computed: placed after the last (if it came late, the song
-    // moves on to make room: a gap rather than an overlap), and kept if it
-    // is of the second lap; with the second lap complete, that loops from
-    // where the song ends.
+    // A chunk computed: kept if it is of the second lap, and, while
+    // playing, placed (if it came late, the song moves on to make room: a
+    // gap rather than an overlap); with the second lap complete, that loops
+    // from where the song ends.
     pub fn take(&mut self, req: MusicRequest, samples: &[f32], now: f64, out: &mut Vec<Cmd>) {
         let Some((want, _)) = self.pending else { return };
         // (an answer to a request from before a restart: not ours)
@@ -188,30 +218,37 @@ impl Music {
             return;
         }
         self.pending = None;
-        let rate = req.rate.round() as u32;
         let frames = req.frames as usize;
         let s = self.next;
-        let mut start = self.start.unwrap_or(frame_at(now + START, rate));
-        let soonest = frame_at(now + 0.02, rate);
-        if start + (s as u64) < soonest {
-            self.stats.late += 1;
-            start = soonest - s as u64;
-        }
-        self.start = Some(start);
-        let data: Arc<[f32]> = samples[..2 * frames].into();
-        out.push(Cmd::Chunk { at: start + s as u64, data });
-        self.stats.played += 1;
         let lap = self.lap;
+        let rate = self.rate;
+        if let Some(p) = &mut self.play {
+            if p.loop_at.is_none() && s >= p.from {
+                let soonest = frame_at(now + 0.02, rate);
+                if p.start + ((s - p.from) as u64) < soonest {
+                    self.stats.late += 1;
+                    p.start = soonest - (s - p.from) as u64;
+                }
+                out.push(Cmd::Chunk { at: p.start + (s - p.from) as u64, data: samples[..2 * frames].into() });
+                self.stats.played += 1;
+            }
+        }
         if s + frames > lap {
             let from = lap.saturating_sub(s);
             self.second.extend_from_slice(&samples[2 * from..2 * frames]);
         }
         self.next += frames;
+        self.chunks += 1;
         if self.next >= 2 * lap {
             let data: Arc<[f32]> = std::mem::take(&mut self.second).into();
-            let at = start + 2 * lap as u64;
-            out.push(Cmd::Loop { at, offset: 0, data: data.clone() });
-            self.looped = Some((at, data));
+            if let Some(p) = &mut self.play {
+                if p.loop_at.is_none() {
+                    let at = p.start + (2 * lap - p.from) as u64;
+                    out.push(Cmd::Loop { at, offset: 0, data: data.clone() });
+                    p.loop_at = Some(at);
+                }
+            }
+            self.looped = Some(data);
         }
     }
 }
@@ -221,30 +258,33 @@ mod tests {
     use super::*;
 
     const RATE: u32 = 48000;
-    // (a short loop, so whole songs are quick)
-    const PERIOD: f32 = 0.5;
-    const LAP: usize = 24000;
+    // (a short loop, so whole songs are quick: 2.5 chunks a lap)
+    const PERIOD: f32 = 1.25;
+    const LAP: usize = 60000;
 
     // A chunk "computed": each frame holds its song frame (both sides).
     fn compute(req: MusicRequest, from: usize) -> Vec<f32> {
         (0..req.frames as usize).flat_map(|i| [(from + i) as f32, (from + i) as f32]).collect()
     }
 
-    // Runs the music at 60 frames a second for `secs`, answering each request
-    // a frame later; returns the commands.
-    fn session(m: &mut Music, t: &mut f64, secs: f64, drop_one: bool) -> Vec<Cmd> {
+    // Runs at 60 frames a second for `secs`, answering each request a frame
+    // later (dropping the first answer if asked); returns the commands.
+    fn session(m: &mut Music, t: &mut f64, secs: f64, drop_one: bool, mut on_at: Option<f64>) -> Vec<Cmd> {
         let mut out = vec![];
         let mut held: Option<MusicRequest> = None;
         let mut dropped = !drop_one;
         let mut computed = 0usize;
         while *t < secs {
+            if on_at.is_some_and(|a| *t >= a) {
+                m.set_on(true, *t, RATE, &mut out);
+                on_at = None;
+            }
             if let Some(r) = held.take() {
                 if !dropped {
                     dropped = true;
                 } else {
-                    let from = r.chunk as usize * FRAMES;
-                    m.take(r, &compute(r, from), *t, &mut out);
-                    computed = computed.max(from + r.frames as usize);
+                    m.take(r, &compute(r, computed), *t, &mut out);
+                    computed += r.frames as usize;
                 }
             }
             m.tick(*t, RATE, &mut out);
@@ -254,31 +294,55 @@ mod tests {
         out
     }
 
-    #[test]
-    fn off_asks_nothing() {
-        let mut m = Music::new();
-        assert!(m.want(0.0, RATE, PERIOD, &mut vec![]).is_none());
+    fn chunks(out: &[Cmd]) -> Vec<(u64, Arc<[f32]>)> {
+        out.iter().filter_map(|c| if let Cmd::Chunk { at, data } = c { Some((*at, data.clone())) } else { None }).collect()
     }
 
     #[test]
-    fn chunks_in_order_back_to_back_then_the_second_lap_loops() {
+    fn computes_in_the_background_while_off() {
+        let mut m = Music::new();
+        let mut t = 0.0;
+        let out = session(&mut m, &mut t, 1.0, false, None);
+        assert!(m.looping(), "the loop is computed with the music off");
+        assert!(chunks(&out).is_empty(), "and nothing plays");
+        // turned on: the loop plays at once, from its start
+        let mut out = vec![];
+        m.set_on(true, t, RATE, &mut out);
+        assert!(out.iter().any(|c| matches!(c, Cmd::Loop { offset: 0, .. })));
+        assert!(m.want(t, RATE, PERIOD, &mut out).is_none());
+    }
+
+    #[test]
+    fn requests_are_half_seconds_numbered_in_order() {
         let mut m = Music::new();
         let mut out = vec![];
-        m.set_on(true, 0.0, RATE, &mut out);
+        let a = m.want(0.0, RATE, PERIOD, &mut out).unwrap();
+        assert_eq!((a.chunk, a.frames), (0, RATE / 2));
+        // (unanswered: nothing more, until it is asked again)
+        assert!(m.want(0.1, RATE, PERIOD, &mut out).is_none());
+        let again = m.want(EXPIRE + 0.1, RATE, PERIOD, &mut out).unwrap();
+        assert_eq!(again, a);
+        m.take(a, &compute(a, 0), EXPIRE + 0.1, &mut out);
+        let b = m.want(EXPIRE + 0.2, RATE, PERIOD, &mut out).unwrap();
+        assert_eq!((b.chunk, b.t0), (1, 0.5));
+    }
+
+    #[test]
+    fn on_before_the_loop_is_done_plays_the_chunks_to_come_back_to_back_then_loops() {
+        let mut m = Music::new();
         let mut t = 0.0;
-        out.extend(session(&mut m, &mut t, 5.0, false));
+        // (on at once: before anything is computed)
+        let out = session(&mut m, &mut t, 6.0, false, Some(0.0));
         assert!(m.looping());
-        let chunks: Vec<(u64, Arc<[f32]>)> = out.iter().filter_map(|c| if let Cmd::Chunk { at, data } = c { Some((*at, data.clone())) } else { None }).collect();
-        // in order, from song frame 0, each where the last ended
-        let start = chunks[0].0;
+        let cs = chunks(&out);
+        let start = cs[0].0;
         let mut s = 0usize;
-        for (at, d) in &chunks {
+        for (at, d) in &cs {
             assert_eq!(*at, start + s as u64);
             assert_eq!(d[0], s as f32);
             s += d.len() / 2;
         }
         assert_eq!(s, 2 * LAP);
-        // the loop: the second lap, from where the song ends
         let (at, offset, data) = out.iter().find_map(|c| if let Cmd::Loop { at, offset, data } = c { Some((*at, *offset, data.clone())) } else { None }).unwrap();
         assert_eq!((at, offset), (start + 2 * LAP as u64, 0));
         assert_eq!(data.len() / 2, LAP);
@@ -287,35 +351,15 @@ mod tests {
     }
 
     #[test]
-    fn requests_number_their_chunks_and_never_run_ahead_of_the_last() {
-        let mut m = Music::new();
-        let mut out = vec![];
-        m.set_on(true, 0.0, RATE, &mut out);
-        let a = m.want(0.0, RATE, PERIOD, &mut out).unwrap();
-        assert_eq!((a.chunk, a.frames as usize), (0, FRAMES));
-        // (unanswered: nothing more, until it is asked again)
-        assert!(m.want(0.1, RATE, PERIOD, &mut out).is_none());
-        let again = m.want(EXPIRE + 0.1, RATE, PERIOD, &mut out).unwrap();
-        assert_eq!(again, a);
-        m.take(a, &compute(a, 0), EXPIRE + 0.1, &mut out);
-        let b = m.want(EXPIRE + 0.2, RATE, PERIOD, &mut out).unwrap();
-        assert_eq!(b.chunk, 1);
-    }
-
-    #[test]
     fn a_lost_answer_is_asked_again_and_the_song_carries_on() {
         let mut m = Music::new();
-        let mut out = vec![];
-        m.set_on(true, 0.0, RATE, &mut out);
         let mut t = 0.0;
-        out.extend(session(&mut m, &mut t, 10.0, true));
+        let out = session(&mut m, &mut t, 8.0, true, Some(0.0));
         assert!(m.looping());
         let mut s = 0usize;
-        for c in &out {
-            if let Cmd::Chunk { data, .. } = c {
-                assert_eq!(data[0], s as f32);
-                s += data.len() / 2;
-            }
+        for (_, d) in chunks(&out) {
+            assert_eq!(d[0], s as f32);
+            s += d.len() / 2;
         }
         assert_eq!(s, 2 * LAP);
     }
@@ -323,10 +367,9 @@ mod tests {
     #[test]
     fn a_new_build_starts_from_chunk_0() {
         let mut m = Music::new();
-        let mut out = vec![];
-        m.set_on(true, 0.0, RATE, &mut out);
         let mut t = 0.0;
-        session(&mut m, &mut t, 0.3, false);
+        session(&mut m, &mut t, 0.1, false, Some(0.0));
+        let mut out = vec![];
         m.reset(t, RATE, &mut out);
         assert!(matches!(out.last(), Some(Cmd::Clear)));
         let r = m.want(t, RATE, PERIOD, &mut out).unwrap();
@@ -337,16 +380,14 @@ mod tests {
     #[test]
     fn off_and_on_again_carries_on_the_loop() {
         let mut m = Music::new();
-        let mut out = vec![];
-        m.set_on(true, 0.0, RATE, &mut out);
         let mut t = 0.0;
-        session(&mut m, &mut t, 5.0, false);
+        session(&mut m, &mut t, 6.0, false, Some(0.0));
         assert!(m.looping());
+        let mut out = vec![];
         m.set_on(false, t, RATE, &mut out);
         m.tick(t + 1.0, RATE, &mut out);
         out.clear();
         m.set_on(true, t + 2.0, RATE, &mut out);
         assert!(out.iter().any(|c| matches!(c, Cmd::Loop { .. })));
-        assert!(m.want(t + 2.0, RATE, PERIOD, &mut out).is_none());
     }
 }

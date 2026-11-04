@@ -85,25 +85,27 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
         // so a few samples differ by up to ~0.1)
         let (rate, chunks) = (48000.0, 8);
         let mut state = vec![0.0; 2 * wizard_shader::soundboard::modes];
-        let (mut worst, mut sum, mut count) = (0f32, 0f64, 0usize);
+        let (mut worst, mut sum, mut count, mut gpu_ms) = (0f32, 0f64, 0usize, 0f64);
         for c in 0..chunks {
             let t0 = o.t0 + (c * n) as f32 / rate;
             let req = crate::types::MusicRequest { t0, rate, frames: n, chunk: c };
             if !frame.music(&device, &queue, &shader, &values, &ON_PATH, req, wizard_shader::music::period) {
                 return Err("the shader has no music entry points".into());
             }
+            let t = Instant::now();
             let data = loop {
                 let _ = device.poll(wgpu::PollType::wait_indefinitely());
                 if let Some((_, d)) = frame.music_ready() {
                     break d;
                 }
             };
+            gpu_ms += t.elapsed().as_secs_f64() * 1000.0;
             let cpu = wizard_shader::music::render_chunk(t0, rate, n as usize, &mut state);
             worst = data.iter().zip(&cpu).map(|(a, b)| (a - b).abs()).fold(worst, f32::max);
             sum += data.iter().map(|v| (v * v) as f64).sum::<f64>();
             count += data.len();
         }
-        println!("music: {chunks} chunks of {n} frames, rms {:.4}, max |GPU - CPU| {worst:.2e}", (sum / count as f64).sqrt());
+        println!("music: {chunks} chunks of {n} frames, {:.1} ms each (GPU and readback), rms {:.4}, max |GPU - CPU| {worst:.2e}", gpu_ms / chunks as f64, (sum / count as f64).sqrt());
         return Ok(());
     }
     if let Some(path) = &o.shot {
