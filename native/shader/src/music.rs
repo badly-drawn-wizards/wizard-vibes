@@ -94,7 +94,12 @@ pub fn bright_noise(rate: f32, t: f32) -> f32 {
 // Harpsichord
 
 // One string of one note, plucked at time 0 and let go at `held` (a quill
-// at fraction b of its length; slightly stiff; damped on release).
+// at fraction b of its length; slightly stiff; damped on release). As
+// measured on the Thomas Barton harpsichord of 1709 (St Cecilia's Hall,
+// Edinburgh; its sample library, CC BY 4.0): the partials fall off more
+// slowly than an ideal pluck's 1/k (the low ones are strong), each decays
+// at about 12 dB/s plus 4 dB/s per kHz of its frequency, and the strings'
+// inharmonicity is B ~ 1.5-4e-5.
 #[inline]
 pub fn harp_string(f: f32, b: f32, u: f32, held: f32) -> f32 {
     let released = (0.0f32).maximum(u - held);
@@ -102,28 +107,46 @@ pub fn harp_string(f: f32, b: f32, u: f32, held: f32) -> f32 {
     let mut k = 0;
     while k < 32 {
         let kf = (k + 1) as f32;
-        let fk = kf * f * (1.0 + 0.00005 * kf * kf).sqrt();
+        let fk = kf * f * (1.0 + 0.00003 * kf * kf).sqrt();
         if !(fk > 12000.0) {
-            let decay = (0.7 + 0.18 * kf + 0.003 * kf * kf) * u + (25.0 + 2.0 * kf) * released;
-            s = s + (PI * kf * b).sin() / kf * (-decay).exp() * (tau * fk * u).sin();
+            let decay = (1.38 + 0.00046 * fk) * u + (25.0 + 2.0 * kf) * released;
+            s = s + (PI * kf * b).sin() / kf.powf(0.8) * (-decay).exp() * (tau * fk * u).sin();
         }
         k += 1;
     }
     s
 }
 
-// One note: two choirs of strings plucked at different points, a hair apart
-// in tune, one more to each side; and the quill's click.
+// Where the quill plucks a string of frequency f, as a fraction of its
+// length: nearer the middle in the treble (as instruments are built: see
+// Välimäki et al., "Sound synthesis of the harpsichord using a
+// computationally efficient physical model", EURASIP JASP 2004). Here as
+// the Barton's spectra's notches have it: about 1/7 at A3, 1/4 by G4.
+#[inline]
+pub fn harp_pluck(f: f32) -> f32 {
+    0.14 + 0.11 * saturate((f / 207.0).log2() / (370.0f32 / 207.0).log2())
+}
+
+// One note: two registers' strings, plucked a little apart (the second
+// nearer the nut) and a hair apart in tune (as the Barton's are, by 0.6 to
+// 4 cents), one more to each side. The pluck is at once, then builds over
+// some 30 ms as the soundboard joins in; the quill scrapes the string for
+// some 20 ms (a twelfth of the onset's energy is noise), and clicks; the
+// damper thumps faintly on release.
 #[inline]
 pub fn harp_note(rate: f32, t: f32, f: f32, u: f32, held: f32) -> (f32, f32) {
     if u < 0.0 {
         return (0.0, 0.0);
     }
-    let attack = 1.0 - (-u * 4000.0).exp();
-    let a = attack * harp_string(f, 0.11, u, held);
-    let b = attack * harp_string(f * 1.0012, 0.19, u, held);
-    let click = 0.25 * (-u * 900.0).exp() * bright_noise(rate, t);
-    (0.6 * a + 0.4 * b + click, 0.4 * a + 0.6 * b + click)
+    let attack = (1.0 - (-u * 4000.0).exp()) * (1.0 - 0.8 * (-u * 60.0).exp());
+    let b = harp_pluck(f);
+    let a = attack * harp_string(f, b, u, held);
+    let c = attack * harp_string(f * 1.0012, 0.85 * b, u, held);
+    let scrape = 0.1 * (-u * 150.0).exp() * noise(rate, t) + 0.25 * (-u * 900.0).exp() * bright_noise(rate, t);
+    let released = u - held;
+    let thump = if released < 0.0 { 0.0 } else { 0.03 * (-released * 30.0).exp() * noise(rate, t) };
+    let n = scrape + thump;
+    (0.6 * a + 0.4 * c + n, 0.4 * a + 0.6 * c + n)
 }
 
 // Which chord tone sixteenth s (0..7) of a half bar plays: 0 1 2 3 2 1 2 3.
