@@ -631,15 +631,22 @@ pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32, f32) {
     (l, r, 0.5 * harp * (hl + hr), send)
 }
 
-// The songs: 0 this one (Wizard disco), 1 chip.rs's (Cracktro).
-pub const songs: i32 = 2;
+// The songs: 0 this one (Wizard disco), 1 chip.rs's (Cracktro), 2
+// stars.rs's (Starscape).
+pub const songs: i32 = 3;
 #[cfg(not(target_arch = "spirv"))]
-pub const song_names: [&str; 2] = ["Wizard disco", "Cracktro"];
+pub const song_names: [&str; 3] = ["Wizard disco", "Cracktro", "Starscape"];
 
 // A song's loop, in seconds.
 #[inline]
 pub fn song_period(song: i32) -> f32 {
-    if song == 1 { crate::chip::period } else { period }
+    if song == 1 {
+        crate::chip::period
+    } else if song == 2 {
+        crate::stars::period
+    } else {
+        period
+    }
 }
 
 // Wraps a time into song's loop.
@@ -655,6 +662,9 @@ pub fn song_wrap(song: i32, t: f32) -> f32 {
 pub fn song_parts(song: i32, rate: f32, t: f32) -> (f32, f32, f32, f32) {
     if song == 1 {
         let (l, r, s) = crate::chip::parts(rate, t);
+        (l, r, 0.0, s)
+    } else if song == 2 {
+        let (l, r, s) = crate::stars::parts(rate, t);
         (l, r, 0.0, s)
     } else {
         music_parts(rate, t)

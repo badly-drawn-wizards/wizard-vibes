@@ -10,7 +10,7 @@
 // (SONG=1 in the environment: the mix of song 1)
 //        cargo run --release --example harp -- part NAME S [T0] > part.f32
 // (`part`: one voice alone, mono: kick, clap, hats, bass, keys, strings,
-// tune; of the cracktro: chip-arp, chip-bass, chip-drums, chip-tune)
+// tune; of the cracktro: chip-arp, chip-bass, chip-drums, chip-tune; Starscape's: stars-celesta, stars-harp, stars-strings, stars-choir, and its dry mix: stars)
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -54,6 +54,14 @@ fn main() {
                 "chip-bass" => wizard_shader::chip::bass(rate, t),
                 "chip-drums" => wizard_shader::chip::drums(rate, t),
                 "chip-tune" => mono(wizard_shader::chip::tune(rate, t)),
+                "stars-celesta" => wizard_shader::stars::celesta(t),
+                "stars-harp" => wizard_shader::stars::harp(t),
+                "stars-strings" => mono(wizard_shader::stars::strings(t)),
+                "stars-choir" => mono(wizard_shader::stars::choir(t)),
+                "stars" => {
+                    let (l, r, _) = wizard_shader::stars::parts(rate, t);
+                    0.5 * (l + r)
+                }
                 _ => panic!("no part {name}"),
             };
             out.extend_from_slice(&v.to_le_bytes());

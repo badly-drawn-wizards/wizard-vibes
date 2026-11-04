@@ -41,6 +41,7 @@ pub mod sfx;
 pub mod shading;
 pub mod soundboard;
 pub mod spells;
+pub mod stars;
 pub mod textures;
 pub mod vec;
 pub mod wizard;
