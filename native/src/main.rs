@@ -4,7 +4,8 @@
 // parameters; the frame rate and GPU time per frame in the title (and on
 // stdout every second). To compare with the browser's.
 //
-// usage: wizard-native [--build DIR] [--vsync] [--scale S]
+// usage: wizard-native [--build DIR [--unchecked] | --rust-gpu | --spirv FILE] [--vsync] [--scale S]
+//        [--set PARAM=VALUE ...]   (a scalar parameter, e.g. --set view=2)
 //        wizard-native --bench [FRAMES] [--size WxH] [--t0 T]
 //        wizard-native --shot FILE.ppm [--size WxH] [--t0 T]
 // (run from the repository, or set WIZARD_ROOT; see native/README.md)
@@ -12,7 +13,7 @@
 mod gpu;
 mod scene;
 
-use gpu::Renderer;
+use gpu::{Renderer, Shader};
 use scene::{Camera, Scene, BENCH_CAMERA, PAGE_CAMERA};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,10 +32,13 @@ struct Args {
     t0: f32,
     vsync: bool,
     scale: f32,
+    spirv: Option<PathBuf>,
+    unchecked: bool,
+    sets: Vec<(String, f64)>,
 }
 
 fn args() -> Args {
-    let mut a = Args { build: None, bench: None, shot: None, size: (1920, 1080), t0: 0.0, vsync: false, scale: 1.0 };
+    let mut a = Args { build: None, bench: None, shot: None, size: (1920, 1080), t0: 0.0, vsync: false, scale: 1.0, spirv: None, unchecked: false, sets: vec![] };
     let mut it = std::env::args().skip(1).peekable();
     while let Some(arg) = it.next() {
         let mut value = || it.next().unwrap_or_else(|| die(&format!("{arg} needs a value")));
@@ -49,6 +53,14 @@ fn args() -> Args {
                 a.size = (w.parse().unwrap_or_else(|_| die("--size: WxH")), h.parse().unwrap_or_else(|_| die("--size: WxH")));
             }
             "--vsync" => a.vsync = true,
+            "--unchecked" => a.unchecked = true,
+            "--set" => {
+                let v = value();
+                let (k, x) = v.split_once('=').unwrap_or_else(|| die("--set: key=value"));
+                a.sets.push((k.to_string(), x.parse().unwrap_or_else(|_| die("--set: a number"))));
+            }
+            "--spirv" => a.spirv = Some(value().into()),
+            "--rust-gpu" => a.spirv = Some("native/shader.spv".into()),
             "--bench" => {
                 a.bench = Some(match it.peek() {
                     Some(n) if n.parse::<u32>().is_ok() => it.next().unwrap().parse().unwrap(),
@@ -85,13 +97,24 @@ fn root() -> PathBuf {
 fn main() {
     let a = args();
     let root = root();
-    let scene = Scene::load(&root, a.build.clone()).unwrap_or_else(|e| die(&e));
-    eprintln!("build: {}", scene.build.display());
+    let scene = Scene::load(&root, a.build.clone(), &a.sets).unwrap_or_else(|e| die(&e));
+    let shader = match &a.spirv {
+        None => {
+            eprintln!("build: {}", scene.build.display());
+            Shader::Wgsl { unchecked: a.unchecked }
+        }
+        Some(p) => {
+            let p = if p.is_relative() { root.join(p) } else { p.clone() };
+            let bytes = std::fs::read(&p).unwrap_or_else(|e| die(&format!("{}: {e} (build it with native/shader-builder)", p.display())));
+            eprintln!("shader: {}", p.display());
+            Shader::Spirv(bytemuck::pod_collect_to_vec(&bytes))
+        }
+    };
     if a.bench.is_some() || a.shot.is_some() {
-        headless(&a, &scene);
+        headless(&a, &scene, &shader);
     } else {
         let event_loop = EventLoop::new().unwrap_or_else(|e| die(&format!("no event loop: {e}")));
-        let mut app = App { scene, vsync: a.vsync, scale: a.scale, state: None };
+        let mut app = App { scene, shader, vsync: a.vsync, scale: a.scale, state: None };
         event_loop.run_app(&mut app).unwrap();
     }
 }
@@ -100,9 +123,9 @@ fn main() {
 // a warm-up frame, then FRAMES frames at t0 + f / 30 with nothing
 // presented, reporting the mean time per frame and GPU time per frame.
 // --shot: one frame at t0, written as a PPM.
-fn headless(a: &Args, scene: &Scene) {
+fn headless(a: &Args, scene: &Scene, shader: &Shader) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let mut r = pollster::block_on(Renderer::new(&instance, None, scene)).unwrap_or_else(|e| die(&e));
+    let mut r = pollster::block_on(Renderer::new(&instance, None, scene, shader)).unwrap_or_else(|e| die(&e));
     let (vw, h) = a.size;
     if let Some(path) = &a.shot {
         r.frame(scene, vw, h, a.t0, PAGE_CAMERA, None, false);
@@ -137,6 +160,7 @@ fn headless(a: &Args, scene: &Scene) {
 
 struct App {
     scene: Scene,
+    shader: Shader,
     vsync: bool,
     scale: f32,
     state: Option<State>,
@@ -167,7 +191,7 @@ impl ApplicationHandler for App {
         );
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(window.clone())));
         let surface = instance.create_surface(window.clone()).unwrap_or_else(|e| die(&format!("no surface: {e}")));
-        let renderer = pollster::block_on(Renderer::new(&instance, Some(&surface), &self.scene)).unwrap_or_else(|e| die(&e));
+        let renderer = pollster::block_on(Renderer::new(&instance, Some(&surface), &self.scene, &self.shader)).unwrap_or_else(|e| die(&e));
         let caps = surface.get_capabilities(&renderer.adapter);
         if !caps.formats.contains(&wgpu::TextureFormat::Bgra8Unorm) || !caps.usages.contains(wgpu::TextureUsages::COPY_DST) {
             die(&format!("the surface takes no copies into bgra8unorm (formats {:?}, usages {:?})", caps.formats, caps.usages));

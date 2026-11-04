@@ -6,12 +6,23 @@
 // adapter has them.
 
 use crate::scene::{Camera, Scene};
+use std::borrow::Cow;
+
+// The shader: the build's WGSL (dev/native.ts), or the rust-gpu port's
+// SPIR-V (native/shader), passed straight to the driver.
+pub enum Shader {
+    // (unchecked: without the bounds checks wgpu otherwise adds, as
+    // passthrough SPIR-V has none)
+    Wgsl { unchecked: bool },
+    Spirv(Vec<u32>),
+}
 
 pub struct Renderer {
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
+    bind_layout: wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
     workgroup: u32,
     target: Option<Target>,
@@ -39,7 +50,7 @@ pub fn padded(vw: u32) -> u32 {
 }
 
 impl Renderer {
-    pub async fn new(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'_>>, scene: &Scene) -> Result<Renderer, String> {
+    pub async fn new(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'_>>, scene: &Scene, shader: &Shader) -> Result<Renderer, String> {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -50,7 +61,13 @@ impl Renderer {
             .map_err(|e| format!("no adapter: {e}"))?;
         let info = adapter.get_info();
         eprintln!("adapter: {} ({:?}, {})", info.name, info.backend, info.driver_info);
-        let features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        let mut features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        if let Shader::Spirv(_) = shader {
+            if !adapter.features().contains(wgpu::Features::PASSTHROUGH_SHADERS) {
+                return Err("the adapter takes no SPIR-V passthrough shaders".into());
+            }
+            features |= wgpu::Features::PASSTHROUGH_SHADERS;
+        }
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("wizard"),
@@ -63,13 +80,35 @@ impl Renderer {
             .map_err(|e| format!("no device: {e}"))?;
 
         let t = std::time::Instant::now();
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("wizard.native.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(scene.wgsl.as_str().into()),
+        let module = match shader {
+            Shader::Wgsl { unchecked } => {
+                let desc = wgpu::ShaderModuleDescriptor { label: Some("wizard.native.wgsl"), source: wgpu::ShaderSource::Wgsl(scene.wgsl.as_str().into()) };
+                if *unchecked {
+                    unsafe { device.create_shader_module_trusted(desc, wgpu::ShaderRuntimeChecks::unchecked()) }
+                } else {
+                    device.create_shader_module(desc)
+                }
+            }
+            // (unchecked: the port is trusted as the driver is)
+            Shader::Spirv(words) => unsafe {
+                device.create_shader_module_passthrough(wgpu::ShaderModuleDescriptorPassthrough {
+                    label: Some("shader.spv"),
+                    entry_points: Cow::Owned(vec![wgpu::PassthroughShaderEntryPoint { name: "native_main".into(), workgroup_size: (scene.workgroup, 1, 1) }]),
+                    spirv: Some(Cow::Borrowed(words)),
+                    ..Default::default()
+                })
+            },
+        };
+        // (explicit, as a passthrough shader is not reflected)
+        let storage = |binding, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None }, count: None };
+        let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("render"),
+            entries: &[storage(0, wgpu::BufferBindingType::Uniform), storage(1, wgpu::BufferBindingType::Storage { read_only: false })],
         });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render"), bind_group_layouts: &[Some(&bind_layout)], immediate_size: 0 });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("render"),
-            layout: None,
+            layout: Some(&layout),
             module: &module,
             entry_point: Some("native_main"),
             compilation_options: Default::default(),
@@ -98,7 +137,7 @@ impl Renderer {
             }),
             period: queue.get_timestamp_period(),
         });
-        Ok(Renderer { adapter, device, queue, pipeline, uniforms, workgroup: scene.workgroup, target: None, timer })
+        Ok(Renderer { adapter, device, queue, pipeline, bind_layout, uniforms, workgroup: scene.workgroup, target: None, timer })
     }
 
     pub fn timed(&self) -> bool {
@@ -116,7 +155,7 @@ impl Renderer {
             });
             let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("render"),
-                layout: &self.pipeline.get_bind_group_layout(0),
+                layout: &self.bind_layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: self.uniforms.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 1, resource: pixels.as_entire_binding() },

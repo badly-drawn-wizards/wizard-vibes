@@ -1,0 +1,17 @@
+[package]
+name = "wizard-shader"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "The wizard scene's per-pixel code, ported from Futhark to rust-gpu"
+
+[lib]
+crate-type = ["lib", "dylib"]
+
+[dependencies]
+spirv-std = "0.11"
+
+[workspace]
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(target_arch, values("spirv"))'] }

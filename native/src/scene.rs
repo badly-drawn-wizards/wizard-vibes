@@ -21,7 +21,7 @@ struct Field {
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum From {
     Param { id: String, index: Option<usize> },
-    Drive {},
+    Drive { id: String },
     Arg { id: String },
 }
 
@@ -57,9 +57,10 @@ const OVERRIDES: &[(&str, f64)] = &[("enemies", 0.0)];
 
 impl Scene {
     // The build in `dir`, or the most recently made one under build/fut.
-    pub fn load(root: &Path, dir: Option<PathBuf>) -> Result<Scene, String> {
+    pub fn load(root: &Path, dir: Option<PathBuf>, sets: &[(String, f64)]) -> Result<Scene, String> {
         let build = match dir {
-            Some(d) => d,
+            // (absolute: dev/native.ts runs from the repository)
+            Some(d) => std::fs::canonicalize(&d).map_err(|e| format!("{}: {e}", d.display()))?,
             None => newest_build(&root.join("build/fut"))?,
         };
         let json = build.join("wizard.native.json");
@@ -84,6 +85,12 @@ impl Scene {
         for (id, v) in OVERRIDES {
             params.insert(id.to_string(), Value::from(*v));
         }
+        for (id, v) in sets {
+            if !params.contains_key(id) {
+                return Err(format!("--set: no parameter {id}"));
+            }
+            params.insert(id.clone(), Value::from(*v));
+        }
         Ok(Scene { wgsl, workgroup: layout.workgroup, build, fields: layout.fields, params })
     }
 
@@ -106,8 +113,7 @@ impl Scene {
                         (_, v) => v.as_f64().unwrap(),
                     }
                 }
-                // on the flight path: everything zero, `free` unset
-                From::Drive { .. } => 0.0,
+                From::Drive { id } => on_path(id),
                 From::Arg { id } => match id.as_str() {
                     "w" => w as f64,
                     "vw" => vw as f64,
@@ -126,6 +132,18 @@ impl Scene {
             out[4 * i..4 * i + 4].copy_from_slice(&bytes);
         }
         out
+    }
+}
+
+// The drive record on the flight path (fut/rig.fut's on_path, and the
+// page's ON_PATH in web/flight.ts).
+fn on_path(id: &str) -> f64 {
+    match id {
+        "sz" => 1.0,
+        "flash" | "shield_hit" => 10.0,
+        "spell" => 1.0,
+        "arena_y" | "arena_z" => 12.0,
+        _ => 0.0, // (free: false)
     }
 }
 

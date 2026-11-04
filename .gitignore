@@ -9,3 +9,7 @@ config.local.json
 fut/render.fut
 fut/reference.fut
 /native/target/
+/native/shader/src/generated.rs
+/native/shader/target/
+/native/shader-builder/target/
+/native/shader.spv
