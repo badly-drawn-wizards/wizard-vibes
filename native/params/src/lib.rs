@@ -1,7 +1,7 @@
 // params.json: every tweakable parameter, and how the drawer lays it out.
 // From it come the shader crate's `generated` module (the compile-time
 // parameters and layer flags as constants, the uniforms as records and as
-// the flat block the app fills: wizard-params-macro's params!() writes it
+// the flat block the app fills: wizard-shader-macros' params!() writes it
 // as the crate compiles), and the block's layout for the app (shader.json,
 // which shader-builder writes), so the app fills it whatever the build's
 // parameters.

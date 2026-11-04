@@ -200,18 +200,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "wizard-params-macro"
-version = "0.1.0"
-dependencies = [
- "wizard-params",
-]
-
-[[package]]
 name = "wizard-shader"
 version = "0.1.0"
 dependencies = [
  "spirv-std",
- "wizard-params-macro",
+ "wizard-shader-macros",
+]
+
+[[package]]
+name = "wizard-shader-macros"
+version = "0.1.0"
+dependencies = [
+ "wizard-params",
 ]
 
 [[package]]

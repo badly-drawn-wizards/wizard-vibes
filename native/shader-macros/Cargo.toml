@@ -1,9 +1,9 @@
 [package]
-name = "wizard-params-macro"
+name = "wizard-shader-macros"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "params!(): the shader crate's parameters, from params.json at compile time"
+description = "The shader crate's macros: params!() (its parameters, from params.json) and melody!() (tunes, packed)"
 
 [lib]
 proc-macro = true

@@ -66,7 +66,7 @@ which `.github/workflows/pages.yml` publishes.
 |---|---|
 | `native/shader` | the scene, music, sound effects and collisions (rust-gpu; ported from the Futhark in `fut/`: see `native/shader/PORTING.md`) |
 | `native/shader-builder` | builds it: SPIR-V, naga's WGSL of it, and the uniform layout |
-| `native/params`, `native/params-macro` | `params.json` as the shader's Rust (read at compile time by `params!()`) and as the uniform layout |
+| `native/params`, `native/shader-macros` | `params.json` as the shader's Rust (read at compile time by `params!()`) and as the uniform layout; `melody!()`, tunes written out and packed |
 | `client` | the app: renderer, egui UI, the game, audio (cpal), native and wasm |
 | `devserver` | rebuilds and serves, and tells the app over server-sent events |
 | `params.json` | every parameter, its range and its group in the drawer |

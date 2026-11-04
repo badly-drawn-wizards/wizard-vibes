@@ -223,30 +223,14 @@ pub fn drums(rate: f32, t: f32) -> f32 {
 // ---------------------------------------------------------------------
 // The tune
 
-// Eight bars of eighths, coded as the disco's (music.rs's melody_code):
-// 0 a rest, 15 hold the note before, else a degree of A minor (1 = A4).
-#[inline]
-fn melody_code(i: i32) -> i32 {
-    let b = imod(idiv(i, 8), 8);
-    let w: u32 = if b == 0 {
-        0x457f8ff5
-    } else if b == 1 {
-        0xf431fff3
-    } else if b == 2 {
-        0xf35f7ff5
-    } else if b == 3 {
-        0x42fffff4
-    } else if b == 4 {
-        0xfa9f8ff5
-    } else if b == 5 {
-        0xf8fafff8
-    } else if b == 6 {
-        0xf3ff5ff7
-    } else {
-        0x0fff2ff4
-    };
-    ((w >> ((4 * imod(i, 8)) as u32)) & 15) as i32
-}
+// Eight bars of eighths, each a degree of A minor (1 = A4), - holding the
+// note before, . a rest.
+wizard_shader_macros::melody!(
+    melody_code,
+    8,
+    "5 - - 8 - 7 5 4 | 3 - - - 1 3 4 - | 5 - - 7 - 5 3 - | 4 - - - - - 2 4 |
+     5 - - 8 - 9 10 - | 8 - - - 10 - 8 - | 7 - - 5 - - 3 - | 4 - - 2 - - - ."
+);
 
 #[inline]
 fn degree_midi(d: i32) -> f32 {

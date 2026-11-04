@@ -10,7 +10,7 @@ crate-type = ["lib", "dylib"]
 
 [dependencies]
 spirv-std = "0.11"
-wizard-params-macro = { path = "../params-macro" }
+wizard-shader-macros = { path = "../shader-macros" }
 
 [workspace]
 

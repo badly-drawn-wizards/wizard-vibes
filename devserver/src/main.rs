@@ -206,7 +206,7 @@ fn jobs_for(root: &Path, p: &Path) -> Vec<Job> {
         return vec![];
     }
     // (the parameters too: the shader crate's params!() reads them)
-    if s.starts_with("native/shader/src/") || s == "native/shader/Cargo.toml" || s.starts_with("native/params") || s == "params.json" || s == "config.local.json" {
+    if s.starts_with("native/shader/src/") || s == "native/shader/Cargo.toml" || s.starts_with("native/params") || s.starts_with("native/shader-macros") || s == "params.json" || s == "config.local.json" {
         return vec![Job::Shader, Job::Web];
     }
     if s.starts_with("native/shader-builder/src/") {
@@ -339,7 +339,7 @@ async fn main() {
         }
     })
     .expect("no file watcher");
-    for (dir, mode) in [("native/shader", RecursiveMode::Recursive), ("native/shader-builder/src", RecursiveMode::Recursive), ("native/params/src", RecursiveMode::Recursive), ("native/params-macro/src", RecursiveMode::Recursive), ("client", RecursiveMode::Recursive), (".", RecursiveMode::NonRecursive), ("build", RecursiveMode::NonRecursive)] {
+    for (dir, mode) in [("native/shader", RecursiveMode::Recursive), ("native/shader-builder/src", RecursiveMode::Recursive), ("native/params/src", RecursiveMode::Recursive), ("native/shader-macros/src", RecursiveMode::Recursive), ("client", RecursiveMode::Recursive), (".", RecursiveMode::NonRecursive), ("build", RecursiveMode::NonRecursive)] {
         std::fs::create_dir_all(root.join(dir)).ok();
         watcher.watch(&root.join(dir), mode).unwrap_or_else(|e| panic!("watching {dir}: {e}"));
     }

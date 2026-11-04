@@ -440,32 +440,14 @@ pub fn keys(t: f32) -> (f32, f32) {
 // ---------------------------------------------------------------------
 // The tune
 
-// The melody: eight bars of eighth notes, each a code: 0 a rest, 15 hold
-// the note before, otherwise a degree of the scale (1 = D4 .. 12 = A5;
-// 13 = C#5). Each bar's eight codes are packed as hex digits (the first
-// eighth in the lowest).
-#[inline]
-pub fn melody_code(i: i32) -> i32 {
-    let b = imod(idiv(i, 8), 8);
-    let w: u32 = if b == 0 {
-        0x789af8f5
-    } else if b == 1 {
-        0xa980fff5
-    } else if b == 2 {
-        0xf6f89afb
-    } else if b == 3 {
-        0x6540fff8
-    } else if b == 4 {
-        0xf89abafa
-    } else if b == 5 {
-        0x00ff87f8
-    } else if b == 6 {
-        0x9df5fdf9
-    } else {
-        0xd9abfffc
-    };
-    ((w >> ((4 * imod(i, 8)) as u32)) & 15) as i32
-}
+// The melody: eight bars of eighth notes, each a degree of the scale (1 =
+// D4 .. 12 = A5; 13 = C#5), - holding the note before, . a rest.
+wizard_shader_macros::melody!(
+    melody_code,
+    8,
+    "5 - 8 - 10 9 8 7 | 5 - - - . 8 9 10 | 11 - 10 9 8 - 6 - | 8 - - - . 4 5 6 |
+     10 - 10 11 10 9 8 - | 8 - 7 8 - - . . | 9 - 13 - 5 - 13 9 | 12 - - - 11 10 9 13"
+);
 
 #[inline]
 pub fn degree_midi(d: i32) -> f32 {

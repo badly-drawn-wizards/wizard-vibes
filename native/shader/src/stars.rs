@@ -287,49 +287,25 @@ pub fn choir(t: f32) -> (f32, f32) {
 // ---------------------------------------------------------------------
 // The tune
 
-// Eight bars of six eighths, coded as the disco's: 0 a rest, 15 hold the
-// note before, else a degree of D major (1 = D5 .. 10 = F#6), 13 = G#5 (the
-// Lydian's sharp fourth, over E). `counter` is the line under it in
-// section 3 (an octave down, long notes).
+// Eight bars of six eighths, each a degree of D major (1 = D5 .. 10 =
+// F#6; 13 = G#5, the Lydian's sharp fourth, over E), - holding the note
+// before, . a rest; and the line under it in section 3 (played an octave
+// down, long notes).
+wizard_shader_macros::melody!(
+    tune_code,
+    6,
+    "5 - - 3 - 2 | 3 - - 13 - 6 | 5 - - - 3 2 | 1 - - - - . |
+     2 - 3 - 4 - | 5 - - 6 - 7 | 8 - - 6 - 5 | 5 - - - - ."
+);
+wizard_shader_macros::melody!(
+    counter_code,
+    6,
+    "3 - - - - - | 2 - - - - - | 1 - - - - - | 2 - - - - - |
+     4 - - 3 - - | 2 - - - - - | 3 - - 2 - - | 1 - - - - -"
+);
 #[inline]
 fn melody_code(i: i32, counter: bool) -> i32 {
-    let b = imod(idiv(i, 6), 8);
-    let w: u32 = if counter {
-        if b == 0 {
-            0xfffff3
-        } else if b == 1 {
-            0xfffff2
-        } else if b == 2 {
-            0xfffff1
-        } else if b == 3 {
-            0xfffff2
-        } else if b == 4 {
-            0xff3ff4
-        } else if b == 5 {
-            0xfffff2
-        } else if b == 6 {
-            0xff2ff3
-        } else {
-            0xfffff1
-        }
-    } else if b == 0 {
-        0x2f3ff5
-    } else if b == 1 {
-        0x6fdff3
-    } else if b == 2 {
-        0x23fff5
-    } else if b == 3 {
-        0x0ffff1
-    } else if b == 4 {
-        0xf4f3f2
-    } else if b == 5 {
-        0x7f6ff5
-    } else if b == 6 {
-        0x5f6ff8
-    } else {
-        0x0ffff5
-    };
-    ((w >> ((4 * imod(i, 6)) as u32)) & 15) as i32
+    if counter { counter_code(i) } else { tune_code(i) }
 }
 
 #[inline]

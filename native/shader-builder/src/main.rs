@@ -2,7 +2,7 @@
 //
 // 1. with the compile-time values in force (config.local.json's, or a
 //    quality preset's: WIZARD_DEFAULTS and WIZARD_PRESET, for the crate's
-//    params!(), which reads params.json; see wizard-params-macro);
+//    params!(), which reads params.json; see wizard-shader-macros);
 // 2. compiles it to SPIR-V with rust-gpu (all its entry points in one
 //    module), which the native app runs as it is;
 // 3. fixes that up for naga (see fixup.rs) and has naga turn it into WGSL,
