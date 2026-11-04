@@ -220,11 +220,10 @@ pub fn bass_step(s: i32) -> (bool, f32, f32) {
 }
 
 // The bass: the chord's root (and its octave and fifth) in the figure
-// above, from the octave of D3 (over the kick, which has 60-120 Hz); a band-limited sawtooth through a resonant filter that snaps shut
+// above, from the octave of D2, with a sine an octave under it; a band-limited sawtooth through a resonant filter that snaps shut
 // (bright for its first 20 ms, round by 60 ms, as WIZARD DISCO's
-// plucked bass measures), a soft clipper, over a little sine on its
-// fundamental (its weight in 60-250 Hz, its second harmonic strongest; as
-// loud as the drums); pumped by the kick.
+// plucked bass measures), a soft clipper; as loud as the drums; pumped by
+// the kick.
 #[inline]
 pub fn bass(t: f32) -> f32 {
     // (the note sounding: the latest to start, up to three sixteenths back)
@@ -242,7 +241,7 @@ pub fn bass(t: f32) -> f32 {
     let u = t - start as f32 * sixteenth;
     let held = len * sixteenth - 0.02;
     let root = chord_tone(chord_at(start as f32 * sixteenth), 0);
-    let f = freq(root + semis);
+    let f = freq(root - 12.0 + semis);
     let env = (1.0 - (-u * 400.0).exp()) * (-u * 2.5).exp() * smoothstep(held + 0.015, held, u);
     // (the filter: harmonic k damped by how far it is above the cutoff,
     // which falls from 8 to 2 times the note's frequency, with a peak there)
@@ -258,8 +257,8 @@ pub fn bass(t: f32) -> f32 {
     }
     let drive = 1.5f32;
     let crunch = (drive * saw).tanh() / drive.tanh();
-    let fundamental = (tau * f * u).sin();
-    duck(t, 0.5) * env * (0.36 * crunch + 0.05 * fundamental)
+    let sub = (tau * f * 0.5 * u).sin();
+    duck(t, 0.5) * env * (0.3 * crunch + 0.14 * sub)
 }
 
 // The kick on every beat, as WIZARD DISCO's (Louie Zong's) measures: a
