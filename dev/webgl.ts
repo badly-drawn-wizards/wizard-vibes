@@ -71,7 +71,14 @@ function paramFields(ps: Param[]): GlField[] {
   return fields;
 }
 
-export function glShader(buildDir: string): void {
+// The program's WGSL (portable, without f16) and the per-pixel GPU
+// functions' calls: an entry point added to it passes them the uniforms
+// from a block `u` with members `fields` (each a 4-byte f32 or i32, at 4 *
+// i), and image point (x, y) as f32s named `x` and `y`. `shade` leaves the
+// colour in r, g, b (and the distance seen in `seen`), `finish` the final
+// colour in fr, fg, fb; all are declared by the caller. Shared with the
+// native client's shader (dev/native.ts).
+export function pixelProgram(buildDir: string): { wgsl: string; fields: GlField[]; shade: string; finish: string } {
   const schema = loadSchema();
   const uniforms = allParams(schema).filter((p) => !p.compile);
   const bools = new Set(uniforms.filter((p) => p.kind === "checkbox").map((p) => `p_${p.id}`));
@@ -90,6 +97,7 @@ export function glShader(buildDir: string): void {
 
   // the arguments, in the order the functions take them (checked against
   // their actual parameters, so a change to either shows up here)
+  // (the target is camera_ray's default_target, (0, 1.15, 0))
   const pnames = pfields.map((f) => f.from.id); // (a colour's three components all carry its name)
   const value = (f: GlField) => (bools.has(f.name) || (f.from.kind === "drive" && DRIVE_BOOL.has(f.from.id)) ? `(u.${f.name} != 0)` : `u.${f.name}`);
   const shadeArgs = [...pfields.map(value), ...dfields.map(value), "0.0", "1.15", "0.0", "u.a_vw", "u.a_h", "u.a_tm", "u.a_yaw", "u.a_pitch", "u.a_dst", "x", "y", "&r", "&g", "&b", "&seen"];
@@ -98,11 +106,14 @@ export function glShader(buildDir: string): void {
   const finishWant = [...pnames, "vw", "h", "x", "y", "x", "y", "z", "@out", "@out", "@out"];
   for (const [fn, want] of [[shade, shadeWant], [finish, finishWant]] as const) {
     if (fn.params.join(",") !== want.join(",")) {
-      throw new Error(`${fn.name} takes (${fn.params.join(", ")})\nbut the fragment shader would pass (${want.join(", ")})`);
+      throw new Error(`${fn.name} takes (${fn.params.join(", ")})\nbut the entry point would pass (${want.join(", ")})`);
     }
   }
+  return { wgsl, fields, shade: `${shade.name}(${shadeArgs.join(", ")});`, finish: `${finish.name}(${finishArgs.join(", ")});` };
+}
 
-  // (the target is camera_ray's default_target, (0, 1.15, 0))
+export function glShader(buildDir: string): void {
+  const { wgsl, fields, shade, finish } = pixelProgram(buildDir);
   const entry = `
 struct GlUniforms {
 ${fields.map((f) => `  ${f.name}: ${f.type},`).join("\n")}
@@ -115,9 +126,9 @@ fn gl_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   let x = pos.x;
   let y = f32(u.a_h) - pos.y;
   var r: f32; var g: f32; var b: f32; var seen: f32;
-  ${shade.name}(${shadeArgs.join(", ")});
+  ${shade}
   var fr: f32; var fg: f32; var fb: f32;
-  ${finish.name}(${finishArgs.join(", ")});
+  ${finish}
   return vec4<f32>(fr, fg, fb, 1.0);
 }
 `;

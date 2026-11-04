@@ -22,7 +22,16 @@
       };
     in {
       packages = forAll (system: pkgs: { naga-cli = naga-cli pkgs; });
-      devShells = forAll (system: pkgs: {
+      devShells = forAll (system: pkgs: let
+        # what the native client (native/) loads at run time: Vulkan and the
+        # window system's libraries
+        nativeLibs = with pkgs; [ vulkan-loader wayland libxkbcommon libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr ];
+      in {
+        # The native client: wgpu on Vulkan, in Rust (see native/README.md).
+        native = pkgs.mkShell {
+          packages = [ pkgs.cargo pkgs.rustc pkgs.pkg-config pkgs.nodejs_24 ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath nativeLibs;
+        };
         default = pkgs.mkShell {
           packages = [
             futhark.packages.${system}.futhark

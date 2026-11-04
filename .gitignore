@@ -8,3 +8,4 @@ fut/config.fut
 config.local.json
 fut/render.fut
 fut/reference.fut
+/native/target/

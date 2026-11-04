@@ -1,0 +1,17 @@
+[package]
+name = "wizard-native"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Native wgpu client for the Futhark ray-marched wizard"
+
+[dependencies]
+wgpu = "30"
+winit = "0.30"
+pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytemuck = "1"
+
+[profile.release]
+debug = false
