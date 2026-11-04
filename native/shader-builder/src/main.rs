@@ -1,32 +1,131 @@
-// Builds the shader crate (native/shader) to SPIR-V with rust-gpu, and
-// copies the module to native/shader.spv for the client (--rust-gpu).
-// First regenerates its parameters (generated.rs) from params.json.
-// Needs rust-gpu's nightly: run in `nix develop .#gpu`.
+// Builds the shader crate (native/shader) for the app:
 //
-// usage: cargo run --release [-- OUT.spv]
+// 1. regenerates its parameters (src/generated.rs) from params.json, with
+//    the compile-time values in force (config.local.json's, or a quality
+//    preset's);
+// 2. compiles it to SPIR-V with rust-gpu (all its entry points in one
+//    module), which the native app runs as it is;
+// 3. fixes that up for naga (see fixup.rs) and has naga turn it into WGSL,
+//    which the browser runs (and which checks it).
+//
+// Writes into OUT (default build/shader): shader.spv, shader.wgsl and
+// shader.json (the uniform block's fields, for the app to fill; the
+// workgroup size), each written to a temporary name and renamed into place,
+// shader.json last (so whoever watches it sees a whole build). Also copies
+// the SPIR-V to native/shader.spv for the old client's --rust-gpu.
+// Needs rust-gpu's nightly: run in `nix develop .#app` (or .#gpu).
+//
+// usage: cargo run --release -- [--out DIR] [--preset low|med|high] [--defaults]
 
+mod fixup;
+mod params;
+
+use serde_json::{Map, Value, json};
 use spirv_builder::{SpirvBuilder, SpirvMetadata};
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+
+const WORKGROUP: u32 = 256;
+
+fn die(msg: &str) -> ! {
+    eprintln!("shader-builder: {msg}");
+    std::process::exit(1)
+}
+
+fn write_if_changed(path: &Path, text: &str) {
+    if std::fs::read_to_string(path).ok().as_deref() != Some(text) {
+        std::fs::write(path, text).unwrap_or_else(|e| die(&format!("{}: {e}", path.display())));
+    }
+}
+
+// Writes via a temporary file, so a reader never sees half of it.
+fn write_atomic(path: &Path, data: &[u8]) {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, data).and_then(|_| std::fs::rename(&tmp, path)).unwrap_or_else(|e| die(&format!("{}: {e}", path.display())));
+}
 
 fn main() {
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ok = Command::new("node").args(["dev/native.ts", "--rust"]).current_dir(here.join("../..")).status().map(|s| s.success()).unwrap_or(false);
-    if !ok {
-        eprintln!("node dev/native.ts --rust failed");
-        std::process::exit(1);
+    let root = here.join("../..").canonicalize().unwrap();
+    let mut out = root.join("build/shader");
+    let mut preset: Option<String> = None;
+    let mut local = true;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--out" => out = PathBuf::from(args.next().unwrap_or_else(|| die("--out DIR"))),
+            "--preset" => preset = Some(args.next().unwrap_or_else(|| die("--preset LEVEL"))),
+            "--defaults" => local = false,
+            _ => die(&format!("unknown argument {a}")),
+        }
     }
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let out = args.first().map(Into::into).unwrap_or_else(|| here.join("../shader.spv"));
-    let result = SpirvBuilder::new(here.join("../shader"), "spirv-unknown-vulkan1.2")
+
+    let schema = params::Schema::load(&root).unwrap_or_else(|e| die(&e));
+    let overrides: Map<String, Value> = match &preset {
+        None => Map::new(),
+        Some(level) => match schema.quality.get(level) {
+            Some(Value::Object(m)) => m.clone(),
+            _ => die(&format!("no quality preset {level} in params.json")),
+        },
+    };
+    let values = params::compile_values(&root, &schema, local, &overrides);
+    write_if_changed(&root.join("native/shader/src/generated.rs"), &params::generated_rs(&schema, &values));
+
+    let t = std::time::Instant::now();
+    let result = SpirvBuilder::new(root.join("native/shader"), "spirv-unknown-vulkan1.2")
         .release(true)
         .spirv_metadata(SpirvMetadata::None)
         .build()
-        .unwrap_or_else(|e| {
-            eprintln!("shader build failed: {e}");
-            std::process::exit(1)
-        });
-    let spv = result.module.unwrap_single();
-    std::fs::copy(spv, &out).unwrap();
-    eprintln!("wrote {} ({} bytes)", out.display(), std::fs::metadata(&out).unwrap().len());
+        .unwrap_or_else(|e| die(&format!("shader build failed: {e}")));
+    let spv = std::fs::read(result.module.unwrap_single()).unwrap();
+    eprintln!("rust-gpu: {} bytes in {:.1} s", spv.len(), t.elapsed().as_secs_f32());
+
+    let t = std::time::Instant::now();
+    let words: Vec<u32> = bytemuck::pod_collect_to_vec(&spv);
+    let fixed = fixup::fixup(&words).unwrap_or_else(|e| die(&e));
+    let module = naga::front::spv::parse_u8_slice(bytemuck::cast_slice(&fixed), &naga::front::spv::Options::default())
+        .unwrap_or_else(|e| die(&format!("naga could not read the SPIR-V: {e}")));
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
+        .validate(&module)
+        .unwrap_or_else(|e| die(&format!("naga rejects the SPIR-V: {}", e.emit_to_string(""))));
+    let wgsl = naga::back::wgsl::write_string(&module, &info, naga::back::wgsl::WriterFlags::empty())
+        .unwrap_or_else(|e| die(&format!("naga could not write WGSL: {e}")));
+    eprintln!("naga: {} bytes of WGSL in {:.1} s", wgsl.len(), t.elapsed().as_secs_f32());
+
+    std::fs::create_dir_all(&out).unwrap_or_else(|e| die(&format!("{}: {e}", out.display())));
+    let fields: Vec<Value> = params::block(&schema).into_iter().map(|f| json!({ "name": f.name, "type": f.ty, "from": f.from })).collect();
+    // each entry point's workgroup size and the bindings it uses: (group,
+    // binding, "uniform" | "storage" | "storage-read"), for the app's
+    // bind group layouts (explicit: SPIR-V run as it is is not reflected)
+    let entries: Vec<Value> = module
+        .entry_points
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let ep = info.get_entry_point(i);
+            let mut bindings = vec![];
+            for (h, var) in module.global_variables.iter() {
+                if ep[h].is_empty() {
+                    continue;
+                }
+                let Some(rb) = &var.binding else { continue };
+                let kind = match var.space {
+                    naga::AddressSpace::Uniform => "uniform",
+                    naga::AddressSpace::Storage { access } if !access.contains(naga::StorageAccess::STORE) => "storage-read",
+                    naga::AddressSpace::Storage { .. } => "storage",
+                    _ => continue,
+                };
+                bindings.push(json!({ "group": rb.group, "binding": rb.binding, "kind": kind }));
+            }
+            json!({ "name": e.name, "workgroup": e.workgroup_size, "bindings": bindings })
+        })
+        .collect();
+    // (the SPIR-V's hash: what tells builds apart, as their other metadata
+    // is mostly the same)
+    let hash = spv.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let meta = json!({ "hash": format!("{hash:016x}"), "fields": fields, "workgroup": WORKGROUP, "entries": entries, "preset": preset, "compile": values });
+    write_atomic(&out.join("shader.spv"), &spv);
+    write_atomic(&out.join("shader.wgsl"), wgsl.as_bytes());
+    write_atomic(&out.join("shader.json"), serde_json::to_string_pretty(&meta).unwrap().as_bytes());
+    std::fs::write(root.join("native/shader.spv"), &spv).unwrap();
+    eprintln!("wrote {}", out.display());
 }

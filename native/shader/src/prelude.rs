@@ -5,9 +5,10 @@
 
 #[allow(unused_imports)]
 pub use spirv_std::num_traits::Float;
-pub use spirv_std::glam::{Vec2, Vec3, vec2, vec3};
+pub use spirv_std::glam::{Vec2, Vec3, Vec4, vec2, vec3, vec4};
 
 pub use crate::anim::*;
+pub use crate::collide::*;
 pub use crate::enemies::*;
 pub use crate::figure::*;
 pub use crate::foes::*;
@@ -24,6 +25,7 @@ pub use crate::rig::*;
 pub use crate::scene::*;
 pub use crate::sdf::*;
 pub use crate::shading::*;
+pub use crate::spells::*;
 pub use crate::textures::*;
 pub use crate::vec::*;
 pub use crate::wizard::*;

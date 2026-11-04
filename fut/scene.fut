@@ -95,7 +95,7 @@ def land_trees (mask: i32) (pose: pose) (p: vec3) : hit =
        in (d, m_trunk + part) |> tag layers_trees
 
 def no_tree_cell : tree_cell =
-  {present = false, kind = 0, px = 0, pz = 0, size = 0, seed = 0, ground = f32.nan}
+  {present = false, kind = 0, px = 0, pz = 0, size = 0, seed = 0, known = false, ground = 0}
 
 -- The same along a ray (exit: see structures in world.fut), given the tree
 -- cell holding p.

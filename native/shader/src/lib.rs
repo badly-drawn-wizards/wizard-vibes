@@ -1,14 +1,19 @@
 // The wizard scene's per-pixel code, ported from Futhark (fut/) to Rust
 // for rust-gpu: one module per Futhark module, under the same names (see
-// PORTING.md). The entry point, native_main, does what dev/native.ts's
-// WGSL entry point does: a thread a pixel, shade_pixel and finish_pixel,
-// packed BGRA8 into a buffer.
+// PORTING.md). The entry point native_main does what dev/native.ts's WGSL
+// entry point does: a thread a pixel, shade_pixel and finish_pixel, packed
+// BGRA8 into a buffer. The others (see ENTRIES.md) render a frame as
+// fut/wizard.fut's render_frame does (with the spells and anti-aliasing),
+// and compute the music (fut/music.fut). The crate also builds for the
+// host, where the app calls the collision probe (collide.rs) and the sound
+// effects (sfx.rs, host only).
 
 #![cfg_attr(target_arch = "spirv", no_std, feature(asm_experimental_arch))]
 #![feature(float_minimum_maximum)]
 #![allow(non_upper_case_globals, non_snake_case, clippy::too_many_arguments, clippy::excessive_precision)]
 
 pub mod anim;
+pub mod collide;
 pub mod enemies;
 pub mod figure;
 pub mod foes;
@@ -19,13 +24,17 @@ pub mod lightning;
 pub mod march;
 pub mod materials;
 pub mod media;
+pub mod music;
 pub mod orbfx;
 pub mod platform;
 pub mod prelude;
 pub mod rig;
 pub mod scene;
 pub mod sdf;
+#[cfg(not(target_arch = "spirv"))]
+pub mod sfx;
 pub mod shading;
+pub mod spells;
 pub mod textures;
 pub mod vec;
 pub mod wizard;
@@ -33,6 +42,7 @@ pub mod world;
 
 use prelude::*;
 use spirv_std::glam::UVec3;
+use spirv_std::memory::{Scope, Semantics};
 use spirv_std::spirv;
 
 #[inline]
@@ -61,4 +71,212 @@ pub fn native_main(
     let (c, _seen) = shade_pixel(prm, dr, default_target, u.a_vw, u.a_h, u.a_tm, u.a_yaw, u.a_pitch, u.a_dst, x, y);
     let f = finish_pixel(prm, u.a_vw, u.a_h, x, y, c);
     out[i as usize] = byte(f.z) | (byte(f.y) << 8) | (byte(f.x) << 16) | 0xff000000;
+}
+
+// ---------------------------------------------------------------------
+// A frame, as render_frame (fut/wizard.fut): shade, then (prm.aa) FXAA or
+// edge supersampling, packed into `out` as native_main packs it. Buffers
+// (see ENTRIES.md): colour holds each pixel's finished colour and the
+// distance its ray sees, vw wide (pixel (x, y) at y * vw + x); edges holds
+// the number of edge pixels found, then their indices into colour; rays
+// one colour per extra ray (4 an edge pixel); args the indirect dispatch
+// sizes of edge_rays and edge_resolve.
+
+#[inline]
+fn pack(c: Vec3) -> u32 {
+    byte(c.z) | (byte(c.y) << 8) | (byte(c.x) << 16) | 0xff000000
+}
+
+// The colour at image point (x, y), with the spells (sample).
+#[inline]
+fn sample_at(u: &Uniforms, spells: &[f32], x: f32, y: f32) -> (Vec3, f32) {
+    let (prm, dr) = unpack(u);
+    let n = u.a_n_spells.min(sdiv(spells.len() as i32, spell_stride));
+    sample(prm, dr, spells, n, default_target, u.a_vw, u.a_h, u.a_tm, u.a_yaw, u.a_pitch, u.a_dst, x, y)
+}
+
+// How many edge pixels the later passes handle: as many as were found, up
+// to what the edges and rays buffers hold.
+#[inline]
+fn edge_count(edges: &[u32], rays: &[Vec4]) -> u32 {
+    edges[0].min(edges.len() as u32 - 1).min(rays.len() as u32 / 4)
+}
+
+// Pass 1: a thread per pixel of out (w * h): shades the pixel into colour,
+// and with no anti-aliasing (aa not 1 or 2) packs it into out too.
+#[spirv(compute(threads(256)))]
+pub fn shade(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] out: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] colour: &mut [Vec4],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] spells: &[f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] edges: &mut [u32],
+) {
+    let i = gid.x as i32;
+    if i >= u.a_w * u.a_h {
+        return;
+    }
+    let plain = u.p_aa != 1 && u.p_aa != 2;
+    if i == 0 && u.p_aa == 2 {
+        edges[0] = 0;
+    }
+    let px = srem(i, u.a_w);
+    let py = sdiv(i, u.a_w);
+    if px >= u.a_vw {
+        if plain {
+            out[i as usize] = 0xff000000;
+        }
+        return;
+    }
+    let (c, seen) = sample_at(u, spells, px as f32 + 0.5, py as f32 + 0.5);
+    colour[(py * u.a_vw + px) as usize] = vec4(c.x, c.y, c.z, seen);
+    if plain {
+        out[i as usize] = pack(c);
+    }
+}
+
+// Pass 2 with aa = 1: a thread per pixel of out (w * h): FXAA over colour,
+// packed into out.
+#[spirv(compute(threads(256)))]
+pub fn fxaa(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] out: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] colour: &mut [Vec4],
+) {
+    let i = gid.x as i32;
+    if i >= u.a_w * u.a_h {
+        return;
+    }
+    let px = srem(i, u.a_w);
+    if px >= u.a_vw {
+        out[i as usize] = 0xff000000;
+        return;
+    }
+    let py = sdiv(i, u.a_w);
+    let c = fxaa_at(u.p_aa_threshold, u.a_h, u.a_vw, colour, py, px);
+    out[i as usize] = pack(c);
+}
+
+// Edge supersampling (aa = 2), pass 2: a thread per pixel of the image
+// (vw * h): appends the edge pixels' indices to edges.
+#[spirv(compute(threads(256)))]
+pub fn edge_mark(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] colour: &mut [Vec4],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] edges: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] rays: &mut [Vec4],
+) {
+    let i = gid.x as i32;
+    let vw = u.a_vw;
+    if i >= vw * u.a_h {
+        return;
+    }
+    if edge_at(3.0 * u.p_aa_threshold, u.a_h, vw, colour, sdiv(i, vw), srem(i, vw)) {
+        let cap = (edges.len() as u32 - 1).min(rays.len() as u32 / 4);
+        let k = unsafe { spirv_std::arch::atomic_i_add::<u32, { Scope::QueueFamily as u32 }, { Semantics::NONE.bits() }>(&mut edges[0], 1) };
+        if k < cap {
+            edges[(k + 1) as usize] = i as u32;
+        }
+    }
+}
+
+// Pass 3: one thread (dispatch 1 workgroup): the indirect dispatch sizes
+// (x, y, z) for edge_rays (args[0..3]: a thread per extra ray) and
+// edge_resolve (args[3..6]: a thread per edge pixel).
+#[spirv(compute(threads(256)))]
+pub fn edge_args(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] edges: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] rays: &mut [Vec4],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 6)] args: &mut [u32],
+) {
+    if gid.x != 0 {
+        return;
+    }
+    let n = edge_count(edges, rays);
+    args[0] = (4 * n + 255) >> 8;
+    args[1] = 1;
+    args[2] = 1;
+    args[3] = (n + 255) >> 8;
+    args[4] = 1;
+    args[5] = 1;
+}
+
+// Pass 4: a thread per extra ray (4 an edge pixel; dispatch args[0..3], or
+// enough for the most edges the buffers hold): shades it into rays.
+#[spirv(compute(threads(256)))]
+pub fn edge_rays(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] spells: &[f32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] edges: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] rays: &mut [Vec4],
+) {
+    let k = gid.x;
+    if k >= 4 * edge_count(edges, rays) {
+        return;
+    }
+    let i = edges[(1 + (k >> 2)) as usize] as i32;
+    let (dx, dy) = edge_offset((k & 3) as i32);
+    let vw = u.a_vw;
+    let (c, _) = sample_at(u, spells, srem(i, vw) as f32 + 0.5 + dx, sdiv(i, vw) as f32 + 0.5 + dy);
+    rays[k as usize] = vec4(c.x, c.y, c.z, 0.0);
+}
+
+// Pass 5: a thread per edge pixel (dispatch args[3..6], or enough for the
+// most edges the buffers hold): averages its four extra rays with its first
+// sample, in colour.
+#[spirv(compute(threads(256)))]
+pub fn edge_resolve(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] colour: &mut [Vec4],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] edges: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] rays: &mut [Vec4],
+) {
+    let j = gid.x;
+    if j >= edge_count(edges, rays) {
+        return;
+    }
+    let i = edges[(1 + j) as usize] as usize;
+    let k = (4 * j) as usize;
+    let c = colour[i];
+    let m = scale(0.2, rays[k].truncate() + rays[k + 1].truncate() + rays[k + 2].truncate() + rays[k + 3].truncate() + c.truncate());
+    colour[i] = vec4(m.x, m.y, m.z, c.w);
+}
+
+// Pass 6 (after edge_resolve): a thread per pixel of out (w * h): packs
+// colour into out.
+#[spirv(compute(threads(256)))]
+pub fn pack_pixels(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] out: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] colour: &mut [Vec4],
+) {
+    let i = gid.x as i32;
+    if i >= u.a_w * u.a_h {
+        return;
+    }
+    let px = srem(i, u.a_w);
+    out[i as usize] = if px >= u.a_vw { 0xff000000 } else { pack(colour[(sdiv(i, u.a_w) * u.a_vw + px) as usize].truncate()) };
+}
+
+// ---------------------------------------------------------------------
+// The music (fut/music.fut sound_chunk): a thread per value, 2 * a_m_n
+// values: a_m_n stereo samples (interleaved left, right) from time a_m_t0
+// within the loop, at a_m_rate samples a second.
+#[spirv(compute(threads(256)))]
+pub fn music(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 7)] samples: &mut [f32],
+) {
+    let j = gid.x as i32;
+    if j >= 2 * u.a_m_n {
+        return;
+    }
+    samples[j as usize] = music::sound_value(u.a_m_t0, u.a_m_rate, j);
 }

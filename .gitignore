@@ -1,15 +1,17 @@
+/target/
 build/
-.emcache/
-node_modules/
 dist/
 result
-fut/params.fut
-fut/config.fut
 config.local.json
-fut/render.fut
-fut/reference.fut
-/native/target/
 /native/shader/src/generated.rs
 /native/shader/target/
 /native/shader-builder/target/
 /native/shader.spv
+# (left by the Futhark/TypeScript version)
+node_modules/
+.emcache/
+fut/params.fut
+fut/config.fut
+fut/render.fut
+fut/reference.fut
+/native/target/

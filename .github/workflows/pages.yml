@@ -1,15 +1,7 @@
-# Builds the static site (npm run build:static) and publishes it to GitHub
-# Pages. Enable it once under Settings > Pages > Source: GitHub Actions.
-#
-# The toolchain comes from the flake. Futhark's WebGPU branch has no public
-# binary cache, so it is kept in the badlydrawnwizards Cachix cache: builds
-# fetch it from there, and push anything they had to build themselves (that
-# needs the repository secret CACHIX_AUTH_TOKEN, a write token for the
-# cache; without it they still read from it).
-#
-# To fill the cache from a machine that has already built the toolchain:
-#   nix develop --profile /tmp/wizard-dev -c true
-#   cachix push badlydrawnwizards /tmp/wizard-dev
+# Builds the static site (the app for the web, with its shader built for the
+# default settings and each quality level: wizard-dev --static) and publishes
+# it to GitHub Pages. Enable it once under Settings > Pages > Source: GitHub
+# Actions. The toolchain comes from the flake.
 
 name: Pages
 
@@ -30,32 +22,24 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - uses: cachix/install-nix-action@v31
 
-      - name: Binary cache (Cachix)
-        uses: cachix/cachix-action@v16
-        with:
-          name: badlydrawnwizards
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
-      - name: Cache emscripten ports (emdawnwebgpu)
+      - name: Cargo cache
         uses: actions/cache@v4
         with:
-          path: .emcache
-          key: emcache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
-
-      - name: Toolchain
-        run: nix develop -c sh -c 'futhark --version && emcc --version | head -1'
-
-      - name: Dependencies
-        run: nix develop -c npm ci
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            native/shader-builder/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('flake.lock', 'Cargo.lock', 'native/shader-builder/Cargo.lock') }}
 
       - name: Build the static site
-        run: nix develop -c npm run build:static
+        run: nix develop -c cargo run --release -p wizard-dev -- --static dist
 
       - uses: actions/configure-pages@v5
 

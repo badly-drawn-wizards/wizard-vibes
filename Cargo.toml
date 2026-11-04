@@ -1,0 +1,20 @@
+# The app (client: native and web) and its dev server. The rust-gpu shader
+# port (native/shader, native/shader-builder) builds apart, with rust-gpu's
+# own nightly.
+[workspace]
+resolver = "3"
+members = ["client", "devserver"]
+# (built apart, by native/shader-builder with rust-gpu)
+exclude = ["native"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[profile.release]
+debug = false
+
+# (the app's own code is light; its dependencies (egui, wgpu, naga) are
+# what make a debug build crawl)
+[profile.dev.package."*"]
+opt-level = 2

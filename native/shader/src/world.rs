@@ -855,8 +855,9 @@ pub fn tree_cell_border(x: f32, z: f32) -> f32 {
 }
 
 // A tree cell's candidate (see tree_candidate), as `trees_in` takes it:
-// whether a tree may stand there, and the ground under it, or NaN where
-// that has not been worked out.
+// whether a tree may stand there, and the ground under it if `known`
+// (worked out). (Not NaN for unknown: WGSL may assume there are no NaNs,
+// and naga's translation tests them as never there.)
 #[derive(Clone, Copy)]
 pub struct TreeCell {
     pub present: bool,
@@ -865,6 +866,7 @@ pub struct TreeCell {
     pub pz: f32,
     pub size: f32,
     pub seed: f32,
+    pub known: bool,
     pub ground: f32,
 }
 
@@ -876,7 +878,7 @@ pub fn tree_ground_ok(l: Land, ground: f32) -> bool {
 #[inline]
 pub fn tree_cell_at(density: f32, x: f32, z: f32) -> TreeCell {
     let (present, kind, px, pz, size, seed) = tree_candidate(density, x, z);
-    TreeCell { present, kind, px, pz, size, seed, ground: NAN }
+    TreeCell { present, kind, px, pz, size, seed, known: false, ground: 0.0 }
 }
 
 // The same with its ground worked out, so whether the tree stands at all is
@@ -887,7 +889,7 @@ pub fn tree_cell_grounded(l: Land, density: f32, x: f32, z: f32) -> TreeCell {
         c
     } else {
         let g = terrain_height(l, c.px, c.pz);
-        TreeCell { ground: g, present: tree_ground_ok(l, g), ..c }
+        TreeCell { known: true, ground: g, present: tree_ground_ok(l, g), ..c }
     }
 }
 
@@ -909,7 +911,7 @@ pub fn trees_in(l: Land, density: f32, grown: f32, outside: f32, exit: f32, c: T
     if density <= 0.0 || grown <= 0.0 || !c.present {
         return (above.maximum(far), part_trunk);
     }
-    let known = !isnan(c.ground);
+    let known = c.known;
     let size = c.size * grown;
     let own = length2(vec2(w.x - c.px, w.z - c.pz)) - tree_reach * size / tree_size_max;
     let b = above.maximum(far.minimum(own));

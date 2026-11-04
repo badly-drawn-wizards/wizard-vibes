@@ -1,0 +1,631 @@
+// The game round the wizard (a port of web/main.ts's step() and the game
+// parts of the page): his free flight (flight.rs), the orbit camera
+// (camera.rs), the modes (mode.rs), spells (spells.rs), the fight with the
+// enemy wizards (enemies.rs, combat.rs, mana.rs, shield.rs), controller
+// input (gamepad.rs), where sounds are heard from (sfx.rs), the controls
+// panel (help.rs) and the quality panel (quality.rs), with the HUD drawn by
+// egui (hud.rs).
+//
+// The app calls, each frame: step() (input, and everything advanced by dt),
+// then the probe it asks for and apply_probe() with its answer, then ui()
+// for the HUD; mode_ui() and quality_ui() go in its top bar.
+
+pub mod camera;
+pub mod combat;
+pub mod enemies;
+pub mod flight;
+pub mod gamepad;
+pub mod help;
+pub mod hud;
+pub mod mana;
+pub mod mode;
+pub mod quality;
+pub mod sfx;
+pub mod shield;
+pub mod spells;
+pub mod vec;
+
+use crate::types::{BuildInfo, Camera, FrameOut, ParamValues, ProbeRequest, Value, PROBE_SPHERES};
+use camera::Orbit;
+use combat::{Combat, Moment};
+use egui::{Align2, Key, Margin, Rect, Vec2};
+use flight::{FreeFlight, Held, Stick};
+use gamepad::Pads;
+use help::{Device, Help};
+use mode::{Mode, ModeName, ORDER};
+use quality::Quality;
+use spells::Spells;
+use std::f32::consts::PI;
+use vec::{turn, V3};
+use web_time::Instant;
+
+pub use quality::{Choice, Level, LEVELS};
+
+// What is kept between runs (sessionStorage / localStorage in the TS).
+const STORE_CAMERA: &str = "wizard-camera";
+const STORE_FLIGHT: &str = "wizard-flight";
+const STORE_MODE: &str = "wizard-mode";
+const STORE_HELP: &str = "wizard-help-closed";
+const STORE_QUALITY: &str = "wizard-quality";
+
+// A small random number generator (splitmix64) for what the TS takes from
+// Math.random: spells' looks, the enemies' timing and aim.
+#[derive(Clone, Debug)]
+pub struct Rng(u64);
+
+impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Rng(seed)
+    }
+
+    // Uniform in [0, 1).
+    pub fn uniform(&mut self) -> f32 {
+        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+        z ^= z >> 31;
+        (z >> 40) as f32 / (1u64 << 24) as f32
+    }
+}
+
+pub struct Game {
+    orbit: Orbit,
+    flight: FreeFlight,
+    mode: Mode,
+    spells: Spells,
+    combat: Combat,
+    help: Help,
+    quality: Quality,
+    pads: Pads,
+    rng: Rng,
+    // the scene's time (stopped while paused)
+    time: f32,
+    paused: bool,
+    pad_connected: bool,
+    // the view's area, as of the last step (the HUD goes round it)
+    view: Option<Rect>,
+    // when the defeat panel appeared (it fades in)
+    defeat_since: Option<Instant>,
+}
+
+impl Game {
+    pub fn new(storage: Option<&dyn eframe::Storage>) -> Game {
+        let get = |key: &str| storage.and_then(|s| s.get_string(key));
+        let orbit = storage
+            .and_then(|s| eframe::get_value::<Camera>(s, STORE_CAMERA))
+            .map_or_else(Orbit::default, Orbit::restored);
+        let flight = storage
+            .and_then(|s| eframe::get_value::<flight::Saved>(s, STORE_FLIGHT))
+            .map_or_else(FreeFlight::default, |s| FreeFlight::restore(&s));
+        let mode = Mode::new(get(STORE_MODE).and_then(|m| ModeName::from_key(&m)).unwrap_or(ModeName::Fixed));
+        let help = Help::new(get(STORE_HELP).as_deref() == Some("1"));
+        let quality = Quality::new(get(STORE_QUALITY).and_then(|c| Choice::from_key(&c)));
+        let seed = web_time::SystemTime::now()
+            .duration_since(web_time::SystemTime::UNIX_EPOCH)
+            .map_or(1, |d| d.as_nanos() as u64);
+        let mut g = Game {
+            orbit,
+            flight,
+            mode,
+            spells: Spells::default(),
+            combat: Combat::default(),
+            help,
+            quality,
+            pads: Pads::default(),
+            rng: Rng::new(seed),
+            time: 0.0,
+            paused: false,
+            pad_connected: false,
+            view: None,
+            defeat_since: None,
+        };
+        // (the flight as the mode has it, the camera as it was: main.ts sets
+        // this before free flight's take-off turns the camera)
+        g.flight.set_active(g.mode.free());
+        g
+    }
+
+    pub fn save(&self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, STORE_CAMERA, &self.orbit.cam);
+        eframe::set_value(storage, STORE_FLIGHT, &self.flight.saved());
+        storage.set_string(STORE_MODE, self.mode.name.key().to_string());
+        storage.set_string(STORE_HELP, if self.help.closed { "1" } else { "0" }.to_string());
+        if let Some(c) = self.quality.choice {
+            storage.set_string(STORE_QUALITY, c.key().to_string());
+        }
+    }
+
+    pub fn set_build(&mut self, info: &BuildInfo) {
+        self.spells.limit = info.spell_limit.max(1) as usize;
+    }
+
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    // Whether a game controller is connected (for the status line).
+    pub fn pad_connected(&self) -> bool {
+        self.pad_connected
+    }
+
+    pub fn camera(&self) -> Camera {
+        self.orbit.cam
+    }
+
+    // The flight and the fight as the mode, just changed, has them: free
+    // flight starts from behind him; a fight starts afresh.
+    fn follow_mode(&mut self) {
+        if self.flight.set_active(self.mode.free()) && self.flight.active {
+            self.orbit.cam.yaw = PI;
+            self.orbit.cam.pitch = 0.3;
+            self.orbit.interacted = true;
+        }
+        if self.mode.fight() {
+            self.combat.restart();
+        }
+    }
+
+    fn set_mode(&mut self, m: ModeName) {
+        if self.mode.set(m) {
+            self.follow_mode();
+        }
+    }
+
+    fn cycle_mode(&mut self) {
+        if self.mode.cycle() {
+            self.follow_mode();
+        }
+    }
+
+    // Enemies for the renderer: the drawer's count in fight mode, else none.
+    fn enemy_count(&self, params: &ParamValues) -> usize {
+        if self.mode.fight() { params.f32("enemies").clamp(0.0, 6.0) as usize } else { 0 }
+    }
+
+    // The orb, and the camera's view, in the world (for casting).
+    fn cast_from(&self) -> (V3, V3) {
+        let (pos, heading) = self.flight.place(self.time);
+        let o = turn(heading, [0.55, 2.1, 0.5]); // the orb, in his frame (orb_pos in fut/rig.fut)
+        (vec::add(pos, o), turn(heading, self.orbit.view_dir()))
+    }
+
+    // Advances everything by dt (input, camera, flight, spells, the fight).
+    // `params` must be the drawer's values, without this game's overrides
+    // (it reads the drawer's enemy count from them).
+    pub fn step(&mut self, ctx: &egui::Context, view: &egui::Response, dt: f32, params: &ParamValues) -> FrameOut {
+        self.view = Some(view.rect);
+        // (pressing on the view takes the keys back from the drawer's controls)
+        if view.is_pointer_button_down_on() {
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            self.orbit.interacted = true;
+        }
+        if view.dragged() {
+            let d = view.drag_delta();
+            self.orbit.drag(d.x, d.y);
+        }
+        if view.hovered() {
+            // (egui's wheel is points up; the TS's deltaY is pixels down,
+            // about 100 a notch to egui's 50)
+            let dy = ctx.input(|i| i.smooth_scroll_delta.y);
+            if dy != 0.0 {
+                self.orbit.wheel(-2.0 * dy);
+            }
+        }
+
+        // the keyboard (unless a text field or the like has it)
+        let mut held = Held::default();
+        let mut casting = false;
+        if !ctx.egui_wants_keyboard_input() {
+            let (keys, typed_any) = ctx.input(|i| {
+                let pressed: Vec<(Key, egui::Modifiers)> = i
+                    .events
+                    .iter()
+                    .filter_map(|e| match e {
+                        egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } => Some((*key, *modifiers)),
+                        _ => None,
+                    })
+                    .collect();
+                let any = i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. }));
+                held = Held {
+                    fwd: i.key_down(Key::W) || i.key_down(Key::ArrowUp),
+                    back: i.key_down(Key::S) || i.key_down(Key::ArrowDown),
+                    left: i.key_down(Key::A) || i.key_down(Key::ArrowLeft),
+                    right: i.key_down(Key::D) || i.key_down(Key::ArrowRight),
+                    up: i.key_down(Key::E),
+                    down: i.key_down(Key::Q),
+                    boost: i.modifiers.shift,
+                };
+                casting = i.key_down(Key::Space);
+                self.combat.shield.wanted = i.key_down(Key::R);
+                (pressed, any)
+            });
+            if typed_any {
+                self.help.device = Device::Keyboard;
+            }
+            for (key, mods) in keys {
+                match key {
+                    Key::F if !mods.ctrl && !mods.command && !mods.alt && !mods.mac_cmd => self.cycle_mode(),
+                    Key::P => self.paused = !self.paused,
+                    Key::Num1 => self.spells.select(0),
+                    Key::Num2 => self.spells.select(1),
+                    Key::Num3 => self.spells.select(2),
+                    Key::Enter if self.combat.enemies.down >= 0.0 => self.combat.reset(&mut self.spells),
+                    _ => {}
+                }
+            }
+        } else {
+            self.combat.shield.wanted = false;
+        }
+
+        if !self.paused {
+            self.time += dt;
+        }
+        self.orbit.idle(dt);
+        let pad = self.pads.read();
+        self.pad_connected = pad.is_some();
+        if let Some(p) = &pad {
+            if p.toggle {
+                self.cycle_mode();
+            }
+            // (A tries again once he is defeated; View / Back resets the fight)
+            if p.reset || (p.confirm && self.combat.enemies.down >= 0.0) {
+                self.combat.reset(&mut self.spells);
+            }
+            if p.active {
+                self.help.device = Device::Pad;
+            }
+            if let Some(s) = p.spell {
+                self.spells.select(s);
+            }
+        }
+        let n = self.enemy_count(params);
+        let pad_cast = pad.is_some_and(|p| p.cast);
+        let game_dt = if self.paused { 0.0 } else { dt };
+        let (origin, dir) = self.cast_from();
+        let moment = Moment {
+            dt: game_dt,
+            time: self.time,
+            him: self.flight.place(self.time).0,
+            origin,
+            dir,
+            drawn: true,
+            able: !self.paused,
+            n,
+            seed: params.f32("enemy_seed") as i64,
+            casting: casting || pad_cast,
+            shielding: pad.is_some_and(|p| p.shield),
+        };
+        self.combat.update(&moment, &mut self.spells, &mut self.rng);
+        self.spells.update(game_dt, casting || pad_cast);
+        self.combat.handle(&mut self.spells);
+        self.help.spell = self.spells.selected;
+        // right stick: look right turns the view right (the camera's yaw is its
+        // azimuth round him, so it decreases), up raises the view
+        if let Some(p) = &pad {
+            self.orbit.nudge(-2.5 * p.look[0] * dt, -1.5 * p.look[1] * dt);
+        }
+        // The camera orbits in his frame, which turns with him; in free flight
+        // keep it still in the world instead, so W (along the camera) does not
+        // chase its own tail as he turns to face the way he goes. (camera_ray
+        // in fut/wizard.fut looks along -(sin yaw, cos yaw) in his frame.)
+        let heading = self.flight.heading;
+        let stick = pad.map(|p| Stick { fwd: p.mov[1], side: p.mov[0], up: p.up, boost: p.boost });
+        self.flight.update(game_dt, self.time, heading + self.orbit.cam.yaw + PI, &held, stick.as_ref());
+        if self.flight.active {
+            self.orbit.cam.yaw -= self.flight.heading - heading;
+        }
+
+        // the drive record: the flight, casting (in his frame: along the
+        // camera's view), and the fight
+        let mut drive = self.flight.drive();
+        let [sx, sy, sz] = self.orbit.view_dir();
+        drive.staff = self.spells.staff;
+        drive.sx = sx;
+        drive.sy = sy;
+        drive.sz = sz;
+        drive.flash = self.spells.since_cast;
+        drive.spell = self.spells.selected as f32;
+        let (shield, shield_hit, arena, foes) = self.combat.drive();
+        drive.shield = shield;
+        drive.shield_hit = shield_hit;
+        [drive.arena_x, drive.arena_y, drive.arena_z] = arena;
+        drive.foe = foes;
+
+        let minimised = ctx.input(|i| i.viewport().minimized == Some(true));
+        self.quality.frame(!self.paused && !minimised);
+
+        let probe = (self.flight.active || self.spells.count() > 0).then(|| {
+            let (ids, pts) = self.spells.probe_points();
+            ProbeRequest { ids, pts }
+        });
+        FrameOut {
+            time: self.time,
+            camera: self.orbit.cam,
+            drive,
+            spells: self.spells.pack(),
+            probe,
+            overrides: vec![("enemies".to_string(), Value::Num(n as f64))],
+            sfx: std::mem::take(&mut self.combat.sfx).into_iter().filter(|e| e.gain >= 0.02).collect(),
+            paused: self.paused,
+        }
+    }
+
+    // The probe's answer to `req`: PROBE_SPHERES spheres round the rock and
+    // him, then the request's points, 4 floats each. (The sounds it sets off
+    // go out with the next frame.)
+    pub fn apply_probe(&mut self, req: &ProbeRequest, data: &[f32]) {
+        let spheres = (PROBE_SPHERES * 4).min(data.len());
+        self.flight.collide(&data[..spheres]);
+        self.spells.apply_probe(&req.ids, &data[spheres..]);
+        self.combat.handle(&mut self.spells);
+    }
+
+    // The mode buttons (for the top bar).
+    pub fn mode_ui(&mut self, ui: &mut egui::Ui) {
+        let mut chosen = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for m in ORDER {
+                let r = ui.add_enabled_ui(self.mode.allowed(m), |ui| {
+                    hud::toggle_button(ui, m.title(), m == self.mode.name, false)
+                });
+                let r = r.inner.on_hover_text(self.mode.tooltip(m)).on_disabled_hover_text(self.mode.tooltip(m));
+                if r.clicked() {
+                    chosen = Some(m);
+                }
+            }
+        })
+        .response
+        .on_hover_text("Mode (F)");
+        if let Some(m) = chosen {
+            self.set_mode(m);
+        }
+    }
+
+    // The quality panel (for the top bar; nothing while it is disabled).
+    pub fn quality_ui(&mut self, ui: &mut egui::Ui) {
+        self.quality.ui(ui);
+    }
+
+    // Sets the quality panel up: `level` the level running now, if known;
+    // `fallback` the choice when none is stored (auto for prebuilt levels;
+    // under the dev server the level running); `enabled` false hides it
+    // (e.g. no presets, or a pinned build).
+    pub fn quality_setup(&mut self, level: Option<Level>, fallback: Option<Choice>, enabled: bool) {
+        self.quality.setup(level, fallback, enabled);
+    }
+
+    // The level to start at: the chosen one, or medium for auto.
+    pub fn quality_initial(&self) -> Level {
+        self.quality.initial()
+    }
+
+    // A level the app should load now (polled once a frame): it then calls
+    // quality_done once that level runs, or failed to load.
+    pub fn quality_request(&mut self) -> Option<Level> {
+        self.quality.take_request()
+    }
+
+    pub fn quality_done(&mut self, level: Option<Level>) {
+        self.quality.done(level);
+    }
+
+    // The HUD: the mode's note, the vitals, the crosshair, the hurt flash,
+    // the defeat panel and the controls panel.
+    pub fn ui(&mut self, ctx: &egui::Context) {
+        let rect = self.view.unwrap_or_else(|| ctx.content_rect());
+        let h = self.combat.hud.clone();
+
+        // the red flash, and the crosshair at the view's centre (not in the
+        // way of the pointer)
+        egui::Area::new(egui::Id::unique("wizard-overlay"))
+            .fixed_pos(rect.min)
+            .interactable(false)
+            .show(ctx, |ui| {
+                let painter = ui.painter_at(rect);
+                hud::hurt(&painter, rect, h.hurt);
+                if h.drawn && h.lost.is_none() {
+                    hud::crosshair(&painter, rect.center(), h.locked, h.shielded);
+                }
+            });
+
+        // the mode's note: it shows for 1.6 s on a change, then fades
+        if let Some(t) = self.mode.noted {
+            let t = t.elapsed().as_secs_f32();
+            let alpha = if t < 1.6 { (t / 0.1).min(1.0) } else { (1.0 - (t - 1.6) / 0.4).max(0.0) };
+            if alpha > 0.0 {
+                ctx.request_repaint();
+                egui::Area::new(egui::Id::unique("wizard-mode-note"))
+                    .pivot(Align2::CENTER_TOP)
+                    .fixed_pos(egui::pos2(rect.center().x, rect.top() + 0.22 * rect.height()))
+                    .interactable(false)
+                    .show(ctx, |ui| {
+                        ui.set_opacity(alpha);
+                        hud::panel(0.6, 6, Margin::symmetric(14, 6)).show(ui, |ui| {
+                            ui.label(hud::text(self.mode.name.label(), hud::FONT, hud::FG));
+                        });
+                    });
+            } else {
+                self.mode.noted = None;
+            }
+        }
+
+        // the vitals, bottom left
+        let mut reset = false;
+        if h.drawn {
+            egui::Area::new(egui::Id::unique("wizard-vitals"))
+                .pivot(Align2::LEFT_BOTTOM)
+                .fixed_pos(rect.left_bottom() + Vec2::new(16.0, -16.0))
+                .show(ctx, |ui| {
+                    hud::panel(0.6, 6, Margin::symmetric(12, 8)).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
+                        let width = 200.0f32.min(0.4 * rect.width());
+                        let health = ctx.animate_value_with_time(egui::Id::unique("wizard-health"), h.health, 0.15);
+                        let mana = ctx.animate_value_with_time(egui::Id::unique("wizard-mana"), h.mana, 0.15);
+                        if h.n > 0 {
+                            ui.horizontal(|ui| {
+                                hud::icon(ui, hud::Icon::Heart, hud::FONT, hud::FG, egui::Sense::hover());
+                                hud::bar(
+                                    ui,
+                                    width,
+                                    health,
+                                    egui::Color32::from_rgb(0xc0, 0x28, 0x3c),
+                                    egui::Color32::from_rgb(0xff, 0x6a, 0x5a),
+                                    hud::BORDER,
+                                );
+                            })
+                            .response
+                            .on_hover_text("Health");
+                        }
+                        ui.horizontal(|ui| {
+                            hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
+                            hud::bar(
+                                ui,
+                                width,
+                                mana,
+                                egui::Color32::from_rgb(0x2a, 0x4f, 0xd0),
+                                egui::Color32::from_rgb(0x6f, 0xb4, 0xff),
+                                if h.short { hud::SHORT } else { hud::BORDER },
+                            );
+                        })
+                        .response
+                        .on_hover_text("Mana");
+                        if h.n > 0 {
+                            ui.horizontal(|ui| {
+                                ui.label(hud::text(format!("{} defeated", h.defeated), 0.85 * hud::FONT, hud::DIM));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let b = hud::plain_button(ui, "↺ Reset", 0.85 * hud::FONT, Vec2::new(8.0, 2.0));
+                                    if b.on_hover_text("Start the fight again (View / Back on a controller)").clicked() {
+                                        reset = true;
+                                    }
+                                });
+                            });
+                        }
+                    });
+                });
+        }
+
+        // defeated: a panel says so, until he tries again
+        match (&h.lost, self.defeat_since) {
+            (Some(_), None) => self.defeat_since = Some(Instant::now()),
+            (None, Some(_)) => self.defeat_since = None,
+            _ => {}
+        }
+        if let (Some(stats), Some(since)) = (&h.lost, self.defeat_since) {
+            let alpha = (since.elapsed().as_secs_f32() / 0.6).min(1.0);
+            if alpha < 1.0 {
+                ctx.request_repaint();
+            }
+            egui::Area::new(egui::Id::unique("wizard-defeat"))
+                .pivot(Align2::CENTER_CENTER)
+                .fixed_pos(egui::pos2(rect.center().x, rect.top() + 0.4 * rect.height()))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    // (ease-out)
+                    ui.set_opacity(1.0 - (1.0 - alpha).powi(2));
+                    hud::panel(0.8, 8, Margin::symmetric(32, 20)).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.spacing_mut().item_spacing.y = 10.0;
+                            ui.label(hud::text("Defeated", 1.8 * hud::FONT, hud::DEFEAT).extra_letter_spacing(0.1 * 1.8 * hud::FONT));
+                            ui.label(hud::text(stats.clone(), hud::FONT, hud::FG));
+                            if hud::plain_button(ui, "Try again", 1.05 * hud::FONT, Vec2::new(16.0, 4.0)).clicked() {
+                                reset = true;
+                            }
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.label(hud::text("or press Enter (", 0.8 * hud::FONT, hud::DIM));
+                                hud::chip(ui, hud::Chip::Face('A'));
+                                ui.label(hud::text(" on a controller)", 0.8 * hud::FONT, hud::DIM));
+                            });
+                        });
+                    });
+                });
+        }
+        if reset {
+            self.combat.reset(&mut self.spells);
+        }
+
+        self.help.ui(ctx, rect);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Drive, ParamValues, Value, ON_PATH};
+
+    fn params(enemies: f64) -> ParamValues {
+        let mut p = ParamValues::default();
+        p.0.insert("enemies".into(), Value::Num(enemies));
+        p.0.insert("enemy_seed".into(), Value::Num(1.0));
+        p
+    }
+
+    // A frame of the app: the view's area, step, the probe (land far
+    // below), the HUD.
+    fn frame(ctx: &egui::Context, g: &mut Game, p: &ParamValues, events: Vec<egui::Event>) -> FrameOut {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 720.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = None;
+        let mut full = ctx.run_ui(input, |ui| {
+            let view = ui.allocate_response(ui.available_size(), egui::Sense::click_and_drag());
+            let o = g.step(ui.ctx(), &view, 1.0 / 60.0, p);
+            if let Some(req) = &o.probe {
+                let n = PROBE_SPHERES + req.ids.len().max(req.pts.len() / 3);
+                g.apply_probe(req, &vec![50.0; n * 4]);
+            }
+            g.ui(ui.ctx());
+            out = Some(o);
+        });
+        full.textures_delta.clear();
+        out.unwrap()
+    }
+
+    // A key pressed and let go.
+    fn key(k: Key) -> Vec<egui::Event> {
+        [true, false]
+            .map(|pressed| egui::Event::Key { key: k, physical_key: None, pressed, repeat: false, modifiers: Default::default() })
+            .to_vec()
+    }
+
+    #[test]
+    fn plays_a_fight() {
+        let ctx = egui::Context::default();
+        let mut g = Game::new(None);
+        let p = params(3.0);
+        let o = frame(&ctx, &mut g, &p, vec![]);
+        assert_eq!(o.drive, Drive { staff: o.drive.staff, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 1.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
+        assert!(o.probe.is_none());
+        assert_eq!(o.overrides, vec![("enemies".to_string(), Value::Num(0.0))]);
+        // F twice: fight
+        frame(&ctx, &mut g, &p, key(Key::F));
+        let o = frame(&ctx, &mut g, &p, key(Key::F));
+        assert!(o.drive.free);
+        assert_eq!(g.mode.name, ModeName::Fight);
+        assert_eq!(o.overrides, vec![("enemies".to_string(), Value::Num(3.0))]);
+        let req = o.probe.unwrap();
+        assert_eq!(req.pts.len(), 6 * 3);
+        // the enemies appear, and cast at him
+        let mut sounds = Vec::new();
+        for _ in 0..60 * 12 {
+            let o = frame(&ctx, &mut g, &p, vec![]);
+            sounds.extend(o.sfx.iter().map(|e| e.kind));
+            assert_eq!(o.spells.len(), 6 * spells::STRIDE);
+        }
+        assert!(o.drive.foe[0] >= 16.0);
+        assert!(sounds.iter().any(|&k| k == sfx::CAST_FIRE || k == sfx::CAST_WIND || k == sfx::MARK), "{sounds:?}");
+        // P pauses the scene's time
+        let t = frame(&ctx, &mut g, &p, key(Key::P)).time;
+        let o = frame(&ctx, &mut g, &p, vec![]);
+        assert!(o.paused);
+        assert_eq!(o.time, t);
+    }
+}

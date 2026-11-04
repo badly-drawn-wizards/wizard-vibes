@@ -3,9 +3,14 @@ name = "wizard-shader-builder"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Builds native/shader to SPIR-V with rust-gpu"
+description = "Builds native/shader with rust-gpu to SPIR-V, and with naga to WGSL"
 
 [dependencies]
 spirv-builder = "0.11"
+# (wgpu 30's)
+naga = { version = "30", features = ["spv-in", "wgsl-out"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 
 [workspace]

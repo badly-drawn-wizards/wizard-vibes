@@ -1,0 +1,45 @@
+[package]
+name = "wizard"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The ray-marched wizard: the scene's Futhark WGSL run by wgpu, with an egui UI, natively and in the browser"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "wizard"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "persistence", "wayland", "x11"] }
+egui = "0.37"
+egui-wgpu = "0.37"
+wgpu = "30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytemuck = "1"
+log = "0.4"
+cpal = "0.18"
+gilrs = "0.11"
+web-time = "1"
+# hot-patching under `dx serve --hotpatch` (Dioxus's Subsecond; pinned to dx's version)
+subsecond = "=0.7.10"
+# the shader crate, on the CPU: the collision probe, the sound effects, its constants
+wizard-shader = { path = "../native/shader" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# (connects to dx for Subsecond's patches; nothing without dx)
+dioxus-devtools = "=0.7.10"
+pollster = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# (pinned to nixpkgs' wasm-bindgen-cli, which must match it exactly)
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "HtmlCanvasElement", "Location", "EventSource", "MessageEvent", "Request", "RequestInit", "Response", "Headers"] }
+console_error_panic_hook = "0.1"
+cpal = { version = "0.18", features = ["wasm-bindgen"] }

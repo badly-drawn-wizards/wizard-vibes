@@ -651,15 +651,15 @@ def tree_cell_border (x: f32) (z: f32) : f32 =
   in f32.min (f32.min fx (tree_cell - fx)) (f32.min fz (tree_cell - fz))
 
 -- A tree cell's candidate (see tree_candidate), as `trees_in` takes it:
--- whether a tree may stand there, and the ground under it, or NaN where
--- that has not been worked out.
-type tree_cell = {present: bool, kind: i32, px: f32, pz: f32, size: f32, seed: f32, ground: f32}
+-- whether a tree may stand there, and the ground under it if `known`
+-- (worked out). (Not NaN for unknown: WGSL may assume there are no NaNs.)
+type tree_cell = {present: bool, kind: i32, px: f32, pz: f32, size: f32, seed: f32, known: bool, ground: f32}
 
 def tree_ground_ok (l: land) (ground: f32) : bool = ground > l.sea + 0.4 && ground < tree_line
 
 def tree_cell_at (density: f32) (x: f32) (z: f32) : tree_cell =
   let (present, kind, px, pz, size, seed) = tree_candidate density x z
-  in {present, kind, px, pz, size, seed, ground = f32.nan}
+  in {present, kind, px, pz, size, seed, known = false, ground = 0}
 
 -- The same with its ground worked out (8 noise lookups), so whether the tree
 -- stands at all (most candidates fail on their ground) is known: for a
@@ -669,7 +669,7 @@ def tree_cell_grounded (l: land) (density: f32) (x: f32) (z: f32) : tree_cell =
   let c = tree_cell_at density x z
   in if !c.present then c
      else let g = terrain_height l c.px c.pz
-          in c with ground = g with present = tree_ground_ok l g
+          in c with known = true with ground = g with present = tree_ground_ok l g
 
 -- The trees' distance at a world point: (distance, part), with the same
 -- kinds of bounds as the structures', and one more: a tree is no taller
@@ -685,7 +685,7 @@ def trees_in (l: land) (density: f32) (grown: f32) (outside: f32) (exit: f32) (c
   in if above > 0.3 then (above, part_trunk) else
   let far = f32.max (tree_cell_border w.x w.z) exit + (tree_inset * tree_cell - tree_reach)
   in if density <= 0 || grown <= 0 || !c.present then (f32.max above far, part_trunk) else
-  let known = !(f32.isnan c.ground)
+  let known = c.known
   let size = c.size * grown
   let own = length2 (vec2 (w.x - c.px) (w.z - c.pz)) - tree_reach * size / tree_size_max
   let b = f32.max above (f32.min far own)

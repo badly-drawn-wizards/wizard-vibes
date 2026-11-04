@@ -1,0 +1,436 @@
+// The app: the scene, drawn by the shader (render/), under egui's UI: the
+// top bar (status, render scale, music and sound, mode, platform, quality),
+// the parameter drawer (params.rs), the game's HUD (game/), and an overlay
+// for shader errors. Natively and in the browser alike.
+//
+// Hot reload: when a new shader build appears (source.rs), it is loaded
+// while the old one keeps drawing, then swapped in. The app's own code is
+// hot-patched by Subsecond under `dx serve --hotpatch` (see README.md).
+
+use crate::audio::Audio;
+use crate::game::{Choice, Game, LEVELS, Level};
+use crate::params::{Params, Schema};
+use crate::render::{self, Args, Shader, frame::{Frame, host_records}};
+use crate::source::{Event, Source};
+use crate::types::{BuildInfo, FrameOut, ParamValues, Value};
+use std::collections::HashMap;
+use web_time::Instant;
+
+// The sound effects' sample rate (resampled to the device's by the audio).
+const SFX_RATE: f32 = 48000.0;
+
+const SCALE: &str = "wizard-scale";
+const DRAWER: &str = "wizard-drawer";
+
+pub struct App {
+    source: Source,
+    params: Option<Params>,
+    shader: Option<Shader>,
+    error: Option<String>,
+    building: bool,
+    frame: Frame,
+    // the image the scene is copied into, and its egui id
+    image: Option<(wgpu::Texture, egui::TextureId)>,
+    start: Instant,
+    last: Instant,
+    fps: f32,
+    scale: f32,
+    drawer: bool,
+    // the last error the device reported (validation of the shader, etc.)
+    device_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    game: Game,
+    audio: Audio,
+    info: BuildInfo,
+    // the sound effects made so far (one a frame, from the shader crate)
+    sfx: Vec<Vec<f32>>,
+    // the drawer's values saved last time (applied once the schema comes)
+    saved_params: Option<HashMap<String, Value>>,
+    // the quality panel: set up once there is a shader; the level whose
+    // build is being loaded
+    quality_ready: bool,
+    quality_loading: Option<Level>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    shot_asked: bool,
+}
+
+impl App {
+    pub fn new(cc: &eframe::CreationContext<'_>, source: Source) -> App {
+        let storage = cc.storage;
+        let scale = storage.and_then(|s| eframe::get_value(s, SCALE)).unwrap_or(1.0);
+        let drawer = storage.and_then(|s| eframe::get_value(s, DRAWER)).unwrap_or(false);
+        let now = Instant::now();
+        let n = wizard_shader::sfx::sfx_count;
+        let info = BuildInfo {
+            spell_limit: wizard_shader::generated::max_spells as u32,
+            music_period: wizard_shader::music::period,
+            sfx_rate: SFX_RATE,
+            sfx_seconds: (0..n).map(wizard_shader::sfx::sfx_length).collect(),
+        };
+        let device_error = std::sync::Arc::new(std::sync::Mutex::new(None));
+        if let Some(rs) = cc.wgpu_render_state.as_ref() {
+            let slot = device_error.clone();
+            rs.device.on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
+                log::error!("{e}");
+                *slot.lock().unwrap() = Some(e.to_string());
+            }));
+        }
+        App {
+            source,
+            params: None,
+            shader: None,
+            error: None,
+            building: false,
+            frame: Frame::default(),
+            image: None,
+            start: now,
+            last: now,
+            fps: 0.0,
+            scale,
+            drawer,
+            device_error,
+            game: {
+                let mut g = Game::new(storage);
+                g.set_build(&info);
+                g
+            },
+            audio: Audio::new(storage),
+            info,
+            sfx: vec![],
+            saved_params: storage.and_then(|s| eframe::get_value(s, crate::params::STORE)),
+            quality_ready: false,
+            quality_loading: None,
+            shot_asked: false,
+        }
+    }
+
+    // The quality level whose compile-time values `compile` are, if any.
+    fn level_of(&self, compile: &HashMap<String, Value>) -> Option<Level> {
+        let presets = &self.params.as_ref()?.schema.quality;
+        LEVELS.into_iter().find(|l| presets.get(l.key()).is_some_and(|p| !p.is_empty() && p.iter().all(|(k, v)| compile.get(k) == Some(v))))
+    }
+
+    // The quality panel follows the builds: once the first shader runs it is
+    // set up (the level running, if it is one); then each level asked for
+    // loads its build (the drawer's own if that is the level), and is done
+    // once that runs.
+    fn quality(&mut self) {
+        let Some(sh) = &self.shader else { return };
+        let running = sh.meta.preset.as_deref().and_then(Level::from_key).or_else(|| self.level_of(&sh.meta.compile));
+        let drawers = self.params.as_ref().and_then(|p| self.level_of(&p.compile));
+        if !self.quality_ready && self.params.is_some() {
+            self.quality_ready = true;
+            // (with a dev server it builds the levels; a static site has them built)
+            let enabled = self.params.as_ref().is_some_and(|p| !p.schema.quality.is_empty());
+            self.game.quality_setup(running, running.map(Choice::Fixed), enabled);
+        }
+        if let Some(l) = self.quality_loading {
+            if running == Some(l) {
+                self.quality_loading = None;
+                self.game.quality_done(Some(l));
+            }
+        }
+        if let Some(l) = self.game.quality_request() {
+            self.quality_loading = Some(l);
+            self.source.follow(if drawers == Some(l) { None } else { Some(l.key()) });
+        }
+    }
+
+    // Makes the next sound effect, if any are still to make; with the last,
+    // hands them all to the audio.
+    fn make_sfx(&mut self) {
+        let n = wizard_shader::sfx::sfx_count as usize;
+        if self.sfx.len() >= n {
+            return;
+        }
+        let k = self.sfx.len() as i32;
+        let frames = (wizard_shader::sfx::sfx_length(k) * SFX_RATE).ceil() as usize;
+        self.sfx.push(wizard_shader::sfx::sfx_samples(k, SFX_RATE, frames));
+        if self.sfx.len() == n {
+            self.audio.set_build(&self.info, self.sfx.clone());
+        }
+    }
+
+    fn handle_events(&mut self, frame: &eframe::Frame) {
+        let Some(rs) = frame.wgpu_render_state() else { return };
+        while let Some(ev) = self.source.poll() {
+            match ev {
+                Event::Schema(s) => self.set_schema(s),
+                Event::Building => self.building = true,
+                Event::Error(e) => {
+                    self.building = false;
+                    self.error = Some(e);
+                }
+                Event::Shader(files) => {
+                    self.building = false;
+                    if self.shader.as_ref().is_some_and(|s| s.version == files.version) {
+                        continue;
+                    }
+                    let t = Instant::now();
+                    match Shader::new(&rs.device, &files) {
+                        Ok(s) => {
+                            log::info!("shader {} ({}) loaded in {:.1} s", s.version, if s.spirv { "SPIR-V" } else { "WGSL" }, t.elapsed().as_secs_f32());
+                            if let Some(p) = self.params.as_mut() {
+                                p.compile = s.meta.compile.clone();
+                            }
+                            self.shader = Some(s);
+                            self.error = None;
+                        }
+                        Err(e) => self.error = Some(format!("loading the shader: {e}")),
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_schema(&mut self, s: Schema) {
+        // (a new schema keeps the values set so far, where they still apply)
+        let mut p = Params::new(s, None);
+        if let Some(saved) = self.saved_params.take() {
+            for (k, v) in saved {
+                p.set(&k, v);
+            }
+        }
+        if let Some(old) = &self.params {
+            for (k, v) in old.values().0 {
+                p.set(&k, v);
+            }
+        }
+        p.can_rebuild = self.source.has_server();
+        if let Some(sh) = &self.shader {
+            p.compile = sh.meta.compile.clone();
+        }
+        self.params = Some(p);
+    }
+
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::top("hud").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let status = match (&self.shader, self.building) {
+                    (_, true) => "compiling…".to_string(),
+                    (None, _) => "loading…".to_string(),
+                    (Some(s), _) => format!("{} · {}", &s.version[..8], if s.spirv { "SPIR-V" } else { "WGSL" }),
+                };
+                let size = self.image.as_ref().map(|(t, _)| format!(" · {}×{}", t.width(), t.height())).unwrap_or_default();
+                let state = format!("{}{}", if self.game.paused() { " · paused" } else { "" }, if self.game.pad_connected() { " · controller" } else { "" });
+                ui.monospace(format!("{status}{size} · {:.1} fps{state}", self.fps));
+                ui.separator();
+                for (s, label) in [(0.25, "¼"), (0.5, "½"), (1.0, "1×")] {
+                    if ui.selectable_label(self.scale == s, label).on_hover_text("Render scale").clicked() {
+                        self.scale = s;
+                    }
+                }
+                ui.separator();
+                self.audio.buttons(ui);
+                ui.separator();
+                self.game.mode_ui(ui);
+                ui.separator();
+                if let Some(p) = self.params.as_mut() {
+                    let mut platform = p.get("platform").map(|v| v.f32() as usize).unwrap_or(0);
+                    let names = ["Rock", "Ice", "Magic carpet"];
+                    egui::ComboBox::from_id_salt("platform").selected_text(names[platform.min(2)]).show_ui(ui, |ui| {
+                        for (i, n) in names.iter().enumerate() {
+                            ui.selectable_value(&mut platform, i, *n);
+                        }
+                    });
+                    if Some(platform as f32) != p.get("platform").map(|v| v.f32()) {
+                        p.set("platform", Value::Num(platform as f64));
+                    }
+                }
+                self.game.quality_ui(ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.selectable_label(self.drawer, "Parameters").on_hover_text("The parameter drawer").clicked() {
+                        self.drawer = !self.drawer;
+                    }
+                });
+            });
+        });
+    }
+
+    // Renders the scene for this frame into the image, at `vw` x `h`.
+    fn render(&mut self, rs: &egui_wgpu::RenderState, vw: u32, h: u32, params: &ParamValues, out: &FrameOut) {
+        let Some(shader) = &self.shader else { return };
+        let (device, queue) = (&rs.device, &rs.queue);
+        // the image, remade when its size changes
+        let fits = self.image.as_ref().is_some_and(|(t, _)| t.width() == vw && t.height() == h);
+        if !fits {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("scene"),
+                size: wgpu::Extent3d { width: vw, height: h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                // (the shader's pixels are gamma-encoded, as egui takes a
+                // texture's samples to be: so not an sRGB format, which would
+                // decode them)
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&Default::default());
+            let mut r = rs.renderer.write();
+            let id = match self.image.take() {
+                Some((_, id)) => {
+                    r.update_egui_texture_from_wgpu_texture(device, &view, wgpu::FilterMode::Linear, id);
+                    id
+                }
+                None => r.register_native_texture(device, &view, wgpu::FilterMode::Linear),
+            };
+            self.image = Some((tex, id));
+        }
+        let n_spells = (out.spells.len() / wizard_shader::spells::spell_stride as usize) as u32;
+        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0 };
+        let mut enc = device.create_command_encoder(&Default::default());
+        self.frame.record(device, queue, &mut enc, shader, params, &out.drive, &args, &out.spells);
+        let (tex, _) = self.image.as_ref().unwrap();
+        enc.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: self.frame.pixels(),
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(render::padded(vw) * 4), rows_per_image: Some(h) },
+            },
+            tex.as_image_copy(),
+            wgpu::Extent3d { width: vw, height: h, depth_or_array_layers: 1 },
+        );
+        queue.submit([enc.finish()]);
+    }
+}
+
+impl eframe::App for App {
+    // (through Subsecond: under `dx serve --hotpatch` an edit to the app's
+    // code patches the running app, which keeps its state; otherwise a
+    // plain call)
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        subsecond::call(|| self.frame_ui(ui, frame));
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.save_state(storage);
+    }
+}
+
+impl App {
+    // WIZARD_SCREENSHOT=FILE.ppm: after a few seconds, the window into FILE,
+    // then quit (to check the native UI without a screen grabber).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn screenshot(&mut self, ctx: &egui::Context) {
+        let Ok(path) = std::env::var("WIZARD_SCREENSHOT") else { return };
+        if (Instant::now() - self.start).as_secs_f32() > 8.0 && !self.shot_asked {
+            self.shot_asked = true;
+            let c = ctx.clone();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |img| {
+                let mut ppm = format!("P6\n{} {}\n255\n", img.width(), img.height()).into_bytes();
+                for p in &img.pixels {
+                    ppm.extend_from_slice(&[p.r(), p.g(), p.b()]);
+                }
+                let _ = std::fs::write(&path, ppm);
+                c.send_viewport_cmd(egui::ViewportCommand::Close);
+                c.request_repaint();
+            })));
+        }
+    }
+
+    fn frame_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.screenshot(&ctx);
+        let now = Instant::now();
+        let dt = (now - self.last).as_secs_f32().min(0.1);
+        self.last = now;
+        if dt > 0.0 {
+            self.fps = self.fps * 0.9 + 0.1 / dt;
+        }
+        self.handle_events(frame);
+        let secs = (now - self.start).as_secs_f64();
+        let server = self.source.has_server();
+        if let Some(p) = self.params.as_mut() {
+            p.can_rebuild = server;
+            if let Some(changes) = p.take_compile_changes(secs) {
+                self.source.send_config(changes);
+            }
+        }
+
+        if let Some(e) = self.device_error.lock().unwrap().take() {
+            self.error = Some(e);
+        }
+        self.top_bar(ui);
+        if self.drawer {
+            if let Some(p) = self.params.as_mut() {
+                egui::Panel::right("drawer").resizable(true).default_size(340.0).show(ui, |ui| p.ui(ui, secs));
+            }
+        }
+        let rs = frame.wgpu_render_state().cloned();
+        self.audio.frame(&ctx);
+        self.make_sfx();
+        self.quality();
+        // (M: the music, unless a control has the keys)
+        if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::M)) {
+            self.audio.toggle_music();
+        }
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+            let rect = ui.max_rect();
+            let view = ui.interact(rect, egui::Id::unique("wizard-view"), egui::Sense::click_and_drag());
+            let ppp = ctx.pixels_per_point();
+            let vw = ((rect.width() * ppp * self.scale) as u32).max(1);
+            let h = ((rect.height() * ppp * self.scale) as u32).max(1);
+            let (Some(rs), Some(p)) = (&rs, &self.params) else { return };
+            let mut values = p.values();
+            let out = self.game.step(&ctx, &view, dt, &values);
+            for (k, v) in &out.overrides {
+                values.0.insert(k.clone(), v.clone());
+            }
+            // the collision probe, on the CPU (the shader crate's code)
+            if let (Some(req), Some(sh)) = (&out.probe, &self.shader) {
+                if let Some((prm, dr)) = host_records(sh, &values, &out.drive) {
+                    let mut data = vec![0.0; wizard_shader::collide::probe_len(req.pts.len() / 3)];
+                    wizard_shader::collide::probe(&prm, &dr, out.time, &req.pts, &mut data);
+                    self.game.apply_probe(req, &data);
+                }
+            }
+            for ev in &out.sfx {
+                self.audio.play(*ev);
+            }
+            self.render(rs, vw, h, &values, &out);
+            // the music: a chunk read back is handed over; one asked for is started
+            if let Some((req, data)) = self.frame.music_ready() {
+                self.audio.music_chunk(req, &data);
+            }
+            if let (Some(sh), Some(req)) = (&self.shader, self.audio.music_request()) {
+                self.frame.music(&rs.device, &rs.queue, sh, &values, &out.drive, req, self.info.music_period);
+            }
+            if let Some((_, id)) = &self.image {
+                ui.painter().image(*id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            }
+        });
+        self.game.ui(&ctx);
+        if let Some(e) = &self.error {
+            egui::Window::new("Shader error").collapsible(true).default_width(700.0).show(&ctx, |ui| {
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| ui.monospace(e.as_str()));
+            });
+        }
+        ctx.request_repaint();
+    }
+
+    fn save_state(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, SCALE, &self.scale);
+        eframe::set_value(storage, DRAWER, &self.drawer);
+        if let Some(p) = &self.params {
+            p.save(storage);
+        }
+        self.game.save(storage);
+        self.audio.save(storage);
+    }
+}
+
+// The device the app asks for: the adapter's limits (the shader's nesting
+// of calls and its buffers), timestamps where there are any, and SPIR-V
+// passthrough where there is (to run rust-gpu's SPIR-V as it is).
+pub fn wgpu_options() -> egui_wgpu::WgpuConfiguration {
+    let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    setup.power_preference = wgpu::PowerPreference::HighPerformance;
+    setup.device_descriptor = std::sync::Arc::new(|adapter: &wgpu::Adapter| wgpu::DeviceDescriptor {
+        label: Some("wizard"),
+        required_features: adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::PASSTHROUGH_SHADERS),
+        required_limits: adapter.limits(),
+        ..Default::default()
+    });
+    egui_wgpu::WgpuConfiguration { wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(setup), ..Default::default() }
+}

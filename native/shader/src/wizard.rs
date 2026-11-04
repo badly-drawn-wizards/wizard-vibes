@@ -43,3 +43,98 @@ pub fn finish_pixel(prm: Params, vw: i32, h: i32, x: f32, y: f32, c: Vec3) -> Ve
     let vig = if prm.view != 0 { 1.0 } else { 1.0 - prm.vignette * (ux * ux + uy * uy) };
     scale(vig, c)
 }
+
+// The final colour seen through image point (x, y), with the first
+// n_spells spells' glow, and how far the ray sees.
+#[inline]
+pub fn sample(prm: Params, dr: Drive, spells: &[f32], n_spells: i32, target: Vec3, vw: i32, h: i32, tm: f32, yaw: f32, pitch: f32, dst: f32, x: f32, y: f32) -> (Vec3, f32) {
+    let (c, seen) = shade_pixel(prm, dr, target, vw, h, tm, yaw, pitch, dst, x, y);
+    // the spells shine in front of whatever the ray sees
+    let (ro, rd) = camera_ray(target, vw, h, yaw, pitch, dst, x, y);
+    let fl = flight_of(prm, dr, tm);
+    let c = c + spell_glow(prm, spells, n_spells, tm, to_world(fl, ro), to_world_dir(fl, rd), seen);
+    (finish_pixel(prm, vw, h, x, y, c), seen)
+}
+
+#[inline]
+pub fn luma(c: Vec3) -> f32 {
+    0.299 * c.x + 0.587 * c.y + 0.114 * c.z
+}
+
+// ---------------------------------------------------------------------
+// Anti-aliasing, as passes over the finished image: h rows of w pixels,
+// pixel (x, y) at img[y * w + x], its finished colour and (in w) the
+// distance its ray sees.
+
+// Pixel (x, y), clamped to the image.
+#[inline]
+pub fn img_at(img: &[Vec4], h: i32, w: i32, y: i32, x: i32) -> Vec4 {
+    img[(0i32.max((h - 1).min(y)) * w + 0i32.max((w - 1).min(x))) as usize]
+}
+
+#[inline]
+fn at3(img: &[Vec4], h: i32, w: i32, y: i32, x: i32) -> Vec3 {
+    img_at(img, h, w, y, x).truncate()
+}
+#[inline]
+fn at2(img: &[Vec4], h: i32, w: i32, y: i32, x: i32) -> (Vec3, f32) {
+    let v = img_at(img, h, w, y, x);
+    (v.truncate(), v.w)
+}
+
+// FXAA, simplified (no search along the edge): where the local contrast
+// exceeds the threshold, find whether the edge runs across or along, and
+// blend towards the neighbour across it, by how much the pixel stands out
+// from its neighbourhood. Pixel (x, y) of fxaa's output.
+#[inline]
+pub fn fxaa_at(threshold: f32, h: i32, w: i32, img: &[Vec4], y: i32, x: i32) -> Vec3 {
+    let c = at3(img, h, w, y, x);
+    let (n, s, e, wst) = (at3(img, h, w, y - 1, x), at3(img, h, w, y + 1, x), at3(img, h, w, y, x + 1), at3(img, h, w, y, x - 1));
+    let (ln, ls, le, lw, lc) = (luma(n), luma(s), luma(e), luma(wst), luma(c));
+    let hi = lc.maximum(ln.maximum(ls).maximum(le.maximum(lw)));
+    let lo = lc.minimum(ln.minimum(ls).minimum(le.minimum(lw)));
+    let range = hi - lo;
+    if range < threshold.maximum(0.125 * hi) {
+        return c;
+    }
+    let (lne, lnw, lse, lsw) = (luma(at3(img, h, w, y - 1, x + 1)), luma(at3(img, h, w, y - 1, x - 1)), luma(at3(img, h, w, y + 1, x + 1)), luma(at3(img, h, w, y + 1, x - 1)));
+    // an edge running along x has its contrast across y
+    let along_x = (ln + ls - 2.0 * lc).abs() * 2.0 + (lne + lse - 2.0 * le).abs() + (lnw + lsw - 2.0 * lw).abs();
+    let along_y = (le + lw - 2.0 * lc).abs() * 2.0 + (lne + lnw - 2.0 * ln).abs() + (lse + lsw - 2.0 * ls).abs();
+    let horizontal = along_x >= along_y;
+    let (a, la, b, lb) = if horizontal { (n, ln, s, ls) } else { (wst, lw, e, le) };
+    let other = if (la - lc).abs() >= (lb - lc).abs() { a } else { b };
+    let avg = (2.0 * (ln + ls + le + lw) + lne + lnw + lse + lsw) / 12.0;
+    let sub = smoothstep(0.0, 1.0, saturate((avg - lc).abs() / range));
+    mix(c, other, 0.5 * sub * sub + 0.15)
+}
+
+// Supersampling at edges: pixels on a geometric edge (where the distance
+// the ray sees jumps by over 4% from a neighbour's, or between something
+// and the sky) or of high contrast in luma (stars, glows) are shaded again
+// with four more rays on a rotated grid and averaged with their first
+// sample. Whether pixel (x, y) is one (img: colour and distance seen).
+#[inline]
+pub fn edge_at(threshold: f32, h: i32, w: i32, img: &[Vec4], y: i32, x: i32) -> bool {
+    let (c, t) = at2(img, h, w, y, x);
+    let lc = luma(c);
+    let differs = |(cn, tn): (Vec3, f32)| {
+        (luma(cn) - lc).abs() > threshold
+            || (if isinf(t) || isinf(tn) { isinf(t) != isinf(tn) } else { (t - tn).abs() > 0.04 * t.minimum(tn) })
+    };
+    differs(at2(img, h, w, y - 1, x)) || differs(at2(img, h, w, y + 1, x)) || differs(at2(img, h, w, y, x - 1)) || differs(at2(img, h, w, y, x + 1))
+}
+
+// Extra ray k (0..3) of an edge pixel: its offset from the pixel's centre.
+#[inline]
+pub fn edge_offset(k: i32) -> (f32, f32) {
+    if k == 0 {
+        (0.125, -0.375)
+    } else if k == 1 {
+        (0.375, 0.125)
+    } else if k == 2 {
+        (-0.125, 0.375)
+    } else {
+        (-0.375, -0.125)
+    }
+}

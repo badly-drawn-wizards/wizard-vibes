@@ -121,7 +121,7 @@ pub fn land_structures_in(mask: i32, pose: Pose, exit: f32, c: StructureCell, p:
     }
 }
 
-pub const no_tree_cell: TreeCell = TreeCell { present: false, kind: 0, px: 0.0, pz: 0.0, size: 0.0, seed: 0.0, ground: NAN };
+pub const no_tree_cell: TreeCell = TreeCell { present: false, kind: 0, px: 0.0, pz: 0.0, size: 0.0, seed: 0.0, known: false, ground: 0.0 };
 
 // The same along a ray (exit: see structures in world.rs), given the tree
 // cell holding p.
