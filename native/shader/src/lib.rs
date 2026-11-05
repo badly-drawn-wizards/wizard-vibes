@@ -23,6 +23,7 @@ pub mod generated {
     wizard_shader_macros::params!();
 }
 pub mod glass;
+pub mod glitch;
 pub mod hash;
 pub mod lightning;
 pub mod march;
@@ -42,10 +43,12 @@ pub mod shading;
 pub mod soundboard;
 pub mod spells;
 pub mod stars;
+pub mod synth;
 pub mod textures;
 pub mod vec;
 pub mod wizard;
 pub mod world;
+pub mod wub;
 
 use prelude::*;
 use spirv_std::glam::UVec3;

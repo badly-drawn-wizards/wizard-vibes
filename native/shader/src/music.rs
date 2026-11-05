@@ -614,10 +614,11 @@ pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32, f32) {
 }
 
 // The songs: 0 this one (Wizard disco), 1 chip.rs's (Cracktro), 2
-// stars.rs's (Starscape).
-pub const songs: i32 = 3;
+// stars.rs's (Starscape), 3 glitch.rs's (Glitch Familiar), 4 wub.rs's (Wub
+// Ward).
+pub const songs: i32 = 5;
 #[cfg(not(target_arch = "spirv"))]
-pub const song_names: [&str; 3] = ["Wizard disco", "Cracktro", "Starscape"];
+pub const song_names: [&str; 5] = ["Wizard disco", "Cracktro", "Starscape", "Glitch Familiar", "Wub Ward"];
 
 // A song's loop, in seconds.
 #[inline]
@@ -626,6 +627,10 @@ pub fn song_period(song: i32) -> f32 {
         crate::chip::period
     } else if song == 2 {
         crate::stars::period
+    } else if song == 3 {
+        crate::glitch::period
+    } else if song == 4 {
+        crate::wub::period
     } else {
         period
     }
@@ -647,6 +652,12 @@ pub fn song_parts(song: i32, rate: f32, t: f32) -> (f32, f32, f32, f32) {
         (l, r, 0.0, s)
     } else if song == 2 {
         let (l, r, s) = crate::stars::parts(rate, t);
+        (l, r, 0.0, s)
+    } else if song == 3 {
+        let (l, r, s) = crate::glitch::parts(rate, t);
+        (l, r, 0.0, s)
+    } else if song == 4 {
+        let (l, r, s) = crate::wub::parts(rate, t);
         (l, r, 0.0, s)
     } else {
         music_parts(rate, t)
