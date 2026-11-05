@@ -26,7 +26,7 @@ edit the app and it is patched where it runs.
   of a 1709 instrument), a chiptune cracktro, and Starscape, an orchestral
   waltz in the manner of RuneScape's. Synthesised sound effects.
 - A drawer with every parameter (uniforms apply at once; shader settings
-  rebuild it), quality levels with an automatic one, FXAA or edge
+  rebuild it), quality levels, dynamic resolution scaling, FXAA or edge
   supersampling, debug views, a game controller.
 
 ## Running

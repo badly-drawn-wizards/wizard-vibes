@@ -9,6 +9,7 @@ pub mod game;
 pub mod headless;
 pub mod params;
 pub mod render;
+pub mod scale;
 pub mod source;
 pub mod types;
 

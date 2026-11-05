@@ -39,7 +39,7 @@ use std::f32::consts::PI;
 use vec::{turn, V3};
 use web_time::Instant;
 
-pub use quality::{Choice, Level, LEVELS};
+pub use quality::{Level, LEVELS};
 
 // What is kept between runs (sessionStorage / localStorage in the TS).
 const STORE_CAMERA: &str = "wizard-camera";
@@ -100,7 +100,7 @@ impl Game {
             .map_or_else(FreeFlight::default, |s| FreeFlight::restore(&s));
         let mode = Mode::new(get(STORE_MODE).and_then(|m| ModeName::from_key(&m)).unwrap_or(ModeName::Fixed));
         let help = Help::new(get(STORE_HELP).as_deref() == Some("1"));
-        let quality = Quality::new(get(STORE_QUALITY).and_then(|c| Choice::from_key(&c)));
+        let quality = Quality::new(get(STORE_QUALITY).and_then(|c| Level::from_key(&c)));
         let seed = web_time::SystemTime::now()
             .duration_since(web_time::SystemTime::UNIX_EPOCH)
             .map_or(1, |d| d.as_nanos() as u64);
@@ -336,8 +336,6 @@ impl Game {
         [drive.arena_x, drive.arena_y, drive.arena_z] = arena;
         drive.foe = foes;
 
-        let minimised = ctx.input(|i| i.viewport().minimized == Some(true));
-        self.quality.frame(!self.paused && !minimised);
 
         let probe = (self.flight.active || self.spells.count() > 0).then(|| {
             let (ids, pts) = self.spells.probe_points();
@@ -393,16 +391,10 @@ impl Game {
     }
 
     // Sets the quality panel up: `level` the level running now, if known;
-    // `fallback` the choice when none is stored (auto for prebuilt levels;
-    // under the dev server the level running); `enabled` false hides it
-    // (e.g. no presets, or a pinned build).
-    pub fn quality_setup(&mut self, level: Option<Level>, fallback: Option<Choice>, enabled: bool) {
+    // `fallback` the choice when none is stored (the level running);
+    // `enabled` false hides it (e.g. no presets, or a pinned build).
+    pub fn quality_setup(&mut self, level: Option<Level>, fallback: Option<Level>, enabled: bool) {
         self.quality.setup(level, fallback, enabled);
-    }
-
-    // The level to start at: the chosen one, or medium for auto.
-    pub fn quality_initial(&self) -> Level {
-        self.quality.initial()
     }
 
     // A level the app should load now (polled once a frame): it then calls

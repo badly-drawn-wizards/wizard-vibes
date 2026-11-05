@@ -8,7 +8,7 @@
 // hot-patched by Subsecond under `dx serve --hotpatch` (see README.md).
 
 use crate::audio::Audio;
-use crate::game::{Choice, Game, LEVELS, Level};
+use crate::game::{Game, LEVELS, Level};
 use crate::params::{Params, Schema};
 use crate::render::{self, Args, Shader, frame::{Frame, host_records}};
 use crate::source::{Event, Source};
@@ -21,6 +21,7 @@ const SFX_RATE: f32 = 48000.0;
 
 const SCALE: &str = "wizard-scale";
 const DRAWER: &str = "wizard-drawer";
+const DYNAMIC: &str = "wizard-dynamic-scale";
 
 pub struct App {
     source: Source,
@@ -34,7 +35,8 @@ pub struct App {
     start: Instant,
     last: Instant,
     fps: f32,
-    scale: f32,
+    // the render scale (by hand, or dynamic: see scale.rs)
+    scale: crate::scale::RenderScale,
     drawer: bool,
     // the last error the device reported (validation of the shader, etc.)
     // the GPU's errors, the first first (the cause; what follows from it is
@@ -64,9 +66,12 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, source: Source) -> App {
         let storage = cc.storage;
-        // (in the browser, ?scale=0.25 (0.5, 1) overrides the stored scale)
-        let scale = url_param("scale").and_then(|v| v.parse::<f32>().ok()).filter(|&v| v > 0.0 && v <= 1.0);
-        let scale = scale.or_else(|| storage.and_then(|s| eframe::get_value(s, SCALE))).unwrap_or(1.0);
+        // (dynamic unless turned off; in the browser, ?scale=0.25 (to 1)
+        // sets it by hand)
+        let fixed = url_param("scale").and_then(|v| v.parse::<f32>().ok()).filter(|&v| v > 0.0 && v <= 1.0);
+        let manual = fixed.or_else(|| storage.and_then(|s| eframe::get_value(s, SCALE))).unwrap_or(1.0);
+        let dynamic = fixed.is_none() && storage.and_then(|s| eframe::get_value(s, DYNAMIC)).unwrap_or(true);
+        let scale = crate::scale::RenderScale::new(dynamic, manual);
         let drawer = storage.and_then(|s| eframe::get_value(s, DRAWER)).unwrap_or(false);
         let now = Instant::now();
         let n = wizard_shader::sfx::sfx_count;
@@ -169,7 +174,7 @@ impl App {
             self.quality_ready = true;
             // (with a dev server it builds the levels; a static site has them built)
             let enabled = self.params.as_ref().is_some_and(|p| !p.schema.quality.is_empty());
-            self.game.quality_setup(running, running.map(Choice::Fixed), enabled);
+            self.game.quality_setup(running, running, enabled);
         }
         if let Some(l) = self.quality_loading {
             if running == Some(l) {
@@ -269,10 +274,18 @@ impl App {
                 let state = format!("{}{}", if self.game.paused() { " · paused" } else { "" }, if self.game.pad_connected() { " · controller" } else { "" });
                 ui.monospace(format!("{status}{size} · {:.1} fps{state}", self.fps));
                 ui.separator();
-                for (s, label) in [(0.25, "¼"), (0.5, "½"), (1.0, "1×")] {
-                    if ui.selectable_label(self.scale == s, label).on_hover_text("Render scale").clicked() {
-                        self.scale = s;
-                    }
+                // the render scale: dynamic, or a slider by hand (which shows
+                // the dynamic scale too, and moved, takes over)
+                let dynamic = self.scale.dynamic;
+                if ui.selectable_label(dynamic, "dynamic").on_hover_text("Scale the resolution to keep 60 fps").clicked() {
+                    self.scale.set_dynamic(!dynamic);
+                }
+                let mut s = self.scale.get();
+                let slider = egui::Slider::new(&mut s, crate::scale::MIN..=crate::scale::MAX).show_value(false);
+                let r = ui.add_sized([90.0, ui.spacing().interact_size.y], slider).on_hover_text("Render scale");
+                ui.monospace(format!("{:>3.0}%", 100.0 * self.scale.get()));
+                if r.changed() {
+                    self.scale.set_manual(s);
                 }
                 ui.separator();
                 self.audio.buttons(ui);
@@ -393,6 +406,10 @@ impl App {
         if dt > 0.0 {
             self.fps = self.fps * 0.9 + 0.1 / dt;
         }
+        // (the frame rate says something of the scale only while drawing a
+        // shader that is in place, and not paused)
+        let drawing = self.shader.is_some() && !self.building && self.unsupported.is_none() && !self.game.paused();
+        self.scale.frame(dt, drawing);
         self.handle_events(frame);
         let secs = (now - self.start).as_secs_f64();
         let server = self.source.has_server();
@@ -428,8 +445,9 @@ impl App {
             let rect = ui.max_rect();
             let view = ui.interact(rect, egui::Id::unique("wizard-view"), egui::Sense::click_and_drag());
             let ppp = ctx.pixels_per_point();
-            let vw = ((rect.width() * ppp * self.scale) as u32).max(1);
-            let h = ((rect.height() * ppp * self.scale) as u32).max(1);
+            let scale = self.scale.get();
+            let vw = ((rect.width() * ppp * scale) as u32).max(1);
+            let h = ((rect.height() * ppp * scale) as u32).max(1);
             let (Some(rs), Some(p), None) = (&rs, &self.params, &self.unsupported) else { return };
             let mut values = p.values();
             let out = self.game.step(&ctx, &view, dt, &values);
@@ -473,7 +491,8 @@ impl App {
     }
 
     fn save_state(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, SCALE, &self.scale);
+        eframe::set_value(storage, SCALE, &self.scale.manual);
+        eframe::set_value(storage, DYNAMIC, &self.scale.dynamic);
         eframe::set_value(storage, DRAWER, &self.drawer);
         if let Some(p) = &self.params {
             p.save(storage);
