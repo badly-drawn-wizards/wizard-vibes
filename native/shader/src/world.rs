@@ -812,11 +812,12 @@ pub fn sd_broadleaf(seed: f32, q: Vec3) -> (f32, i32) {
     }
     let (wood, tip) = (d, p);
     // a clump of leaves at each tip (lumpy: the bumps have slope under 0.45,
-    // so the 0.7 keeps it a bound), and one over the crown's middle
+    // so the 0.7 keeps it a bound), and a small one over the crown's middle:
+    // small enough, and blended little, that the branches show between them
     let bumps = 0.04 * (6.0 * q.x + 7.0 * seed).sin() * (6.0 * q.y).sin() * (6.0 * q.z + 3.0 * seed).sin();
-    let clump = sd_sphere(tip - vec(0.0, 0.1, 0.0), 0.55);
-    let middle = sd_ellipsoid(q - vec(0.0, 2.55, 0.0), vec(0.95, 0.75, 0.95));
-    let leaves = 0.7 * (smin(0.3, clump, middle) + bumps);
+    let clump = sd_sphere(tip - vec(0.0, 0.08, 0.0), 0.38);
+    let middle = sd_ellipsoid(q - vec(0.0, 2.6, 0.0), vec(0.5, 0.38, 0.5));
+    let leaves = 0.7 * (smin(0.15, clump, middle) + bumps);
     if wood < leaves { (wood, part_trunk) } else { (leaves, part_leaves) }
 }
 
