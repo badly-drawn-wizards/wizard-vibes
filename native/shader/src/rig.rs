@@ -134,6 +134,8 @@ pub const on_path: Drive = Drive {
     shield: 0.0,
     shield_hit: 10.0,
     thumb: 0.0,
+    groove: 0.0,
+    beat: 0.0,
     arena_x: 0.0,
     arena_y: 12.0,
     arena_z: 12.0,
@@ -183,12 +185,19 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     // way he goes instead.
     let thumb = if dr.free { saturate(dr.thumb) } else { 0.0 };
     let point = (1.0 - thumb) * if dr.free { saturate(length(accel)) } else { smoothstep(0.03, 0.12, fl.turn.abs()) };
-    let lean = clamp(-0.15, 0.15, prm.lean * fl.turn);
+    // Dancing to the music (groove 0 .. 1, on its beat): the shoulders dip
+    // and the head nods on each beat, the body sways over two, the free
+    // hand conducts, the staff taps, the runes flash.
+    let groove = saturate(dr.groove);
+    let on_beat = 0.5 + 0.5 * (2.0 * PI * dr.beat).cos(); // 1 on the beat, 0 between
+    let sway = 0.05 * groove * (PI * dr.beat).sin();
+    let lean = clamp(-0.15, 0.15, prm.lean * fl.turn) + sway;
     let shift = move |y: f32| vec(lean * 0f32.maximum(y - 0.45), 0.0, 0.0);
     // inhaling lifts the shoulders; the head rises and nods forward a little
     let bd = b * prm.breath;
-    let lift = vec(0.0, 0.012 * bd, 0.004 * bd) + shift(1.33);
-    let head = vec(0.0, 0.012 * bd, 0.007 * bd) + shift(1.6);
+    let dip = groove * on_beat;
+    let lift = vec(0.0, 0.012 * bd - 0.022 * dip, 0.004 * bd) + shift(1.33);
+    let head = vec(0.0, 0.012 * bd - 0.04 * dip, 0.007 * bd + 0.025 * dip) + shift(1.6);
     let l_shoulder = vec(0.2, 1.33, 0.0) + lift;
     let r_shoulder = vec(-0.2, 1.33, 0.0) + lift;
     // The staff leans with him, half as far, tilting about its foot (a shear
@@ -208,8 +217,9 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     // Aiming to his right (local -x), he brings the staff across in front of
     // his chest, the further the more he aims that way.
     let across = dr.staff * smoothstep(0.0, 0.7, -aim.x);
+    // (dancing, the staff lifts between beats and taps down on them)
     let staff_shift = scale(0.16 * dr.staff + 0.07 * kick, normalise(vec(aim.x, 0.0, aim.z) + vec(0.0, 0.0, 1e-4)))
-        + vec(-0.6 * across, 0.08 * dr.staff + 0.05 * across, 0.22 * across);
+        + vec(-0.6 * across, 0.08 * dr.staff + 0.05 * across + 0.035 * groove * (1.0 - on_beat) * (1.0 - dr.staff), 0.22 * across);
     let (staff_cos, staff_sin) = (angle.cos(), angle.sin());
     let held = move |q: Vec3| staff_pivot + rotate_about(staff_axis, staff_cos, staff_sin, leaned(q) - staff_pivot) + staff_shift;
     // (that, as a rotation and offset)
@@ -249,7 +259,10 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let orb_boost = 1.0 + 2.0 * (-6.0 * dr.flash).exp();
     // the right hand drifts idly in front of the belly, or points into the turn
     let idle = vec(0.025 * tm.sin(), 0.018 * (2.0 * tm).sin() + 0.01 * b, 0.02 * tm.cos());
-    let rest = vec(-0.25, 1.02, 0.27) + idle + shift(1.02);
+    // (dancing, it conducts: up and out, swinging across over two beats and
+    // bouncing on each)
+    let conduct = vec(-0.06 * (PI * dr.beat).sin(), 0.14 + 0.06 * on_beat, 0.08);
+    let rest = vec(-0.25, 1.02, 0.27) + idle + scale(groove, conduct) + shift(1.02);
     // (pointing to his left means reaching across the body, so aim higher and more
     // forward to keep the arm clear of the beard)
     let aim_dir = if dr.free {
@@ -289,7 +302,8 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         thumb,
         pix: 0.0008,
         // doubling for every 4 units/s of climb
-        runes: if dr.free { clamp(0.1, 3.0, 2f32.powf(dr.climb / 4.0)) } else { 1.0 },
+        // (and they flash on the beat, dancing)
+        runes: (if dr.free { clamp(0.1, 3.0, 2f32.powf(dr.climb / 4.0)) } else { 1.0 }) * (1.0 + 1.5 * groove * (-6.0 * fract(dr.beat)).exp()),
         // three quick blinks per loop (every 4 s), each about 0.2 s long
         blink: {
             let d = (fract(3.0 * tm / (2.0 * PI) + 0.15) - 0.5) * 28.0;

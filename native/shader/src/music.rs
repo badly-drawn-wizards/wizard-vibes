@@ -620,6 +620,23 @@ pub const songs: i32 = 5;
 #[cfg(not(target_arch = "spirv"))]
 pub const song_names: [&str; 5] = ["Wizard disco", "Cracktro", "Starscape", "Glitch Familiar", "Wub Ward"];
 
+// The beat a song is danced to (beats a minute): its tempo, but the
+// dubstep's half time.
+#[inline]
+pub fn song_bpm(song: i32) -> f32 {
+    if song == 1 {
+        crate::chip::bpm
+    } else if song == 2 {
+        crate::stars::bpm
+    } else if song == 3 {
+        crate::glitch::bpm
+    } else if song == 4 {
+        0.5 * crate::wub::bpm
+    } else {
+        bpm
+    }
+}
+
 // A song's loop, in seconds.
 #[inline]
 pub fn song_period(song: i32) -> f32 {

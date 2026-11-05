@@ -115,6 +115,22 @@ impl Music {
         }
     }
 
+    // Where in the song's loop the music playing now is (seconds), if it
+    // plays (by the mixer's clock: what has been mixed).
+    pub fn position(&self, now: f64) -> Option<f64> {
+        let p = self.play.as_ref()?;
+        if !self.on || self.lap == 0 || self.rate == 0 {
+            return None;
+        }
+        let c = frame_at(now, self.rate);
+        let s = match p.loop_at {
+            Some(a) if c >= a => c - a,
+            _ if c >= p.start => p.from as u64 + (c - p.start),
+            _ => return None,
+        };
+        Some((s % self.lap as u64) as f64 / self.rate as f64)
+    }
+
     #[cfg(test)]
     pub fn looping(&self) -> bool {
         self.looped.is_some()
@@ -382,6 +398,24 @@ mod tests {
             s += d.len() / 2;
         }
         assert_eq!(s, 2 * LAP);
+    }
+
+    #[test]
+    fn the_position_follows_the_clock_round_the_loop() {
+        let mut m = Music::new();
+        let mut t = 0.0;
+        assert_eq!(m.position(t), None);
+        session(&mut m, &mut t, 1.0, false, Some(0.0));
+        // (playing: from START after it was turned on, round the loop)
+        let a = m.position(t).unwrap();
+        let b = m.position(t + 0.1).unwrap();
+        assert!((0.0..PERIOD as f64).contains(&a));
+        let d = (b - a).rem_euclid(PERIOD as f64);
+        assert!((d - 0.1).abs() < 1e-3, "{a} {b}");
+        // (off: none)
+        let mut out = vec![];
+        m.set_on(false, t, RATE, &mut out);
+        assert_eq!(m.position(t), None);
     }
 
     #[test]

@@ -35,6 +35,10 @@ pub struct App {
     start: Instant,
     last: Instant,
     fps: f32,
+    // dancing: how much (eased), the beat, and its rate (beats a second)
+    groove: f32,
+    beat: f64,
+    beat_rate: f64,
     // the render scale (by hand, or dynamic: see scale.rs)
     scale: crate::scale::RenderScale,
     drawer: bool,
@@ -126,6 +130,9 @@ impl App {
             drawer,
             device_error,
             device_errors_shown: 0,
+            groove: 0.0,
+            beat: 0.0,
+            beat_rate: 2.0,
             unsupported: cc.wgpu_render_state.as_ref().and_then(|rs| {
                 let caps = rs.adapter.get_downlevel_capabilities();
                 if caps.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS) {
@@ -450,7 +457,22 @@ impl App {
             let h = ((rect.height() * ppp * scale) as u32).max(1);
             let (Some(rs), Some(p), None) = (&rs, &self.params, &self.unsupported) else { return };
             let mut values = p.values();
-            let out = self.game.step(&ctx, &view, dt, &values);
+            let mut out = self.game.step(&ctx, &view, dt, &values);
+            // he dances to the music: on its beat while it plays, easing in
+            // and out (the beat carrying on as he stops)
+            match self.audio.music_position() {
+                Some((song, secs)) => {
+                    self.beat_rate = wizard_shader::music::song_bpm(song as i32) as f64 / 60.0;
+                    self.beat = secs * self.beat_rate;
+                    self.groove += (1.0 - self.groove) * (1.0 - (-dt / 0.6).exp());
+                }
+                None => {
+                    self.beat += dt as f64 * self.beat_rate;
+                    self.groove *= (-dt / 0.4).exp();
+                }
+            }
+            out.drive.groove = self.groove;
+            out.drive.beat = self.beat as f32;
             for (k, v) in &out.overrides {
                 values.0.insert(k.clone(), v.clone());
             }

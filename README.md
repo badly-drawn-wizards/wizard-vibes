@@ -21,6 +21,8 @@ edit the app and it is patched where it runs.
   groves, and alpine mountains with towers, with rivers, clouds and fog.
 - A glass orb that refracts and reflects, with lightning inside it; potions,
   a tome, runes that glow with his flight.
+- He dances to the music: on its beat, he bobs, sways, conducts and taps
+  his staff, and the runes flash.
 - Five songs, computed as pure functions of time: a disco (its voices
   modelled on a reference track's stems, its harpsichord on measurements
   of a 1709 instrument), a chiptune cracktro, Starscape (an orchestral

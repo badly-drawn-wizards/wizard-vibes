@@ -145,6 +145,12 @@ impl Audio {
         self.flush();
     }
 
+    // The song playing and where in its loop (seconds), if one plays.
+    pub fn music_position(&mut self) -> Option<(u32, f64)> {
+        let now = self.out.as_mut()?.now();
+        Some((self.song, self.music.position(now)?))
+    }
+
     pub fn music_on(&self) -> bool {
         self.music.on
     }
