@@ -622,7 +622,8 @@ pub fn light_at(pose: Pose, g: Glow, k: i32) -> Light {
         // Its shadow rays stop short of it; and the staff layer takes no
         // shadows from it (a branch cannot really shadow a light at its own
         // tip, and its shadow rays graze every swelling and knot).
-        let c = scale(pose.prm.orb_light * g.level, mix(vec(0.6, 0.5, 1.0), vec(0.9, 0.95, 1.0), 0.6 * g.flash) * pose.bolt_tint);
+        // (defeated, gone with him; as the potions' below)
+        let c = scale(if pose.dead { 0.0 } else { pose.prm.orb_light * g.level }, mix(vec(0.6, 0.5, 1.0), vec(0.9, 0.95, 1.0), 0.6 * g.flash) * pose.bolt_tint);
         Light {
             pos: pose.orb,
             directional: false,
@@ -641,7 +642,7 @@ pub fn light_at(pose: Pose, g: Glow, k: i32) -> Light {
         // (whole multiples of the loop).
         let i = k - 2;
         let flicker = 1.0 + 0.12 * ((7 + 3 * i) as f32 * pose.tm + i as f32 * 2.1).sin();
-        let c = scale(pose.prm.potion_light * flicker, glow_colour(pose.prm, m_potion + i));
+        let c = scale(if pose.dead { 0.0 } else { pose.prm.potion_light * flicker }, glow_colour(pose.prm, m_potion + i));
         Light {
             pos: from_body_space(pose, potion_centre(gear_of(pose.prm), i)),
             directional: false,
@@ -802,21 +803,54 @@ pub const glass_tint: Vec3 = Vec3::new(0.93, 0.97, 1.0);
 
 // Distances (entry, exit) where the ray meets the orb; entry > exit on a miss.
 #[inline]
-// Where the ray ro + t rd meets the orb's glass, sphere-traced (within a
-// bounding sphere a little wider): from outside, where it enters (else
-// infinity), and the far side of the bound; from inside, where it leaves
-// (-infinity, then). With the glass's normals there.
-pub fn orb_hit(pose: Pose, ro: Vec3, rd: Vec3, inside: bool) -> (f32, f32, Vec3) {
-    let sdf = move |q: Vec3| sd_sphere(q - pose.orb, orb_radius);
-    let (a, b) = ray_sphere(pose.orb, orb_radius + 0.02, ro, rd);
-    if a > b || b < 0.0 {
-        (INF, -INF, vec(0.0, 1.0, 0.0))
-    } else if inside {
-        let (hit, t, n) = glass_hit(sdf, 24, ro, rd, 1e-3, b);
-        (-INF, if hit { t } else { b }, n)
+// The orbs: 0 his (unless hidden, or he is defeated), 1 + i enemy i's
+// (while it stands): centre and radius (his space), and the colour its
+// glass takes (his clear).
+pub fn orb_of(pose: Pose, k: i32) -> Option<(Vec3, f32, Vec3)> {
+    let vis = pose.prm.layers;
+    if k == 0 {
+        if has(vis, layers_orb) && !pose.dead { Some((pose.orb, orb_radius, splat(1.0))) } else { None }
+    } else if has(vis, layers_enemies) && k - 1 < pose.prm.enemies.min(max_enemies) {
+        enemy_orb_at(pose.prm, pose.foes, k - 1, pose.secs, pose.fl)
     } else {
-        let (hit, t, n) = glass_hit(sdf, 24, ro, rd, a.maximum(1e-3), b);
-        if hit { (t, b, n) } else { (INF, -INF, n) }
+        None
+    }
+}
+
+// Where the ray ro + t rd meets an orb's glass, sphere-traced (each within
+// a bounding sphere a little wider): from outside (`within` -1), where it
+// first enters one (else infinity), the far side of its bound, and which;
+// from inside orb `within`, where it leaves (-infinity, then). With the
+// glass's normal there.
+pub fn orbs_hit(pose: Pose, ro: Vec3, rd: Vec3, within: i32) -> (f32, f32, Vec3, i32) {
+    let trace = move |k: i32, inside: bool| -> (f32, f32, Vec3) {
+        let Some((c, r, _)) = orb_of(pose, k) else { return (INF, -INF, vec(0.0, 1.0, 0.0)) };
+        let sdf = move |q: Vec3| sd_sphere(q - c, r);
+        let (a, b) = ray_sphere(c, r + 0.02, ro, rd);
+        if a > b || b < 0.0 {
+            (INF, -INF, vec(0.0, 1.0, 0.0))
+        } else if inside {
+            let (hit, t, n) = glass_hit(sdf, 24, ro, rd, 1e-3, b);
+            (-INF, if hit { t } else { b }, n)
+        } else {
+            let (hit, t, n) = glass_hit(sdf, 24, ro, rd, a.maximum(1e-3), b);
+            if hit { (t, b, n) } else { (INF, -INF, n) }
+        }
+    };
+    if within >= 0 {
+        let (a, b, n) = trace(within, true);
+        (a, b, n, within)
+    } else {
+        let mut best = (INF, -INF, vec(0.0, 1.0, 0.0), -1);
+        let mut k = 0;
+        while k <= max_enemies {
+            let (a, b, n) = trace(k, false);
+            if a < best.0 {
+                best = (a, b, n, k);
+            }
+            k += 1;
+        }
+        best
     }
 }
 
@@ -933,25 +967,33 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
     let (mut ro, mut rd, mut w, mut acc, mut inside, mut done, mut refl, mut first): (Vec3, Vec3, Vec3, Vec3, bool, bool, Reflection, f32) =
         (ro0, rd0, splat(w0), splat(0.0), false, false, (false, ro0, rd0, 0f32), INF);
     let mut seg = 0;
+    // (the orb the ray is in: 0 his, 1 + i enemy i's)
+    let mut within = -1i32;
     while seg < 3 {
+        let mut entering = within;
         let next: (Vec3, Vec3, Vec3, Vec3, bool, bool, Reflection, f32) = if done {
             (ro, rd, w, acc, inside, done, refl, first)
         } else {
             let vis = pose.prm.layers;
             // (a hidden orb is no glass at all)
-            let (t_in, t_out, n_orb) = if has(vis, layers_orb) && !pose.dead { orb_hit(pose, ro, rd, inside) } else { (INF, -INF, vec(0.0, 1.0, 0.0)) };
+            let (t_in, t_out, n_orb, k_orb) = orbs_hit(pose, ro, rd, if inside { within } else { -1 });
             let enters = !inside && t_in > 1e-3 && t_in < t_out;
             let tmax = if inside { t_out } else if enters { t_in } else { pose.prm.view_distance };
+            // (an enemy's orb lies beyond the scene near him: on the way to
+            // it, the land and the enemies are in the way as ever; inside
+            // it, nothing)
+            let far_orb = (enters && k_orb > 0) || (inside && within > 0);
+            let skip = inside || (enters && !far_orb);
             // Two passes: the terrain alone over the whole segment, then the
             // scene near the wizard up to the terrain hit or the edge of the
             // sphere that holds it (the peaks reach into that sphere, so the
             // terrain goes first). Neither pass evaluates the other's
             // geometry at every step.
             let (t_terrain, m_land) =
-                if inside || enters || !(has(vis, land_layers)) { (INF, 0) } else { march_terrain(vis, pose, ro, rd, tmax) };
+                if skip || !(has(vis, land_layers)) { (INF, 0) } else { march_terrain(vis, pose, ro, rd, tmax) };
             // the enemies, in front of the land (a pass of their own, which
             // most rays skip: see march_enemies)
-            let (t_terrain, m_land) = if inside || enters || !(has(vis, layers_enemies)) || pose.prm.enemies <= 0 {
+            let (t_terrain, m_land) = if skip || !(has(vis, layers_enemies)) || pose.prm.enemies <= 0 {
                 (t_terrain, m_land)
             } else {
                 let (te, me) = march_enemies(pose.prm, pose.foes, pose.secs, pose.fl, ro, rd, tmax.minimum(t_terrain));
@@ -960,12 +1002,18 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
             let local_end = 0f32.maximum(ray_sphere(occluder_centre, local_radius, ro, rd).1);
             let local_max = tmax.minimum(t_terrain.minimum(local_end));
             let (t, m, emitted, tr) = march(move |tol, q| local_scene(vis, pose, tol, q), move |q| media(pose, g, q), ro, rd, local_max);
-            let (t, m) = if m < 0 && t_terrain < tmax { (t_terrain, m_land) } else { (t, m) };
+            let (t, m) = if m < 0 && t_terrain < tmax {
+                (t_terrain, m_land)
+            } else if m < 0 && far_orb {
+                (tmax, m)
+            } else {
+                (t, m)
+            };
             // the glows are above the cloud slab, so in front of the clouds
             let (cloud_rad, cloud_tr) =
                 if has(vis, layers_clouds) { clouds(pose, ro, rd, if m >= 0 { t } else { tmax }) } else { (splat(0.0), 1.0) };
             // the potions' glass, in front of whatever this segment reaches
-            let (glass_added, glass_through) = if inside || !(has(vis, layers_gear)) {
+            let (glass_added, glass_through) = if inside || !(has(vis, layers_gear)) || pose.dead {
                 (splat(0.0), splat(1.0))
             } else {
                 glass(pose, g, ro, rd, if m >= 0 { t } else { local_max })
@@ -992,13 +1040,31 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
             } else if enters && t >= t_in {
                 // into the glass
                 let p = ro + scale(t_in, rd);
+                entering = k_orb;
                 let fr = fresnel_at(pose.prm.orb_ior, rd, n_orb);
                 let refl = if refl.0 { refl } else { (true, p, fr.reflected, w.x * fr.f) };
                 (p, fr.refracted, scale(1.0 - fr.f, w * glass_tint), acc, true, false, refl, first)
             } else if inside && t >= t_out {
                 // out of the glass
+                // (an enemy's: its spell's colour through it, and what fills
+                // it, as his does his, gathered along the way through)
                 let p = ro + scale(t_out, rd);
-                (p, fresnel_at(1.0 / pose.prm.orb_ior, rd, n_orb).refracted, w * glass_tint, acc, false, false, refl, first)
+                let (tint, glow) = match orb_of(pose, within) {
+                    Some((c, _, col)) if within > 0 => {
+                        let n = 16;
+                        let dt = t_out / n as f32;
+                        let mut sum = splat(0.0);
+                        let mut j = 0;
+                        while j < n {
+                            let q = ro + scale((j as f32 + 0.5) * dt, rd);
+                            sum = sum + scale(dt, enemy_orb_media(pose.prm, pose.foes, within - 1, pose.secs, pose.tm, pose.fl, c, q).radiance);
+                            j += 1;
+                        }
+                        (mix(splat(1.0), col, 0.5), sum)
+                    }
+                    _ => (splat(1.0), splat(0.0)),
+                };
+                (p, fresnel_at(1.0 / pose.prm.orb_ior, rd, n_orb).refracted, w * glass_tint * tint, acc + (w * glow), false, false, refl, first)
             } else {
                 (ro, rd, w, acc + (w * sky(pose, to_world_dir(pose.fl, rd))), inside, true, refl, first)
             }
@@ -1008,6 +1074,7 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
         w = next.2;
         acc = next.3;
         inside = next.4;
+        within = if inside { entering } else { -1 };
         done = next.5;
         refl = next.6;
         first = next.7;

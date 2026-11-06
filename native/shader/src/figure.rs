@@ -760,7 +760,8 @@ pub fn bounded_figure(mask: i32, pose: Pose, tol: f32, p: Vec3) -> Hit {
     let b = wizard_bound(p);
     let q = staff_rest(pose, p);
     let sb = staff_bound(q);
-    // (defeated, he is drawn coming apart as an enemy: see him_dying)
+    // (defeated, he is drawn coming apart as an enemy: see him_dying; an
+    // enemy's own pose is never dead)
     if !(has(mask, figure_layers)) || pose.dead {
         nothing
     } else {

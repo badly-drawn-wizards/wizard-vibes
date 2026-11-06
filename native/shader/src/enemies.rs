@@ -630,15 +630,51 @@ pub fn enemy_figure(prm: Params, i: i32, lk: Looks, secs: f32, q: Vec3, parts: i
             | (if parts & parts_staff != 0 { layers_staff } else { 0 })
             | (if body && !hat { no_hat } else { 0 })
             | (if hat && !body { only_hat } else { 0 });
-        // (its orb a glowing sphere, in the colour of its spell: his is
-        // drawn apart, as glass)
+        // (its orb is glass, as his, drawn apart: see enemy_orb_at)
         let (d, fm) = if mask & figure_layers != 0 { bounded_figure(mask, ep, 0.1, q) } else { nothing };
-        let h = (d, m_enemy_full + full_parts * i + hit_material(fm));
-        if parts & parts_staff != 0 { umin((sd_sphere(q - ep.orb, orb_radius), m + part_orb), h) } else { h }
+        let _ = m;
+        (d, m_enemy_full + full_parts * i + hit_material(fm))
     } else {
         let (d, part) = sd_enemy_figure(lk, secs, q, parts);
         (d, m + part)
     }
+}
+
+// Enemy i's orb, in his space, while it stands: its centre and radius
+// (where its pose's staff holds it, at its size), and its spell's colour,
+// which its glass takes (see orbs_hit in shading.rs).
+pub fn enemy_orb_at(prm: Params, fs: Foes, i: i32, secs: f32, fl: Flight) -> Option<(Vec3, f32, Vec3)> {
+    let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
+    if e.dying >= 0.0 || !shown(e) || i == fs.him {
+        return None;
+    }
+    let lk = looks_in(prm, fs, e.r#gen, i);
+    let dr = Drive { spell: lk.spell as f32, ..on_path };
+    let s = secs + lk.phase;
+    let q = staff_hold(prm, dr, flight_of(prm, dr, s)).at(orb_pos());
+    let world = e.pos + yaw(e.yaw, scale(e.size, q));
+    let tint = if lk.spell == 0 { vec(1.0, 0.42, 0.12) } else if lk.spell == 2 { vec(0.4, 0.88, 1.0) } else { vec(0.7, 0.78, 1.0) };
+    Some((to_local_dir(fl, world - fl.pos), orb_radius * e.size, tint))
+}
+
+// What fills enemy i's orb, at p in his space (inside it: the same flames,
+// whirlwind or lightning as his, by its spell, and the haze), as his own
+// orb's media has them; taken in the orb's own frame (round orb_pos, as
+// his are), turned with the enemy and at its size.
+pub fn enemy_orb_media(prm: Params, fs: Foes, i: i32, secs: f32, tm: f32, fl: Flight, centre: Vec3, p: Vec3) -> MediaSample {
+    let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
+    let lk = looks_in(prm, fs, e.r#gen, i);
+    let q = orb_pos() + scale(1.0 / e.size.maximum(0.05), yaw_inv(e.yaw, to_world_dir(fl, p - centre)));
+    let fx = if lk.spell == 0 {
+        fire_media(secs, q)
+    } else if lk.spell == 2 {
+        wind_media(secs, q)
+    } else {
+        let l = lightning_media(tm, q);
+        MediaSample { radiance: scale(prm.lightning, l.radiance), ..l }
+    };
+    let tint = if lk.spell == 0 { vec(1.0, 0.42, 0.12) } else if lk.spell == 2 { vec(0.4, 0.88, 1.0) } else { prm.orb_glow_colour };
+    MediaSample { radiance: fx.radiance + scale(globe_haze, tint), ..fx }
 }
 
 // The enemies near his space's point p (tagged materials).

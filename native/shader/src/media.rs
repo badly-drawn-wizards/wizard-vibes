@@ -58,8 +58,9 @@ pub fn potion_glow_density(prm: Params, ld: f32) -> f32 {
 pub fn media(pose: Pose, g: Glow, p: Vec3) -> MediaSample {
     let tm = pose.tm;
     let vis = pose.prm.layers;
-    let glow = has(vis, layers_glow); // the glow clouds round the orb, runes and potions
-    let orb = has(vis, layers_orb); // the haze and lightning inside the orb
+    // (defeated, his orb and potions are gone with him)
+    let glow = has(vis, layers_glow) && !pose.dead; // the glow clouds round the orb, runes and potions
+    let orb = has(vis, layers_orb) && !pose.dead; // the haze and lightning inside the orb
     // (the orb and its arcs go where the staff holds them)
     let q = staff_rest(pose, p);
     let od = sd_orb(q);
