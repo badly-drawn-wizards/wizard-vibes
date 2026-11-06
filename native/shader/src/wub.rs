@@ -153,24 +153,58 @@ fn pluck(t: f32) -> f32 {
 }
 
 // The drops' riff: per half bar, a note (G, G, Bb, F, G, G, D, F over the
-// four bars' eight halves; G2 and round it) and an LFO rate in beats
-// (1, 1/2, 1/3, 1/4; the triplets every third half bar).
+// four bars' eight halves; G2 and round it), the time into it, and the
+// LFO's phase (see lfo_phase).
 #[inline]
 fn riff(t: f32) -> (f32, f32, f32) {
     let h = ftoi((t / (2.0 * beat)).floor());
     let i = imod(h, 8);
     let note = if i == 2 { 46 } else if i == 3 || i == 7 { 41 } else if i == 6 { 38 } else { 43 };
-    let per = if imod(i, 4) == 0 { 1.0 } else if imod(i, 4) == 1 { 0.5 } else if imod(i, 4) == 2 { 1.0 / 3.0 } else { 0.25 };
     let u = t - h as f32 * 2.0 * beat;
-    (freq(note as f32), per * beat, u)
+    (freq(note as f32), lfo_phase(t), u)
+}
+
+// The LFO's rate in half bar m (cycles a second): one, two, three, four a
+// beat, by the half bar.
+#[inline]
+fn lfo_rate(m: i32) -> f32 {
+    (imod(m, 4) + 1) as f32 / beat
+}
+
+// The LFO's phase (in cycles) at t, running on through each drop: in each
+// half bar its rate eases from the last half bar's to its own over `glide`
+// (along a smoothstep), so the wobble speeds up and slows down rather than
+// jumping; a smoothstep integrates in closed form (x^3 - x^4 / 2), so the
+// phase is still a function of t alone: the half bars before, whole, and
+// this one so far.
+const glide: f32 = 0.6 * beat;
+#[inline]
+fn lfo_phase(t: f32) -> f32 {
+    let seg = 2.0 * beat;
+    let h0 = 16 * ftoi((t / (8.0 * bar)).floor()); // the drop's first half bar
+    let h = ftoi((t / seg).floor());
+    let part = move |m: i32, u: f32| {
+        let r = lfo_rate(m);
+        let was = if m == h0 { r } else { lfo_rate(m - 1) };
+        let x = saturate(u / glide);
+        let eased = if u < glide { glide * (x * x * x - 0.5 * x * x * x * x) } else { u - 0.5 * glide };
+        was * u + (r - was) * eased
+    };
+    let mut ph = 0.0f32;
+    let mut m = h0;
+    while m < h {
+        ph = fract(ph + part(m, seg));
+        m += 1;
+    }
+    ph + part(h, t - h as f32 * seg)
 }
 
 // The wobble: a reese (two saws, 0.4% apart) through a resonant low-pass,
-// its cutoff swung from near the note up to 25 times it by the LFO (a
-// period of `lfo` seconds), driven hard.
+// its cutoff swung from near the note up to 25 times it by the LFO (at
+// phase `ph`, in cycles), driven hard.
 #[inline]
-fn wobble(f: f32, u: f32, lfo: f32) -> f32 {
-    let w = 0.5 - 0.5 * (tau * u / lfo).cos();
+fn wobble(f: f32, u: f32, ph: f32) -> f32 {
+    let w = 0.5 - 0.5 * (tau * ph).cos();
     let fc = f * (1.3 + 24.0 * w * w);
     let s = saw_lp(f * 0.998, u, fc, 1.6, 40) + saw_lp(f * 1.002, u, fc, 1.6, 40);
     drive(0.7 * s, 3.0)
@@ -179,8 +213,8 @@ fn wobble(f: f32, u: f32, lfo: f32) -> f32 {
 // The talking bass: a formant voice whose vowel the LFO moves from "o" (450,
 // 800 Hz) to "i" (300, 2200 Hz) and back: yoi; driven.
 #[inline]
-fn talk(f: f32, u: f32, lfo: f32) -> f32 {
-    let w = 0.5 - 0.5 * (tau * u / lfo).cos();
+fn talk(f: f32, u: f32, ph: f32) -> f32 {
+    let w = 0.5 - 0.5 * (tau * ph).cos();
     let f1 = 450.0 - 150.0 * w;
     let f2 = 800.0 + 1400.0 * w;
     drive(0.5 * formant(f, u, f1, f2, 40), 2.5)
@@ -192,7 +226,7 @@ fn talk(f: f32, u: f32, lfo: f32) -> f32 {
 wizard_shader_macros::melody!(
     theme_code,
     8,
-    "5 - 4 3 4 - 1 . | 3 - 2 1 2 - . . | 3 - 4 5 6 - 5 . | 4 - 3 2 1 - - ."
+    "5 - 4 3 4 - 1 . | 3 - 1 . 3 - 6 . | 3 - 4 5 6 - 5 . | 4 - 3 2 1 - - ."
 );
 
 // The theme at t: the note sounding (MIDI, an octave shifted by `octave`),
@@ -279,7 +313,7 @@ pub fn parts(rate: f32, t: f32) -> (f32, f32, f32) {
             (0.0, 0.0)
         };
         // (the theme on a bell in the intro)
-        let bell = if k == 0 { 0.33 * bell_theme(t) } else { 0.0 };
+        let bell = if k == 0 { 0.24 * bell_theme(t) } else { 0.0 };
         let l = pg * pl + 0.6 * pk + kick + hats + rl + riser + 0.45 * bell;
         let r = pg * pr + 0.4 * pk + kick + hats + rl + riser + 0.55 * bell;
         return (l, r, 0.6 * pg * (pl + pr) + 0.5 * pk + 0.6 * rl + 0.4 * riser + 0.7 * bell);
@@ -305,7 +339,7 @@ pub fn parts(rate: f32, t: f32) -> (f32, f32, f32) {
     let (bass, sub) = if fill {
         let slide = (0.5f32).powf(saturate(u / (2.0 * beat)));
         let fu = f * u * (1.0 + slide) * 0.5;
-        (wobble(f, fu / f, 0.25 * beat), (tau * 0.5 * fu).sin())
+        (wobble(f, fu / f, lfo), (tau * 0.5 * fu).sin())
     } else {
         (bass, sub)
     };
@@ -331,6 +365,31 @@ pub fn parts(rate: f32, t: f32) -> (f32, f32, f32) {
 
 #[cfg(all(test, not(target_arch = "spirv")))]
 mod tests {
+    // The LFO's phase runs on smoothly through a drop: no jumps at the half
+    // bars (where its rate changes), always forwards, at the half bar's own
+    // rate once eased into it.
+    #[test]
+    fn the_wobble_glides() {
+        let t0 = 16.0 * super::bar; // the first drop
+        let dt = 1e-3;
+        let mut last = super::lfo_phase(t0);
+        let mut worst = 0f32;
+        let mut t = t0 + dt;
+        while t < t0 + 8.0 * super::bar - dt {
+            let ph = super::lfo_phase(t);
+            let step = (ph - last).rem_euclid(1.0);
+            worst = worst.max(step);
+            last = ph;
+            t += dt;
+        }
+        // (at most four cycles a beat: some 0.0093 a millisecond)
+        assert!(worst < 0.0105, "{worst}");
+        // late in a half bar, its own rate
+        let h = 16.0 * super::bar + 2.0 * (2.0 * super::beat) + 1.5 * super::beat;
+        let rate = ((super::lfo_phase(h + 1e-3) - super::lfo_phase(h)).rem_euclid(1.0)) / 1e-3;
+        assert!((rate - super::lfo_rate(2)).abs() < 0.1, "{rate}");
+    }
+
     // (the theme's voices' levels over four bars, for the mix)
     #[test]
     fn the_theme_voices() {
