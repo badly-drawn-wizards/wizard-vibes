@@ -14,7 +14,7 @@ pub enum Action {
     Right,
     Climb,
     Descend,
-    Boost,
+    Dash,
     Cast,
     Shield,
     // the spells, in SPELL_NAMES's order
@@ -32,7 +32,7 @@ pub const ACTIONS: [Action; 17] = [
     Action::Right,
     Action::Climb,
     Action::Descend,
-    Action::Boost,
+    Action::Dash,
     Action::Cast,
     Action::Shield,
     Action::Spell(0),
@@ -54,7 +54,7 @@ impl Action {
             Action::Right => "Right",
             Action::Climb => "Climb",
             Action::Descend => "Descend",
-            Action::Boost => "Boost",
+            Action::Dash => "Dash",
             Action::Cast => "Cast",
             Action::Shield => "Shield (hold)",
             Action::Spell(i) => ["Spell slot 1", "Spell slot 2", "Spell slot 3", "Spell slot 4"][i.min(3)],
@@ -242,7 +242,7 @@ impl Default for Binds {
             (Action::Right, k(K::D), None),
             (Action::Climb, k(K::E), Some(PadButton::RT)),
             (Action::Descend, k(K::Q), Some(PadButton::LT)),
-            (Action::Boost, Some(KeyBind::Shift), Some(PadButton::LS)),
+            (Action::Dash, Some(KeyBind::Shift), Some(PadButton::LS)),
             (Action::Cast, Some(KeyBind::Mouse(egui::PointerButton::Primary)), Some(PadButton::RB)),
             (Action::Shield, Some(KeyBind::Mouse(egui::PointerButton::Secondary)), Some(PadButton::LB)),
             (Action::Spell(0), k(K::Num1), Some(PadButton::X)),
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn kept_and_restored() {
         let mut b = Binds::default();
-        b.set_key(Action::Boost, KeyBind::Ctrl);
+        b.set_key(Action::Dash, KeyBind::Ctrl);
         b.set_key(Action::Mode, KeyBind::Mouse(egui::PointerButton::Middle));
         b.set_pad(Action::ZoomIn, PadButton::RS);
         assert_eq!(Binds::restored(&b.saved()), b);

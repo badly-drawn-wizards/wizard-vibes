@@ -122,6 +122,8 @@ pub struct Game {
     picture: Option<Picture>,
     // the enemies fighting, as last logged
     enemies_shown: usize,
+    // dash pressed (taken by the flight this step)
+    dash: bool,
     // (?open=die-...: defeated by that, so many frames into the fight)
     die_soon: Option<(u32, u32)>,
     // the souls he has gathered, all told (to spend: the start of an
@@ -293,6 +295,7 @@ impl Game {
             over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
             picture: None,
             enemies_shown: 0,
+            dash: false,
             die_soon: None,
             souls: get(STORE_SOULS).and_then(|v| v.parse().ok()).unwrap_or(0),
             ffa: get(STORE_FFA).as_deref() == Some("1"),
@@ -598,7 +601,7 @@ impl Game {
                     right: down(Action::Right) || i.key_down(Key::ArrowRight),
                     up: down(Action::Climb),
                     down: down(Action::Descend),
-                    boost: down(Action::Boost),
+                    boost: down(Action::Dash),
                 };
                 casting = down(Action::Cast);
                 self.combat.shield.wanted = down(Action::Shield);
@@ -667,6 +670,7 @@ impl Game {
                     Action::Mode => self.cycle_mode(),
                     Action::Pause => self.pause_pressed(),
                     Action::Spell(k) => self.select_slot(k),
+                    Action::Dash => self.dash = true,
                     // (defeated, and time stopped: casting opens the skill
                     // tree, the shield tries again)
                     Action::Cast if self.settled() && !self.paused => self.ask_skills(),
@@ -873,14 +877,12 @@ impl Game {
             pic.at = vec::add(pic.at, vec::scale(speed * dt, step));
         }
         let (held, stick) = if self.picture.is_some() { (Held::default(), None) } else { (held, stick) };
-        // (channelling healing, he cannot move: no input, and he is brought
-        // to a stop)
+        // (channelling, he cannot speed up: no input; he drifts on, slowing
+        // as the air's drag takes his speed)
         let channelling = self.spells.channel >= 0.0;
         let (held, stick) = if channelling || self.death.is_some() { (flight::Held::default(), None) } else { (held, stick) };
-        self.flight.update(game_dt, self.time, heading + self.orbit.cam.yaw + PI, &held, stick.as_ref());
-        if channelling {
-            self.flight.brake(game_dt);
-        }
+        let dash = std::mem::take(&mut self.dash) || pad.is_some_and(|p| p.dash);
+        self.flight.update(game_dt, self.time, heading + self.orbit.cam.yaw + PI, &held, stick.as_ref(), dash);
         if self.flight.active {
             self.orbit.cam.yaw -= self.flight.heading - heading;
         }

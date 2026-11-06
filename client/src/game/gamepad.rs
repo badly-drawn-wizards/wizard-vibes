@@ -20,7 +20,8 @@ pub struct Pad {
     pub mov: [f32; 2],  // x right, y forward
     pub look: [f32; 2], // x right, y up
     pub up: f32,        // -1..1
-    pub boost: bool,
+    pub boost: bool,          // the dash button held (picture mode's speed)
+    pub dash: bool,           // the dash button pressed since the last read
     pub mode: bool,           // the mode's button pressed since the last read
     pub pause: bool,          // pause's button pressed since the last read
     pub back: bool,           // B pressed since the last read
@@ -164,7 +165,8 @@ impl Pads {
             mov: [mx, my],
             look: [lx, ly],
             up: (value(Action::Climb) - value(Action::Descend)).clamp(-1.0, 1.0),
-            boost: held(Action::Boost),
+            boost: held(Action::Dash),
+            dash: pressed(Action::Dash),
             mode: pressed(Action::Mode),
             pause: pressed(Action::Pause),
             back: hit(PadButton::B),

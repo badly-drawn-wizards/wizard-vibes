@@ -5,7 +5,9 @@
 //
 //   W / S   accelerate the way the camera looks / backwards
 //   A / D   accelerate left / right (of the camera): strafe
-//   E / Q   climb / descend           Shift   boost
+//   E / Q   climb / descend           Shift   dash (a burst of speed the
+//                                     way he steers, climbing or
+//                                     descending too; then a cooldown)
 //
 // or a game controller (see gamepad.rs).
 //
@@ -56,7 +58,8 @@ const SIDE: f32 = 7.0; // sideways
 const CLIMB: f32 = 6.0;
 const BACK: f32 = 0.7; // backwards, of the thrust forwards
 const DRAG: f32 = 0.5; // per second: top speed is thrust / drag
-const BOOST: f32 = 2.5;
+const DASH: f32 = 16.0; // units a second a dash adds
+pub const DASH_COOLDOWN: f32 = 1.2; // seconds before the next
 const TURN_RATE: f32 = 2.5; // how fast the heading follows its aim (1/s)
 const DRIFT: f32 = 0.4; // how far he turns towards his sideways drift (of its angle)
 const MAX_TURN: f32 = 1.2; // rad/s
@@ -87,6 +90,7 @@ pub struct FreeFlight {
     last_vel: V3, // at the end of the last update
     climb: f32,   // vertical speed, smoothed
     time: f32,    // the animation time, as of the last update
+    pub dash_cooldown: f32, // seconds until he can dash again
 }
 
 impl Default for FreeFlight {
@@ -101,6 +105,7 @@ impl Default for FreeFlight {
             last_vel: [0.0, 0.0, SPEED],
             climb: 0.0,
             time: 0.0,
+            dash_cooldown: 0.0,
         }
     }
 }
@@ -141,13 +146,17 @@ impl FreeFlight {
     }
 
     // `view` is the camera's heading in the world (radians from +z towards +x).
-    pub fn update(&mut self, dt: f32, time: f32, view: f32, held: &Held, pad: Option<&Stick>) {
+    // `dash`: dash pressed (a burst of speed the way he steers, up and down
+    // as well; the way the camera looks if he steers nowhere), if its
+    // cooldown is over.
+    pub fn update(&mut self, dt: f32, time: f32, view: f32, held: &Held, pad: Option<&Stick>, dash: bool) {
         self.time = time;
+        self.dash_cooldown = (self.dash_cooldown - dt).max(0.0);
         if !self.active || dt <= 0.0 {
             return;
         }
         let h = held;
-        let boost = if h.boost || pad.is_some_and(|p| p.boost) { BOOST } else { 1.0 };
+        let boost = 1.0;
         let fwd: V3 = [view.sin(), 0.0, view.cos()];
         let right: V3 = [-fwd[2], 0.0, fwd[0]]; // the camera's right
         let b = |x: bool| if x { 1.0 } else { 0.0 };
@@ -160,7 +169,21 @@ impl FreeFlight {
         for i in 0..3 {
             a[i] = fwd[i] * thrust + right[i] * side - DRAG * self.vel[i];
         }
-        a[1] += clamp1(k(h.up, h.down) + pad.map_or(0.0, |p| p.up)) * CLIMB * boost;
+        let climb = clamp1(k(h.up, h.down) + pad.map_or(0.0, |p| p.up));
+        a[1] += climb * CLIMB * boost;
+        if dash && self.dash_cooldown <= 0.0 {
+            let mut d = [0.0; 3];
+            for i in 0..3 {
+                d[i] = fwd[i] * push + right[i] * (side / SIDE);
+            }
+            d[1] += climb;
+            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            let d = if l > 0.1 { d.map(|x| x / l) } else { fwd };
+            for i in 0..3 {
+                self.vel[i] += d[i] * DASH;
+            }
+            self.dash_cooldown = DASH_COOLDOWN;
+        }
         let steering = (thrust / THRUST).abs().max((side / SIDE).abs());
         for i in 0..3 {
             self.vel[i] += a[i] * dt;
@@ -274,7 +297,7 @@ mod tests {
     #[test]
     fn takes_off_from_the_path() {
         let mut f = FreeFlight::default();
-        f.update(0.016, 5.0, 0.0, &Held::default(), None);
+        f.update(0.016, 5.0, 0.0, &Held::default(), None, false);
         assert!(f.set_active(true));
         assert_eq!(f.pos, [path_x(5.0), 12.0, 15.0]);
         assert_eq!(f.place(5.0), (f.pos, path_dx(5.0).atan2(3.0)));
@@ -289,7 +312,7 @@ mod tests {
         let mut f = FreeFlight { active: true, vel: [0.0; 3], ..Default::default() };
         let held = Held { fwd: true, ..Default::default() };
         for _ in 0..2000 {
-            f.update(0.02, 0.0, 0.0, &held, None);
+            f.update(0.02, 0.0, 0.0, &held, None, false);
         }
         // thrust / drag along +z, and facing it
         assert!((f.vel[2] - THRUST / DRAG).abs() < 0.01, "{:?}", f.vel);
@@ -297,7 +320,7 @@ mod tests {
         // S: backwards, to its own top speed, still facing ahead, thumbing
         let held = Held { back: true, ..Default::default() };
         for _ in 0..2000 {
-            f.update(0.02, 0.0, 0.0, &held, None);
+            f.update(0.02, 0.0, 0.0, &held, None, false);
         }
         assert!((f.vel[2] + BACK * THRUST / DRAG).abs() < 0.01, "{:?}", f.vel);
         assert!(f.heading.abs() < 1e-3);
@@ -311,11 +334,24 @@ mod tests {
         let mut f = FreeFlight { active: true, vel: [0.0; 3], ..Default::default() };
         let held = Held { right: true, ..Default::default() };
         for _ in 0..2000 {
-            f.update(0.02, 0.0, 0.0, &held, None);
+            f.update(0.02, 0.0, 0.0, &held, None, false);
         }
         assert!((f.vel[0] + SIDE / DRAG).abs() < 0.01 && f.vel[2].abs() < 0.01, "{:?}", f.vel);
         let want = -DRIFT * std::f32::consts::FRAC_PI_2;
         assert!((f.heading - want).abs() < 1e-3, "{} not {want}", f.heading);
+    }
+
+    #[test]
+    fn a_dash_goes_the_way_he_steers_and_climbs() {
+        let mut f = FreeFlight { active: true, vel: [0.0; 3], ..Default::default() };
+        let held = Held { fwd: true, up: true, ..Default::default() };
+        f.update(0.001, 0.0, 0.0, &held, None, true);
+        // (forward is +z, the view's way; up as much)
+        assert!(f.vel[2] > 10.0 && f.vel[1] > 10.0 && f.vel[0].abs() < 1e-3, "{:?}", f.vel);
+        // (not again until the cooldown is over)
+        let v = f.vel;
+        f.update(0.001, 0.0, 0.0, &held, None, true);
+        assert!((f.vel[2] - v[2]).abs() < 0.1);
     }
 
     #[test]
@@ -324,7 +360,7 @@ mod tests {
         let mut f = FreeFlight { active: true, vel: [0.0; 3], last_vel: [0.0; 3], ..Default::default() };
         let held = Held { fwd: true, right: true, ..Default::default() };
         let view = std::f32::consts::FRAC_PI_2;
-        f.update(0.1, 0.0, view, &held, None);
+        f.update(0.1, 0.0, view, &held, None, false);
         // fwd (1, 0, 0) * 9 + right (0, 0, 1) * 7
         assert!((f.vel[0] - 0.9).abs() < 1e-5 && (f.vel[2] - 0.7).abs() < 1e-5, "{:?}", f.vel);
         assert!((f.pos[0] - 0.09).abs() < 1e-5 && (f.pos[2] - 0.07).abs() < 1e-5);
@@ -343,7 +379,7 @@ mod tests {
     #[test]
     fn ceiling() {
         let mut f = FreeFlight { active: true, pos: [0.0, 79.99, 0.0], vel: [0.0, 5.0, 0.0], ..Default::default() };
-        f.update(0.1, 0.0, 0.0, &Held { up: true, ..Default::default() }, None);
+        f.update(0.1, 0.0, 0.0, &Held { up: true, ..Default::default() }, None, false);
         assert_eq!(f.pos[1], CEILING);
         assert_eq!(f.vel[1], 0.0);
     }
