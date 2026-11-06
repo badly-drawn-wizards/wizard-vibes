@@ -14,3 +14,4 @@ fut/config.fut
 fut/render.fut
 fut/reference.fut
 /native/target/
+.direnv/
