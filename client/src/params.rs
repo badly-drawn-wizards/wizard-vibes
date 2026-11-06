@@ -73,8 +73,10 @@ pub struct Params {
     // the compile-time values in force (the shader's), and those changed
     // here but not yet sent
     pub compile: HashMap<String, Value>,
+    // compile-time changes not yet rebuilt (dirty), and the Recompile button
+    // pressed
     pending: HashMap<String, Value>,
-    pending_since: f64,
+    recompile: bool,
     // whether compile-time changes can go anywhere (a dev server)
     pub can_rebuild: bool,
     // groups the user has opened or closed, by path
@@ -93,7 +95,7 @@ impl Params {
             }
         }
         let open = storage.and_then(|s| eframe::get_value(s, OPEN)).unwrap_or_default();
-        Params { schema, values, compile, pending: HashMap::new(), pending_since: 0.0, can_rebuild: false, open, copied: None }
+        Params { schema, values, compile, pending: HashMap::new(), recompile: false, can_rebuild: false, open, copied: None }
     }
 
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
@@ -118,13 +120,19 @@ impl Params {
         }
     }
 
-    // The compile-time changes to send, once they have settled (half a
-    // second after the last), at time `now` in seconds.
-    pub fn take_compile_changes(&mut self, now: f64) -> Option<HashMap<String, Value>> {
-        if self.pending.is_empty() || now - self.pending_since < 0.5 {
+    // The compile-time changes to send, once the Recompile button asks
+    // (else none): sent, they are no longer dirty.
+    pub fn take_compile_changes(&mut self) -> Option<HashMap<String, Value>> {
+        if !std::mem::take(&mut self.recompile) || self.pending.is_empty() {
             return None;
         }
         Some(std::mem::take(&mut self.pending))
+    }
+
+    // Whether a compile-time parameter has changed since the shader was
+    // last rebuilt (dirty: see Recompile).
+    pub fn dirty(&self, id: &str) -> bool {
+        self.pending.contains_key(id)
     }
 
     fn changes(&self) -> BTreeMap<String, Value> {
@@ -151,6 +159,16 @@ impl Params {
                 let text = serde_json::to_string_pretty(&self.changes()).unwrap();
                 ui.ctx().copy_text(text);
                 self.copied = Some((tr("copied").into(), now));
+            }
+            // (rebuilds the shader with the dirty compile-time parameters)
+            let dirty = self.pending.len();
+            let r = ui
+                .add_enabled(dirty > 0 && self.can_rebuild, egui::Button::new(if dirty > 0 { trf("Recompile ({})", &[&dirty]) } else { tr("Recompile").to_string() }))
+                .on_hover_text(tr("Rebuild the shader with the compile-time parameters changed (marked ●)"))
+                .on_disabled_hover_text(tr(if self.can_rebuild { "Nothing changed to recompile" } else { "Compile-time: fixed without the dev server" }));
+            nav.item(ui, &r);
+            if r.clicked() {
+                self.recompile = true;
             }
             let r = ui.button(tr("Reset all"));
             nav.item(ui, &r);
@@ -227,8 +245,8 @@ impl Params {
 
     fn set_compile(&mut self, id: &str, v: Value, now: f64) {
         self.compile.insert(id.to_string(), v.clone());
+        let _ = now;
         self.pending.insert(id.to_string(), v);
-        self.pending_since = now;
     }
 
     // One labelled control, with a reset-to-default button: a row of the
@@ -241,13 +259,22 @@ impl Params {
         let before = v.clone();
         ui.horizontal(|ui| {
             ui.add_enabled_ui(enabled, |ui| {
-                let label = if p.compile { format!("{} *", tr_key(&p.label)) } else { tr_key(&p.label).to_string() };
+                // (compile-time: starred; changed and not yet rebuilt, marked)
+                let dirty = self.dirty(&p.id);
+                let label = if dirty {
+                    egui::RichText::new(format!("● {} *", tr_key(&p.label))).color(crate::game::hud::FOCUS)
+                } else if p.compile {
+                    egui::RichText::new(format!("{} *", tr_key(&p.label)))
+                } else {
+                    egui::RichText::new(tr_key(&p.label))
+                };
                 let tip = if p.compile {
                     tr(if enabled { "Compile-time: changing it rebuilds the shader" } else { "Compile-time: fixed without the dev server" })
                 } else {
                     ""
                 };
                 let l = ui.label(label);
+                let l = if dirty { l.on_hover_text(tr("Changed: Recompile to rebuild the shader with it")) } else { l };
                 let l = match &p.doc {
                     Some(d) => l.on_hover_text(tr_key(d)),
                     None => l,

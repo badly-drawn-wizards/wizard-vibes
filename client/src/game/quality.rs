@@ -61,6 +61,13 @@ impl Quality {
         self.enabled = enabled;
     }
 
+    // The drawer's own settings, recompiled, run: no level chosen.
+    pub fn custom(&mut self) {
+        self.choice = None;
+        self.stored = None;
+        self.busy = false;
+    }
+
     pub fn choose(&mut self, l: Level) {
         self.choice = Some(l);
         self.stored = Some(l);

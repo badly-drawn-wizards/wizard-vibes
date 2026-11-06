@@ -20,7 +20,7 @@ pub fn rune_glow_density(prm: Params, tm: f32, gd: f32) -> f32 {
 }
 
 // Inside a glass orb, a faint glowing haze.
-pub const globe_haze: f32 = 0.3;
+pub const globe_haze: f32 = 3.0; // (enough to light the glass at a distance, whatever the spell)
 
 // Clouds are lit by the moon, more brightly towards their tops, over a dim
 // ambient; they scatter what they absorb.

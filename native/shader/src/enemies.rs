@@ -657,6 +657,9 @@ pub fn enemy_orb_at(prm: Params, fs: Foes, i: i32, secs: f32, fl: Flight) -> Opt
     Some((to_local_dir(fl, world - fl.pos), orb_radius * e.size, tint))
 }
 
+// (how much brighter the haze in their orbs is than in his)
+pub const ENEMY_HAZE: f32 = 20.0;
+
 // What fills enemy i's orb, at p in his space (inside it: the same flames,
 // whirlwind or lightning as his, by its spell, and the haze), as his own
 // orb's media has them; taken in the orb's own frame (round orb_pos, as
@@ -674,7 +677,8 @@ pub fn enemy_orb_media(prm: Params, fs: Foes, i: i32, secs: f32, tm: f32, fl: Fl
         MediaSample { radiance: scale(prm.lightning, l.radiance), ..l }
     };
     let tint = if lk.spell == 0 { vec(1.0, 0.42, 0.12) } else if lk.spell == 2 { vec(0.4, 0.88, 1.0) } else { prm.orb_glow_colour };
-    MediaSample { radiance: fx.radiance + scale(globe_haze, tint), ..fx }
+    // (brighter than his haze: his orb is lit the more by its glow and light)
+    MediaSample { radiance: fx.radiance + scale(ENEMY_HAZE * globe_haze, tint), ..fx }
 }
 
 // The enemies near his space's point p (tagged materials).

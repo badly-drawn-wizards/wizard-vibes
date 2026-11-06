@@ -291,9 +291,8 @@ impl Game {
         storage.set_string(STORE_FFA, if self.ffa { "1" } else { "0" }.to_string());
         storage.set_string(STORE_SKILLS, self.skills.saved());
         storage.set_string(STORE_SPELL, self.spells.selected.to_string());
-        if let Some(c) = self.quality.choice {
-            storage.set_string(STORE_QUALITY, c.key().to_string());
-        }
+        // (none chosen: the drawer's own settings, recompiled)
+        storage.set_string(STORE_QUALITY, self.quality.choice.map_or("custom", |c| c.key()).to_string());
     }
 
     pub fn set_build(&mut self, info: &BuildInfo) {
@@ -1036,6 +1035,11 @@ impl Game {
     // nothing while it is disabled).
     pub fn quality_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         self.quality.ui(ui, nav);
+    }
+
+    // The drawer's own settings run, not a quality level (none chosen).
+    pub fn quality_custom(&mut self) {
+        self.quality.custom();
     }
 
     // Sets the quality panel up: `level` the level running now, if known;

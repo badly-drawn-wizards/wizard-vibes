@@ -736,8 +736,12 @@ impl App {
         let server = self.source.has_server();
         if let Some(p) = self.params.as_mut() {
             p.can_rebuild = server;
-            if let Some(changes) = p.take_compile_changes(secs) {
+            // (recompiled: the drawer's own build, rebuilt with the changes,
+            // runs from now on, not a quality level's)
+            if let Some(changes) = p.take_compile_changes() {
                 self.source.send_config(changes);
+                self.source.follow(None);
+                self.game.quality_custom();
             }
         }
 

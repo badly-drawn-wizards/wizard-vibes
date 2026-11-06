@@ -1054,15 +1054,21 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32, reflected: boo
                 let p = ro + scale(t_out, rd);
                 let (tint, glow) = match orb_of(pose, within) {
                     Some((c, _, col)) if within > 0 => {
-                        let n = 16;
-                        let dt = t_out / n as f32;
+                        // (stepped as his orb's march steps through his:
+                        // finely where the media ask, so the thin flames and
+                        // arcs are not missed between steps)
                         let mut sum = splat(0.0);
-                        let mut j = 0;
-                        while j < n {
-                            let q = ro + scale((j as f32 + 0.5) * dt, rd);
-                            sum = sum + scale(dt, enemy_orb_media(pose.prm, pose.foes, within - 1, pose.secs, pose.tm, pose.fl, c, q).radiance);
+                        let (mut tt, mut j) = (0.0f32, 0);
+                        while j < 64 && tt < t_out {
+                            let q = ro + scale(tt, rd);
+                            let sm = enemy_orb_media(pose.prm, pose.foes, within - 1, pose.secs, pose.tm, pose.fl, c, q);
+                            let dt = sm.cap.maximum(0.004).minimum(t_out - tt + 1e-4).minimum(0.25 * t_out + 1e-3);
+                            sum = sum + scale(dt, sm.radiance);
+                            tt += dt;
                             j += 1;
                         }
+                        // (the rest of the way, if the steps ran out: its haze)
+                        let sum = sum + scale((t_out - tt).maximum(0.0) * ENEMY_HAZE * globe_haze, col);
                         (mix(splat(1.0), col, 0.5), sum)
                     }
                     _ => (splat(1.0), splat(0.0)),

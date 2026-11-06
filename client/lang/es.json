@@ -295,5 +295,10 @@
  "Learn": "Aprender",
  "Unlocks healing (channelled)": "Desbloquea la curación (canalizada)",
  "Unlocks the wind blades": "Desbloquea las cuchillas de viento",
- "Unlocks the lightning strike": "Desbloquea el rayo"
+ "Unlocks the lightning strike": "Desbloquea el rayo",
+ "Recompile": "Recompilar",
+ "Recompile ({})": "Recompilar ({})",
+ "Rebuild the shader with the compile-time parameters changed (marked ●)": "Recompila el shader con los parámetros de compilación cambiados (marcados con ●)",
+ "Nothing changed to recompile": "Nada que recompilar",
+ "Changed: Recompile to rebuild the shader with it": "Cambiado: Recompilar para recompilar el shader con él"
 }
