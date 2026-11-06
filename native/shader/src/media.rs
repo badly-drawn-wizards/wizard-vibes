@@ -68,9 +68,9 @@ pub fn media(pose: Pose, g: Glow, p: Vec3) -> MediaSample {
     // in the orb: lightning arcs, flames or a whirlwind, by the spell in hand
     let bolts = if !orb {
         no_media
-    } else if pose.spell == 0 {
+    } else if pose.spell == 0 || pose.spell == 6 {
         fire_media(pose.secs, q)
-    } else if pose.spell == 2 || pose.spell == 3 {
+    } else if pose.spell == 2 || pose.spell == 3 || pose.spell == 4 || pose.spell == 7 {
         wind_media(pose.secs, q)
     } else {
         let l = lightning_media(tm, q);

@@ -48,13 +48,25 @@ pub const CHARGE: u32 = 8; // a fire bolt being charged at the orb (his: held)
 pub const WINDUP: u32 = 9; // wind blades warming up at the orb
 pub const WISP: u32 = 10; // a defeated enemy's soul, flying to him (it restores his mana)
 pub const WISP_TAIL: u32 = 11; // a piece of a soul's tail (drawn only: see pack)
+pub const FROST: u32 = 12; // a frost lance: passes through what it hits, slowing it
+pub const MISSILE: u32 = 13; // an arcane missile: homes in on its target (vel: its velocity)
+pub const FALLING: u32 = 14; // a meteor falling to where it was called (top: whence)
+pub const WELL: u32 = 15; // a gravity well: pulls enemies, and their spells, in
+pub const SPIRIT: u32 = 16; // his spirit familiar, circling him and casting missiles
+pub const CHAIN: u32 = 17; // his strike's lightning jumping on to another enemy (drawn only): from pos to vel
+// (his strike chains on from the enemy it hits to the nearest other within
+// CHAIN_RANGE, and so on, CHAIN_JUMPS times, each doing CHAIN_DAMAGE of its
+// damage)
+const CHAIN_RANGE: f32 = 9.0;
+const CHAIN_JUMPS: usize = 2;
+const CHAIN_DAMAGE: f32 = 0.5;
 // (a soul's tail: how much of its path it trails, units, and how far apart
 // the points of its path are kept)
 const TAIL: f32 = 1.8;
 const TAIL_STEP: f32 = 0.05;
 pub const STRIDE: usize = 10;
 
-const LIFE: [f32; 11] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5, 12.0]; // seconds, by kind
+const LIFE: [f32; 18] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5, 12.0, 1.0, 2.0, 3.0, 1.0, 4.0, 12.0, 0.35]; // seconds, by kind
 pub const WARMUP: f32 = 0.5; // seconds wind blades warm up before the first flies
 pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
 const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s, by kind (fire, strike, wind)
@@ -460,6 +472,7 @@ impl Spells {
         let ffa = self.ffa;
         let targets = &self.targets;
         let events = &mut self.events;
+        let mut chains: Vec<(V3, V3)> = Vec::new();
         for s in &mut self.items {
             if s.kind == FIRE || s.kind == WIND {
                 let Some(t) = targets.iter().find(|t| Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r) else {
@@ -490,9 +503,34 @@ impl Spells {
                         None => hits.push((t.side, scale)),
                     }
                 }
+                // (his strike, having hit an enemy: chained on from it)
+                if s.kind == STRIKE && s.owner == HIS && !hits.is_empty() {
+                    let mut from = s.pos;
+                    let mut struck: Vec<i32> = hits.iter().map(|h| h.0).collect();
+                    for _ in 0..CHAIN_JUMPS {
+                        let next = targets
+                            .iter()
+                            .filter(|t| t.side >= 0 && t.r < 1.0 && !struck.contains(&t.side) && dist(t.c, from) < CHAIN_RANGE)
+                            .min_by(|a, b| dist(a.c, from).total_cmp(&dist(b.c, from)));
+                        let Some(t) = next else { break };
+                        events.push(SpellEvent::Hit { side: t.side, kind: STRIKE, owner: HIS, cut: None, scale: CHAIN_DAMAGE });
+                        chains.push((super::vec::add(from, [0.0, 1.0, 0.0]), t.c));
+                        struck.push(t.side);
+                        from = t.c;
+                    }
+                }
                 for (side, scale) in hits {
                     events.push(SpellEvent::Hit { side, kind: s.kind, owner: s.owner, cut: None, scale });
                 }
+            }
+        }
+        // (the chains' arcs, to be seen)
+        let mut rng = Rng::new(self.next_id as u64 * 7919);
+        for (a, b) in chains {
+            if self.launch(CHAIN, a, [0.0, 1.0, 0.0], HIS, None, &mut rng) {
+                let s = self.items.last_mut().unwrap();
+                s.vel = b;
+                s.life = 0.35;
             }
         }
     }
@@ -539,8 +577,9 @@ impl Spells {
                 }
             }
             // (telegraphs stay where they are put; a gust stays where the
-            // blade broke: its velocity only aims the shards)
-            if s.kind != GUST && s.kind != CHARGE && s.kind != WINDUP {
+            // blade broke: its velocity only aims the shards; a chain's is
+            // where it ends)
+            if s.kind != GUST && s.kind != CHARGE && s.kind != WINDUP && s.kind != CHAIN {
                 for i in 0..3 {
                     s.pos[i] += s.vel[i] * dt;
                 }

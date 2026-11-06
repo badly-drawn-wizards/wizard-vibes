@@ -26,6 +26,12 @@
 //                 how far it has been taken into him, shrinking
 //   spell_wisp_tail  a piece of a soul's tail, from (x, y, z) to (a, b, c),
 //                 as wide as age there, and life at its end
+//   spell_frost   a frost lance at (x, y, z) flying at (a, b, c)
+//   spell_missile an arcane missile at (x, y, z) flying at (a, b, c)
+//   spell_falling a meteor at (x, y, z) falling at (a, b, c)
+//   spell_well    a gravity well at (x, y, z)
+//   spell_spirit  his spirit familiar at (x, y, z), flying at (a, b, c)
+//   spell_chain   lightning jumping from (x, y, z) to (a, b, c)
 //
 // Every spell fades out over the last part of its life; the seed makes each
 // one a little different. Any other kind is an empty slot. Positions are in
@@ -46,6 +52,12 @@ pub const spell_charge: i32 = 8;
 pub const spell_windup: i32 = 9;
 pub const spell_wisp: i32 = 10;
 pub const spell_wisp_tail: i32 = 11;
+pub const spell_frost: i32 = 12;
+pub const spell_missile: i32 = 13;
+pub const spell_falling: i32 = 14;
+pub const spell_well: i32 = 15;
+pub const spell_spirit: i32 = 16;
+pub const spell_chain: i32 = 17;
 // (a soul's head's width, and its tail's at its end)
 pub const wisp_head: f32 = 0.05;
 pub const wisp_tip: f32 = 0.003;
@@ -237,6 +249,96 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         let flick = 0.8 + 0.2 * (secs * 17.0 + seed as f32 * 0.37).sin();
         let (_, t, behind) = ray_segment(o, d, tmax, p, q);
         scale(flick * seen(t, behind, 0.3) * wisp_tail(o, d, tmax, secs, seed, p, q, age, life), vec(0.82, 0.95, 1.0))
+    } else if kind == spell_frost {
+        // a shard of ice, long along its flight, pale and bright, a frosty
+        // trail behind it
+        let dir = normalise(q + vec(0.0, 1e-4, 0.0));
+        let (dist, t, behind) = ray_segment(o, d, tmax, p - scale(0.55, dir), p + scale(0.12, dir));
+        let (core, halo) = glow_line(0.03, 0.25, dist);
+        let (td, _, _) = ray_segment(o, d, tmax, p - scale(1.6, dir), p);
+        let trail = (-(td * td) / 0.01).exp();
+        let glint = 0.8 + 0.2 * (secs * 23.0 + i as f32).sin();
+        scale(fade * seen(t, behind, 0.3), scale(4.0 * glint * core, vec(0.8, 0.95, 1.0)) + scale(0.5 * halo + 0.35 * trail, vec(0.45, 0.8, 1.0)))
+    } else if kind == spell_missile {
+        // a small violet bolt, a short trail behind it
+        let tail = p - scale(0.05, q);
+        let (dist, t, behind) = ray_segment(o, d, tmax, tail, p);
+        let (core, halo) = glow_line(0.05, 0.4, dist);
+        scale(fade * seen(t, behind, 0.2), scale(4.0 * core, vec(0.95, 0.75, 1.0)) + scale(0.5 * halo, vec(0.6, 0.3, 1.0)))
+    } else if kind == spell_falling {
+        // a meteor: a great ball of fire, its long tail streaming up behind
+        let tail = p - scale(0.2, q);
+        let (dist, t, behind) = ray_segment(o, d, tmax, tail, p);
+        let (hd, _, _) = ray_segment(o, d, tmax, p, p);
+        let (core, _) = glow_line(0.45, 1.0, hd);
+        let (trail, halo) = glow_line(0.25, 2.5, dist);
+        let flick = 0.85 + 0.15 * (secs * 31.0).sin();
+        let hot = (-(hd * hd) / 0.03).exp();
+        scale(
+            flick * seen(t, behind, 1.0),
+            scale(6.0 * core, mix(vec(1.0, 0.4, 0.08), vec(1.0, 0.9, 0.6), hot)) + scale(2.0 * trail, vec(1.0, 0.35, 0.05)) + scale(0.6 * halo, vec(1.0, 0.3, 0.05)),
+        )
+    } else if kind == spell_well {
+        // a gravity well: a dark heart, rings of light turning round it,
+        // motes falling in
+        let grow = smoothstep(0.0, 0.4, age);
+        let (hd, t, behind) = ray_segment(o, d, tmax, p, p);
+        let rim = (-((hd - 0.35 * grow) * (hd - 0.35 * grow)) / 0.002).exp();
+        let mut rings = 0.0f32;
+        let mut j = 0;
+        while j < 3 {
+            let rr = (0.6 + 0.35 * j as f32) * grow;
+            let tilt = 0.5 * j as f32 - 0.4;
+            let a0 = secs * (2.0 + j as f32) * (if j == 1 { -1.0 } else { 1.0 });
+            let point = move |k: i32| {
+                let a = a0 + 0.9 * k as f32;
+                p + vec(rr * a.cos(), tilt * rr * a.sin(), rr * a.sin())
+            };
+            let (dd, _, _) = ray_polyline(o, d, tmax, 6, point);
+            let (c, h) = glow_line(0.015, 0.12, dd);
+            rings = rings + c + 0.2 * h;
+            j += 1;
+        }
+        let mut motes = 0.0f32;
+        let mut k = 0;
+        while k < 8 {
+            let h1 = hash2(seed + k, 31);
+            let f = fract(secs * 0.7 + h1);
+            let r = 1.6 * (1.0 - f) * grow;
+            let a = 6.28 * h1 + 3.0 * f;
+            let m = p + vec(r * a.cos(), (hash2(seed + k, 32) - 0.5) * r, r * a.sin());
+            let (md, _, _) = ray_segment(o, d, tmax, m, m);
+            motes += (-(md * md) / 0.0006).exp();
+            k += 1;
+        }
+        scale(fade * seen(t, behind, 0.5), scale(1.4 * rim + 1.2 * rings + 1.5 * motes, vec(0.7, 0.5, 1.0)))
+    } else if kind == spell_spirit {
+        // his familiar: a pale glowing orb, two wings beating either side
+        let (hd, t, behind) = ray_segment(o, d, tmax, p, p);
+        let (core, halo) = glow_line(0.08, 0.5, hd);
+        let dir = normalise(vec(q.x, 0.0, q.z) + vec(0.0, 0.0, 1e-4));
+        let side = normalise(cross(dir, vec(0.0, 1.0, 0.0)));
+        let beat = 0.25 * (secs * 9.0).sin();
+        let mut wings = 0.0f32;
+        let mut s = -1.0f32;
+        while s < 1.5 {
+            let tip = p + scale(0.35 * s, side) + vec(0.0, 0.15 + beat, 0.0);
+            let (wd, _, _) = ray_segment(o, d, tmax, p, tip);
+            wings += (-(wd * wd) / 0.0012).exp();
+            s += 2.0;
+        }
+        scale(fade * seen(t, behind, 0.3), scale(3.0 * core + 1.2 * wings, vec(0.9, 0.97, 1.0)) + scale(0.4 * halo, vec(0.55, 0.75, 1.0)))
+    } else if kind == spell_chain {
+        // lightning leaping on: a jagged arc, flickering, fading fast
+        let flick = (secs * 30.0).floor() as i32;
+        let point = move |k: i32| {
+            let f = k as f32 / 8.0;
+            let jit = if k == 0 || k == 8 { 0.0 } else { 0.35 };
+            p + scale(f, q - p) + scale(jit, vec(hash3(seed, k, flick) - 0.5, hash3(seed, k, flick + 7) - 0.5, hash3(seed, k, flick + 13) - 0.5))
+        };
+        let (dd, t, behind) = ray_polyline(o, d, tmax, 8, point);
+        let (core, halo) = glow_line(0.02, 0.2, dd);
+        scale(fade * seen(t, behind, 0.3), scale(4.0 * core, vec(0.85, 0.92, 1.0)) + scale(0.5 * halo, vec(0.5, 0.65, 1.0)))
     } else if kind == spell_burst {
         // An explosion: a billowing fireball that swells fast and cools
         // from yellow-white through orange to a dull red, a shockwave ring

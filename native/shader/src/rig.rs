@@ -377,21 +377,32 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let l_palm = hand_at(l_elbow).0;
     // the orb takes the colour of the spell in hand, and flares as it is cast
     let spell = ftoi(round_even(dr.spell));
-    let orb_tint = if spell == 0 {
+    // (the spells by number: 0 fire bolt, 1 lightning strike, 2 wind
+    // blade, 3 healing, 4 frost lance, 5 arcane missiles, 6 meteor, 7
+    // gravity well, 8 spirit familiar)
+    let orb_tint = if spell == 0 || spell == 6 {
         vec(1.0, 0.42, 0.12)
     } else if spell == 2 {
         vec(0.4, 0.88, 1.0)
     } else if spell == 3 {
         vec(0.45, 1.0, 0.5)
+    } else if spell == 4 {
+        vec(0.6, 0.9, 1.0)
+    } else if spell == 5 || spell == 7 {
+        vec(0.75, 0.5, 1.0)
+    } else if spell == 8 {
+        vec(0.85, 0.95, 1.0)
     } else {
         prm.orb_glow_colour
     };
-    let bolt_tint = if spell == 0 {
+    let bolt_tint = if spell == 0 || spell == 6 {
         vec(1.5, 0.65, 0.25)
-    } else if spell == 2 {
+    } else if spell == 2 || spell == 4 {
         vec(0.7, 1.1, 1.3)
     } else if spell == 3 {
         vec(0.7, 1.3, 0.75)
+    } else if spell == 5 || spell == 7 {
+        vec(1.1, 0.7, 1.4)
     } else {
         splat(1.0)
     };
