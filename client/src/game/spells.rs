@@ -145,7 +145,11 @@ struct Spell {
     power: f32, // a fire bolt's (and its burst's) charge, 0..1
     quiet: bool, // a wind blade that fades at the end of its flight (not bursting)
     trail: Vec<V3>, // a soul's path behind it, newest last (TAIL of it)
+    absorb: f32,    // a soul reaching him: how far it has been taken in (0..1), or -1
 }
+
+// (seconds a soul takes to be taken in, shrinking, its tail drawn after)
+const ABSORB: f32 = 0.35;
 
 // His wind blades held: they come faster as it spins up (spin 0..1), and
 // each heats it; too hot, it overheats and will not fire until it has
@@ -178,6 +182,8 @@ pub struct Spells {
     pub charge: f32,
     pub orb: V3,
     pub gatling: Gatling,
+    // free for all: the enemies' spells hit each other too
+    pub ffa: bool,
     items: Vec<Spell>,
     // each spell's cooldown left (seconds)
     cooldowns: [f32; 4],
@@ -199,6 +205,7 @@ impl Default for Spells {
             charge: -1.0,
             orb: [0.0; 3],
             gatling: Gatling::default(),
+            ffa: false,
             items: Vec::new(),
             cooldowns: [0.0; 4],
             next_id: 1,
@@ -297,6 +304,7 @@ impl Spells {
             power: 0.0,
             quiet: false,
             trail: Vec::new(),
+            absorb: -1.0,
         };
         self.next_id += 1;
         if kind == STRIKE || kind == MARK {
@@ -365,10 +373,12 @@ impl Spells {
         }
     }
 
-    // His bolts and blades in flight (where, and how fast), for the
-    // enemies to dodge.
-    pub fn his_missiles(&self) -> Vec<(V3, V3)> {
-        self.items.iter().filter(|s| s.owner == HIS && (s.kind == FIRE || s.kind == WIND)).map(|s| (s.pos, s.vel)).collect()
+    // The bolts and blades in flight that could hit `side` (where, and how
+    // fast), for it to dodge.
+    pub fn missiles_at(&self, side: i32) -> Vec<(V3, V3)> {
+        let ffa = self.ffa;
+        let t = Target { c: [0.0; 3], r: 0.0, side };
+        self.items.iter().filter(|s| (s.kind == FIRE || s.kind == WIND) && Self::opposed(ffa, s.owner, &t)).map(|s| (s.pos, s.vel)).collect()
     }
 
     // The enemy target nearest his aim, within LOCK_ON of it and in range.
@@ -416,18 +426,20 @@ impl Spells {
         events.push(SpellEvent::Sound { what: Sound::Gust, pos: s.pos });
     }
 
-    // Whether a spell of `owner`'s can hit target t.
-    fn opposed(owner: i32, t: &Target) -> bool {
-        (owner == HIS) != (t.side == HIS)
+    // Whether a spell of `owner`'s can hit target t: his theirs, and
+    // theirs his; free for all (ffa), anyone's anyone else's.
+    fn opposed(ffa: bool, owner: i32, t: &Target) -> bool {
+        if ffa { owner != t.side } else { (owner == HIS) != (t.side == HIS) }
     }
 
     // Bolts and blades that fly into a target; bursts' and strikes' blasts.
     fn collide(&mut self) {
+        let ffa = self.ffa;
         let targets = &self.targets;
         let events = &mut self.events;
         for s in &mut self.items {
             if s.kind == FIRE || s.kind == WIND {
-                let Some(t) = targets.iter().find(|t| Self::opposed(s.owner, t) && dist(s.pos, t.c) < t.r) else {
+                let Some(t) = targets.iter().find(|t| Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r) else {
                     continue;
                 };
                 let cut = if s.kind == WIND { Some((s.pos, blade_normal(s))) } else { None };
@@ -446,7 +458,7 @@ impl Spells {
                 let mut hits: Vec<(i32, f32)> = Vec::new();
                 for t in targets {
                     let d = (dist(s.pos, t.c) - t.r).max(0.0);
-                    if !Self::opposed(s.owner, t) || d >= reach {
+                    if !Self::opposed(ffa, s.owner, t) || d >= reach {
                         continue;
                     }
                     let scale = if s.kind == BURST { (1.0 + 2.0 * s.power) * (1.0 - 0.5 * d / reach) } else { 1.0 };
@@ -475,13 +487,25 @@ impl Spells {
         for s in &mut self.items {
             s.age += dt;
             // (a soul flies to him, faster and faster, turning towards him;
-            // reaching him, it is gone)
+            // reaching him, it is taken in: drawn into him, shrinking, its
+            // tail after it; then gone)
             if s.kind == WISP {
-                let to = sub(super::vec::add(self.here, [0.0, 1.3, 0.0]), s.pos);
+                let heart = super::vec::add(self.here, [0.0, 1.3, 0.0]);
+                let to = sub(heart, s.pos);
                 let d = len(to);
-                if d < 0.6 {
-                    s.age = s.life;
-                    self.events.push(SpellEvent::Soul);
+                if s.absorb < 0.0 && d < 0.6 {
+                    s.absorb = 0.0;
+                }
+                if s.absorb >= 0.0 {
+                    s.absorb += dt / ABSORB;
+                    let k = 1.0 - (-dt * 12.0).exp();
+                    for j in 0..3 {
+                        s.pos[j] += to[j] * k;
+                    }
+                    if s.absorb >= 1.0 {
+                        s.age = s.life;
+                        self.events.push(SpellEvent::Soul);
+                    }
                     continue;
                 }
                 let speed = 4.0 + 14.0 * s.age.min(1.5);
@@ -601,17 +625,19 @@ impl Spells {
                 [s.power, 0.0, 0.0]
             } else if s.kind == WISP {
                 // (a soul: its head, and the first of three points along its
-                // tail; the rest as two more pieces, in free slots)
-                let [a, b, c] = tail_points(&s.trail, s.pos);
-                tails.push([WISP_TAIL as f32, a[0], a[1], a[2], b[0], b[1], b[2], 0.03, 0.014, s.seed]);
-                tails.push([WISP_TAIL as f32, b[0], b[1], b[2], c[0], c[1], c[2], 0.014, 0.003, s.seed]);
+                // tail; the rest as two more pieces, in free slots; taken in,
+                // all of it shrinking, the tail drawn in from its end)
+                let k = 1.0 - s.absorb.clamp(0.0, 1.0);
+                let [a, b, c] = tail_points(&s.trail, s.pos, k);
+                tails.push([WISP_TAIL as f32, a[0], a[1], a[2], b[0], b[1], b[2], 0.03 * k, 0.014 * k, s.seed]);
+                tails.push([WISP_TAIL as f32, b[0], b[1], b[2], c[0], c[1], c[2], 0.014 * k, 0.003 * k, s.seed]);
                 a
             } else {
                 s.vel
             };
-            let slot = [
-                s.kind as f32, s.pos[0], s.pos[1], s.pos[2], extra[0], extra[1], extra[2], s.age, s.life, s.seed,
-            ];
+            // (a soul's age: how far it has been taken in, of 1)
+            let (age, life) = if s.kind == WISP { (s.absorb.max(0.0), 1.0) } else { (s.age, s.life) };
+            let slot = [s.kind as f32, s.pos[0], s.pos[1], s.pos[2], extra[0], extra[1], extra[2], age, life, s.seed];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
         // (the souls' tails, in the free slots there are)
@@ -763,12 +789,12 @@ mod tests {
 }
 
 // Three points along a soul's tail (its path behind `head`, oldest first),
-// a third, two thirds and all the way along it: all of it the renderer is
-// sent.
-fn tail_points(trail: &[V3], head: V3) -> [V3; 3] {
+// a third, two thirds and all the way along the first `keep` of it: all of
+// it the renderer is sent.
+fn tail_points(trail: &[V3], head: V3, keep: f32) -> [V3; 3] {
     let mut pts: Vec<V3> = trail.iter().rev().copied().collect();
     pts.insert(0, head);
-    let total: f32 = pts.windows(2).map(|w| dist(w[0], w[1])).sum();
+    let total = keep * pts.windows(2).map(|w| dist(w[0], w[1])).sum::<f32>();
     let at = |f: f32| {
         let want = f * total;
         let mut gone = 0.0;

@@ -78,8 +78,10 @@ pub struct Combat {
     healed: f32,  // healing channelled towards the next point of health
     here: (V3, V3), // him, and the way he looks
     started: bool,  // the fight has an arena (it starts with the first enemies)
-    // where enemies were defeated (their souls to send him)
+    // where enemies were defeated (their souls to send him), and the souls
+    // he has taken in since the game last counted them
     souls: Vec<V3>,
+    pub souls_taken: u32,
     // sounds to play
     pub sfx: Vec<SfxEvent>,
     pub hud: Hud,
@@ -99,6 +101,7 @@ impl Default for Combat {
             here: ([0.0; 3], [0.0, 0.0, 1.0]),
             started: false,
             souls: Vec::new(),
+            souls_taken: 0,
             sfx: Vec::new(),
             hud: Hud::default(),
         }
@@ -320,11 +323,12 @@ impl Combat {
     pub fn handle(&mut self, spells: &mut Spells) {
         for e in std::mem::take(&mut spells.events) {
             match e {
-                SpellEvent::Hit { side, kind, cut, scale, .. } => {
-                    self.enemies.hit_with(side, kind, cut, scale);
+                SpellEvent::Hit { side, kind, cut, scale, owner } => {
+                    self.enemies.hit_with(side, kind, cut, scale, owner);
                     self.enemy_events();
                 }
                 SpellEvent::Soul => {
+                    self.souls_taken += 1;
                     self.mana.value = (self.mana.value + SOUL_MANA).min(MANA);
                     self.sfx.push(sfx::here(sfx::SHIELD_UP));
                 }
@@ -365,8 +369,10 @@ impl Combat {
                     sfx::here(sfx::BLOCK)
                 }
                 EnemyEvent::Hurt => sfx::here(sfx::HURT),
-                EnemyEvent::Defeat(pos) => {
-                    self.souls.push(super::vec::add(pos, [0.0, 1.3, 0.0]));
+                EnemyEvent::Defeat(pos, his) => {
+                    if his {
+                        self.souls.push(super::vec::add(pos, [0.0, 1.3, 0.0]));
+                    }
                     self.placed(sfx::DEFEAT, pos)
                 }
                 EnemyEvent::Appear(pos) => self.placed(sfx::APPEAR, pos),

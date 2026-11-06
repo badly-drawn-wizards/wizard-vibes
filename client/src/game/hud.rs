@@ -319,6 +319,10 @@ pub enum Icon {
     Cross,
     // the controller's View button (two overlapping squares)
     View,
+    // a skull (enemies defeated)
+    Skull,
+    // a soul (souls gathered)
+    Soul,
 }
 
 // An icon `size` points high (and as wide, plus a little room), in `colour`.
@@ -365,6 +369,36 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, which: Icon, colour: Color32) {
             let st = Stroke::new(1.3, colour);
             p.line_segment([c + Vec2::new(-d, -d), c + Vec2::new(d, d)], st);
             p.line_segment([c + Vec2::new(-d, d), c + Vec2::new(d, -d)], st);
+        }
+        Icon::Skull => {
+            // a round crown, a narrower jaw, two eyes and a nose dark in it
+            let crown = c + Vec2::new(0.0, -0.12 * s);
+            p.circle_filled(crown, 0.62 * s, colour);
+            p.rect_filled(Rect::from_center_size(c + Vec2::new(0.0, 0.42 * s), Vec2::new(0.7 * s, 0.4 * s)), 2, colour);
+            let dark = bg(1.0);
+            p.circle_filled(crown + Vec2::new(-0.25 * s, 0.05 * s), 0.17 * s, dark);
+            p.circle_filled(crown + Vec2::new(0.25 * s, 0.05 * s), 0.17 * s, dark);
+            p.add(Shape::convex_polygon(
+                vec![c + Vec2::new(0.0, 0.12 * s), c + Vec2::new(-0.07 * s, 0.26 * s), c + Vec2::new(0.07 * s, 0.26 * s)],
+                dark,
+                Stroke::NONE,
+            ));
+            for k in [-1.0, 0.0, 1.0] {
+                let x = c.x + k * 0.17 * s;
+                p.line_segment([Pos2::new(x, c.y + 0.3 * s), Pos2::new(x, c.y + 0.62 * s)], Stroke::new(1.0, dark));
+            }
+        }
+        Icon::Soul => {
+            // a round head, and a tail waving away from it
+            let head = c + Vec2::new(-0.35 * s, -0.1 * s);
+            p.circle_filled(head, 0.32 * s, colour);
+            let pts: Vec<Pos2> = (0..=10)
+                .map(|k| {
+                    let t = k as f32 / 10.0;
+                    head + Vec2::new(0.25 * s + 0.75 * s * t, 0.18 * s * (t * 7.0).sin() + 0.3 * s * t)
+                })
+                .collect();
+            p.add(Shape::line(pts, Stroke::new(0.18 * s, colour)));
         }
         Icon::View => {
             let w = 0.5 * s;

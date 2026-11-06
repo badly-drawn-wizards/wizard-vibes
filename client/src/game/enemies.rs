@@ -127,7 +127,8 @@ pub fn spheres(pos: V3, side: i32) -> [Target; 2] {
 pub enum EnemyEvent {
     Block,
     Hurt,
-    Defeat(V3),
+    // (and whether he defeated it)
+    Defeat(V3, bool),
     Appear(V3),
     Cast(u32, V3),
 }
@@ -177,6 +178,8 @@ struct Slot {
     dodge_dir: V3,
     strafe: f32, // which way it drifts round him (-1 or 1), and for how long more
     strafe_t: f32,
+    target: i32, // whom it casts at: him (HIS), or free for all another
+    chosen: bool, // (free for all) its next target chosen
 }
 
 impl Slot {
@@ -197,6 +200,8 @@ impl Slot {
             dodge_dir: [0.0; 3],
             strafe: 1.0,
             strafe_t: 0.0,
+            target: HIS,
+            chosen: false,
         }
     }
 }
@@ -215,6 +220,7 @@ pub struct Enemies {
     last: Option<V3>,     // where he was last frame
     vel: V3,              // how fast he is going, smoothed
     placed: bool,         // the slots have been put where they belong
+    pub ffa: bool,        // free for all: they fight each other too
 }
 
 impl Default for Enemies {
@@ -232,6 +238,7 @@ impl Default for Enemies {
             last: None,
             vel: [0.0; 3],
             placed: false,
+            ffa: false,
         }
     }
 }
@@ -308,12 +315,13 @@ impl Enemies {
 
     // A spell of `kind` hit `side`.
     pub fn hit(&mut self, side: i32, kind: u32) {
-        self.hit_with(side, kind, None, 1.0);
+        self.hit_with(side, kind, None, 1.0, HIS);
     }
 
     // The same, a wind blade's cut with it (a point and normal, world), its
-    // damage scaled by `scale` (rounded; at least 1, if it does any).
-    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<(V3, V3)>, scale: f32) {
+    // damage scaled by `scale` (rounded; at least 1, if it does any), cast
+    // by `owner` (only his defeats count).
+    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<(V3, V3)>, scale: f32, owner: i32) {
         let damage = match damage(kind) {
             0 => 0,
             d => ((d as f32 * scale).round() as i32).max(1),
@@ -345,9 +353,12 @@ impl Enemies {
             if s.hp <= 0 {
                 s.down = 0.0;
                 s.vel = [0.0; 3];
-                self.defeated += 1;
+                let his = owner == HIS;
+                if his {
+                    self.defeated += 1;
+                }
                 s.kill = kill_code(kind, cut, s.pos, facing(s.pos, him));
-                self.events.push(EnemyEvent::Defeat(s.pos));
+                self.events.push(EnemyEvent::Defeat(s.pos, his));
             }
         }
     }
@@ -385,10 +396,11 @@ impl Enemies {
             }
             self.placed = true;
         }
-        let missiles = spells.his_missiles();
-        let others: Vec<(bool, V3)> = self.slots.iter().take(n).map(|s| (s.down < 0.0, s.pos)).collect();
+        let others: Vec<(bool, V3, V3)> = self.slots.iter().take(n).map(|s| (s.down < 0.0 && s.appear <= 0.0, s.pos, s.vel)).collect();
+        let (ffa, his_vel, he_stands) = (self.ffa, self.vel, self.down < 0.0);
         for i in 0..MAX {
             let arena = self.arena;
+            let missiles = spells.missiles_at(i as i32);
             let s = &mut self.slots[i];
             if s.down >= 0.0 {
                 // (a telegraph cut short)
@@ -431,7 +443,7 @@ impl Enemies {
                 let round = normalise([off[2], 0.0, -off[0]]);
                 want = add(want, scale(1.5 * s.strafe * skill, round));
                 // (apart from the others)
-                for (j, &(up, p)) in others.iter().enumerate() {
+                for (j, &(up, p, _)) in others.iter().enumerate() {
                     let v = sub(s.pos, p);
                     let dd = len(v);
                     if j != i && up && dd < APART && dd > 1e-3 {
@@ -471,24 +483,54 @@ impl Enemies {
                 s.pos = add(s.pos, scale(dt, s.vel));
                 s.pos[1] = s.pos[1].clamp(arena[1] - 4.0, arena[1] + 6.0);
             }
-            if s.appear > 0.0 || self.down >= 0.0 {
+            if s.appear > 0.0 || (self.down >= 0.0 && !ffa) {
                 continue;
             }
-            // it casts: its own spell, telegraphed as his are
+            // it casts: its own spell, telegraphed as his are, at him (or,
+            // free for all, at whoever it chose)
             let orb = orb_of(s.pos, him);
             if let Some(id) = s.telegraph {
                 spells.place(id, orb);
             }
-            let chest = add(him, [0.0, 1.1, 0.0]);
+            // (its target gone: him, if he stands; else no one)
+            if s.target >= 0 && !others.get(s.target as usize).is_some_and(|o| o.0) {
+                s.target = HIS;
+            }
+            if s.target == HIS && !he_stands {
+                s.act = Act::Idle;
+                if let Some(id) = s.telegraph.take() {
+                    spells.end(id);
+                }
+                continue;
+            }
+            let (at, at_vel) = if s.target == HIS { (him, his_vel) } else { (others[s.target as usize].1, others[s.target as usize].2) };
+            let chest = add(at, [0.0, 1.1, 0.0]);
             let in_range = dist(chest, orb) <= RANGE;
             let kind = spell_of(seed, s.generation, i);
             s.act_t += dt;
             match s.act {
                 Act::Idle => {
                     s.cast_in -= dt;
-                    if s.cast_in > 0.0 || !in_range {
+                    if s.cast_in > 0.0 {
                         continue;
                     }
+                    // (free for all: whoever is nearest, give or take)
+                    if ffa && !s.chosen {
+                        s.chosen = true;
+                        let mut best = (if he_stands { dist(him, s.pos) * (0.7 + 0.6 * rng.uniform()) } else { f32::MAX }, HIS);
+                        for (j, &(up, p, _)) in others.iter().enumerate() {
+                            let d = dist(p, s.pos) * (0.7 + 0.6 * rng.uniform());
+                            if j != i && up && d < best.0 {
+                                best = (d, j as i32);
+                            }
+                        }
+                        s.target = best.1;
+                        continue;
+                    }
+                    if !in_range {
+                        continue;
+                    }
+                    s.chosen = false;
                     s.act_t = 0.0;
                     if kind == FIRE {
                         let secs = 0.6 + 0.8 * rng.uniform();
@@ -502,7 +544,7 @@ impl Enemies {
                         s.cast_in = 6.0 + 6.0 * rng.uniform() + n as f32;
                         let lead = 1.1;
                         let (mx, mz) = (miss(rng), miss(rng));
-                        let at = add(add(him, scale(lead, self.vel)), [mx, 0.6, mz]);
+                        let at = add(add(at, scale(lead, at_vel)), [mx, 0.6, mz]);
                         if spells.launch(MARK, orb, [0.0, 1.0, 0.0], i as i32, Some(at), rng) {
                             self.events.push(EnemyEvent::Cast(MARK, at));
                         }
@@ -514,7 +556,7 @@ impl Enemies {
                     }
                     let power = ENEMY_POWER * (c / 1.4).min(1.0);
                     let speed = 30.0 * (1.0 + 0.6 * power);
-                    let aim = aim_at(chest, orb, self.vel, speed, rng);
+                    let aim = aim_at(chest, orb, at_vel, speed, rng);
                     if spells.launch(FIRE, orb, aim, i as i32, None, rng) {
                         spells.empower_last(power);
                         self.events.push(EnemyEvent::Cast(FIRE, orb));
@@ -534,7 +576,7 @@ impl Enemies {
                         s.act = Act::Blades { left, next, shot };
                         continue;
                     }
-                    let aim = aim_at(chest, orb, self.vel, 24.0, rng);
+                    let aim = aim_at(chest, orb, at_vel, 24.0, rng);
                     if spells.launch(WIND, orb, aim, i as i32, None, rng) {
                         self.events.push(EnemyEvent::Cast(WIND, orb));
                     }
@@ -630,12 +672,22 @@ mod tests {
             e.hit(1, WIND);
         }
         assert_eq!(e.defeated, 1);
-        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_))));
+        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, true))));
         assert_eq!(e.foes()[1], 16.0 + 8.0);
         // it comes back, a generation on
         e.update(5.0, 3, 1, 0.0, [0.0, 12.0, 0.0], &mut spells, &mut rng);
         assert_eq!(e.foes()[1], 32.0 + 1.5);
         assert!(matches!(e.events.last(), Some(EnemyEvent::Appear(_))));
+    }
+
+    #[test]
+    fn their_defeats_of_each_other_are_not_his() {
+        let mut e = Enemies::default();
+        e.reset([0.0; 3]);
+        e.slots[0].appear = 0.0;
+        e.hit_with(0, STRIKE, None, 2.0, 1);
+        assert_eq!(e.defeated, 0);
+        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, false))));
     }
 
     #[test]

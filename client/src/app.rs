@@ -476,6 +476,11 @@ impl App {
             ui.horizontal(|ui| game.mode_ui(ui, nav));
             ui.end_row();
 
+            ui.label(tr("Enemies"));
+            nav.row();
+            ui.horizontal(|ui| game.sides_ui(ui, nav));
+            ui.end_row();
+
             ui.label(tr("Camera"));
             nav.row();
             ui.horizontal(|ui| game.camera_ui(ui, nav));

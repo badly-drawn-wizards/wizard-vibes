@@ -29,7 +29,7 @@ pub mod spellbar;
 pub mod spells;
 pub mod vec;
 
-use crate::i18n::{tr, trf};
+use crate::i18n::tr;
 use crate::types::{BuildInfo, Camera, FrameOut, ParamValues, ProbeRequest, Value, PROBE_SPHERES};
 use camera::Orbit;
 use combat::{Combat, Moment};
@@ -55,6 +55,8 @@ const STORE_MODE: &str = "wizard-mode";
 const STORE_BINDS: &str = "wizard-binds-2";
 const STORE_SHOULDER: &str = "wizard-over-shoulder";
 const STORE_SWAP_XY: &str = "wizard-swap-xy";
+const STORE_SOULS: &str = "wizard-souls";
+const STORE_FFA: &str = "wizard-ffa";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -116,6 +118,11 @@ pub struct Game {
     picture: Option<Picture>,
     // the enemies fighting, as last logged
     enemies_shown: usize,
+    // the souls he has gathered, all told (to spend: the start of an
+    // incremental game)
+    pub souls: u64,
+    // free for all (the enemies fight each other too), or one against all
+    ffa: bool,
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
@@ -202,6 +209,8 @@ impl Game {
             over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
             picture: None,
             enemies_shown: 0,
+            souls: get(STORE_SOULS).and_then(|v| v.parse().ok()).unwrap_or(0),
+            ffa: get(STORE_FFA).as_deref() == Some("1"),
             cross: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
@@ -222,6 +231,8 @@ impl Game {
         eframe::set_value(storage, STORE_BINDS, &self.binds.saved());
         storage.set_string(STORE_SHOULDER, if self.over_shoulder { "1" } else { "0" }.to_string());
         storage.set_string(STORE_SWAP_XY, if self.pads.swap_xy { "1" } else { "0" }.to_string());
+        storage.set_string(STORE_SOULS, self.souls.to_string());
+        storage.set_string(STORE_FFA, if self.ffa { "1" } else { "0" }.to_string());
         if let Some(c) = self.quality.choice {
             storage.set_string(STORE_QUALITY, c.key().to_string());
         }
@@ -608,6 +619,8 @@ impl Game {
             self.last_pos = Some(him);
         }
         let dir = self.assist(origin, dir);
+        self.spells.ffa = self.ffa;
+        self.combat.enemies.ffa = self.ffa;
         let moment = Moment {
             dt: game_dt,
             time: self.time,
@@ -625,6 +638,7 @@ impl Game {
         self.combat.update(&moment, &mut self.spells, &mut self.rng);
         self.spells.update(game_dt, casting || pad_cast);
         self.combat.handle(&mut self.spells);
+        self.souls += std::mem::take(&mut self.combat.souls_taken) as u64;
         self.spellbar.spell = self.spells.selected;
         self.spellbar.cooling = [0, 1, 2, 3].map(|i| self.spells.cooling(i));
         self.spellbar.heat = self.spells.gatling.heat;
@@ -727,6 +741,7 @@ impl Game {
         self.flight.collide(&data[..spheres]);
         self.spells.apply_probe(&req.ids, &data[spheres..]);
         self.combat.handle(&mut self.spells);
+        self.souls += std::mem::take(&mut self.combat.souls_taken) as u64;
     }
 
     // The mode buttons (for the pause menu: a row of its navigation).
@@ -783,6 +798,21 @@ impl Game {
             self.leave_picture();
         } else {
             self.paused = !self.paused;
+        }
+    }
+
+    // Whom the enemies fight (for the pause menu: a row of its navigation):
+    // him alone, or each other too.
+    pub fn sides_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        for (name, ffa, tip) in [
+            ("1 vs all", false, "The enemies all fight him"),
+            ("Free for all", true, "The enemies fight each other too"),
+        ] {
+            let r = hud::fill_toggle(ui, tr(name), self.ffa == ffa).on_hover_text(tr(tip));
+            nav.item(ui, &r);
+            if r.clicked() {
+                self.ffa = ffa;
+            }
         }
     }
 
@@ -891,57 +921,55 @@ impl Game {
             }
         }
 
-        // the vitals, bottom left
+        // the vitals, bottom left (bare, on the view)
         let mut reset = false;
         if h.drawn {
             egui::Area::new(egui::Id::unique("wizard-vitals"))
                 .pivot(Align2::LEFT_BOTTOM)
                 .fixed_pos(rect.left_bottom() + Vec2::new(16.0, -16.0))
                 .show(ctx, |ui| {
-                    hud::panel(0.6, 6, Margin::symmetric(12, 8)).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
-                        let width = 200.0f32.min(0.4 * rect.width());
-                        let health = ctx.animate_value_with_time(egui::Id::unique("wizard-health"), h.health, 0.15);
-                        let mana = ctx.animate_value_with_time(egui::Id::unique("wizard-mana"), h.mana, 0.15);
-                        if h.n > 0 {
-                            ui.horizontal(|ui| {
-                                hud::icon(ui, hud::Icon::Heart, hud::FONT, hud::FG, egui::Sense::hover());
-                                hud::bar(
-                                    ui,
-                                    width,
-                                    health,
-                                    egui::Color32::from_rgb(0xc0, 0x28, 0x3c),
-                                    egui::Color32::from_rgb(0xff, 0x6a, 0x5a),
-                                    hud::BORDER,
-                                );
-                            })
-                            .response
-                            .on_hover_text(tr("Health"));
-                        }
+                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
+                    let width = 200.0f32.min(0.4 * rect.width());
+                    let health = ctx.animate_value_with_time(egui::Id::unique("wizard-health"), h.health, 0.15);
+                    let mana = ctx.animate_value_with_time(egui::Id::unique("wizard-mana"), h.mana, 0.15);
+                    if h.n > 0 {
                         ui.horizontal(|ui| {
-                            hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
-                            hud::bar(
-                                ui,
-                                width,
-                                mana,
-                                egui::Color32::from_rgb(0x2a, 0x4f, 0xd0),
-                                egui::Color32::from_rgb(0x6f, 0xb4, 0xff),
-                                if h.short { hud::SHORT } else { hud::BORDER },
-                            );
+                            hud::icon(ui, hud::Icon::Heart, hud::FONT, hud::FG, egui::Sense::hover());
+                            hud::bar(ui, width, health, egui::Color32::from_rgb(0xc0, 0x28, 0x3c), egui::Color32::from_rgb(0xff, 0x6a, 0x5a), hud::BORDER);
                         })
                         .response
-                        .on_hover_text(tr("Mana"));
+                        .on_hover_text(tr("Health"));
+                    }
+                    ui.horizontal(|ui| {
+                        hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
+                        hud::bar(
+                            ui,
+                            width,
+                            mana,
+                            egui::Color32::from_rgb(0x2a, 0x4f, 0xd0),
+                            egui::Color32::from_rgb(0x6f, 0xb4, 0xff),
+                            if h.short { hud::SHORT } else { hud::BORDER },
+                        );
+                    })
+                    .response
+                    .on_hover_text(tr("Mana"));
+                });
+            // the tally, top right: enemies he has defeated (in a fight),
+            // and the souls he has gathered, all told
+            egui::Area::new(egui::Id::unique("wizard-tally"))
+                .pivot(Align2::RIGHT_TOP)
+                .fixed_pos(rect.right_top() + Vec2::new(-16.0, 16.0))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 5.0;
                         if h.n > 0 {
-                            ui.horizontal(|ui| {
-                                ui.label(hud::text(trf("{} defeated", &[&h.defeated]), 0.85 * hud::FONT, hud::DIM));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let b = hud::plain_button(ui, tr("↺ Reset"), 0.85 * hud::FONT, Vec2::new(8.0, 2.0));
-                                    if b.on_hover_text(tr("Start the fight again (View / Back on a controller)")).clicked() {
-                                        reset = true;
-                                    }
-                                });
-                            });
+                            hud::icon(ui, hud::Icon::Skull, 1.3 * hud::FONT, hud::FG, egui::Sense::hover());
+                            ui.label(hud::text(h.defeated.to_string(), 1.2 * hud::FONT, hud::FG));
+                            ui.add_space(10.0);
                         }
+                        hud::icon(ui, hud::Icon::Soul, 1.3 * hud::FONT, egui::Color32::from_rgb(0xb8, 0xe4, 0xff), egui::Sense::hover());
+                        ui.label(hud::text(self.souls.to_string(), 1.2 * hud::FONT, hud::FG));
                     });
                 });
         }

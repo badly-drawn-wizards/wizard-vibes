@@ -22,7 +22,8 @@
 //   spell_windup  wind blades warming up, likewise: gusts swirling in
 //                 round the orb, faster and brighter as age / life nears 1
 //   spell_wisp    a defeated enemy's soul, its head at (x, y, z), the first
-//                 of its tail's points at (a, b, c)
+//                 of its tail's points at (a, b, c); age (of a life of 1)
+//                 how far it has been taken into him, shrinking
 //   spell_wisp_tail  a piece of a soul's tail, from (x, y, z) to (a, b, c),
 //                 as wide as age there, and life at its end
 //
@@ -221,11 +222,13 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
     } else if kind == spell_wisp {
         // a soul, like a sperm: a bright oval head, and the start of its
         // tail behind it (the rest: spell_wisp_tail)
+        // (taken in, as age nears 1: shrinking away)
+        let k = 1.0 - saturate(age);
         let back = normalise(q - p + vec(0.0, 1e-4, 0.0));
-        let (hd, t, behind) = ray_segment(o, d, tmax, p - scale(0.04, back), p + scale(0.05, back));
-        let (core, halo) = glow_line(wisp_head, 0.45, hd);
+        let (hd, t, behind) = ray_segment(o, d, tmax, p - scale(0.04 * k, back), p + scale(0.05 * k, back));
+        let (core, halo) = glow_line(wisp_head * k + 1e-4, 0.45 * k + 1e-3, hd);
         let flick = 0.8 + 0.2 * (secs * 17.0 + seed as f32 * 0.37).sin();
-        let tail = wisp_tail(o, d, tmax, secs, seed, p, q, wisp_head, 0.03);
+        let tail = wisp_tail(o, d, tmax, secs, seed, p, q, wisp_head * k + 1e-4, 0.03 * k + 1e-4);
         scale(
             fade * flick * seen(t, behind, 0.3),
             scale(2.6 * core + tail, vec(0.82, 0.95, 1.0)) + scale(0.3 * halo, vec(0.45, 0.75, 1.0)),
