@@ -34,6 +34,10 @@ pub struct Args {
     pub m_n: u32,
     pub m_chunk: u32,
     pub m_song: u32,
+    // the defeat overlay's: seconds since his defeat, and by what (a kill
+    // code's kind)
+    pub o_t: f32,
+    pub o_kind: u32,
 }
 
 struct Kernel {
@@ -205,6 +209,8 @@ impl Shader {
                     "m_n" => a.m_n as f64,
                     "m_chunk" => a.m_chunk as f64,
                     "m_song" => a.m_song as f64,
+                    "o_t" => a.o_t as f64,
+                    "o_kind" => a.o_kind as f64,
                     _ => 0.0,
                 },
             };

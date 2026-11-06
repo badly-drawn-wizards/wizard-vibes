@@ -42,6 +42,10 @@ pub struct App {
     frame: Frame,
     // the image the scene is copied into, and its egui id
     image: Option<(wgpu::Texture, egui::TextureId)>,
+    // the defeat screen's magic (drawn by the shader at the window's own
+    // size, not the scene's scale, with alpha), likewise, and its buffers
+    overlay: Option<(wgpu::Texture, egui::TextureId)>,
+    overlay_bufs: render::Buffers,
     start: Instant,
     last: Instant,
     fps: f32,
@@ -158,6 +162,8 @@ impl App {
             compiling: None,
             frame: Frame::default(),
             image: None,
+            overlay: None,
+            overlay_bufs: Default::default(),
             start: now,
             last: now,
             fps: 0.0,
@@ -625,7 +631,7 @@ impl App {
             self.image = Some((tex, id));
         }
         let n_spells = (out.spells.len() / wizard_shader::spells::spell_stride as usize) as u32;
-        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
+        let args = Args { vw, h, tm: out.time, camera: out.camera, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0, o_t: 0.0, o_kind: 0 };
         let mut enc = device.create_command_encoder(&Default::default());
         self.frame.record(device, queue, &mut enc, shader, params, &out.drive, &args, &out.spells);
         let (tex, _) = self.image.as_ref().unwrap();
@@ -636,6 +642,62 @@ impl App {
             },
             tex.as_image_copy(),
             wgpu::Extent3d { width: vw, height: h, depth_or_array_layers: 1 },
+        );
+        queue.submit([enc.finish()]);
+    }
+}
+
+impl App {
+    // The defeat screen's magic for this frame (see the shader's defeat.rs),
+    // into its own image, `ow` x `oh` (the window's pixels), t seconds
+    // since his defeat, by `kind`.
+    #[allow(clippy::too_many_arguments)]
+    fn render_overlay(&mut self, rs: &egui_wgpu::RenderState, ow: u32, oh: u32, params: &ParamValues, out: &FrameOut, t: f32, kind: u32) {
+        let Some(shader) = &self.shader else { return };
+        if !shader.has("overlay") {
+            return;
+        }
+        let (device, queue) = (&rs.device, &rs.queue);
+        let fits = self.overlay.as_ref().is_some_and(|(tex, _)| tex.width() == ow && tex.height() == oh);
+        if !fits {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("overlay"),
+                size: wgpu::Extent3d { width: ow, height: oh, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&Default::default());
+            let mut r = rs.renderer.write();
+            let id = match self.overlay.take() {
+                Some((_, id)) => {
+                    r.update_egui_texture_from_wgpu_texture(device, &view, wgpu::FilterMode::Linear, id);
+                    id
+                }
+                None => r.register_native_texture(device, &view, wgpu::FilterMode::Linear),
+            };
+            self.overlay = Some((tex, id));
+        }
+        use wgpu::BufferUsages as U;
+        let args = Args { vw: ow, h: oh, tm: out.time, camera: out.camera, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0, o_t: t, o_kind: kind };
+        let data = shader.uniforms(params, &out.drive, &args);
+        let w = render::padded(ow);
+        let b = &mut self.overlay_bufs;
+        queue.write_buffer(b.get(device, render::frame::UNIFORMS, data.len() as u64, U::UNIFORM | U::COPY_DST), 0, &data);
+        b.get(device, render::frame::PIXELS, w as u64 * oh as u64 * 4, U::STORAGE | U::COPY_SRC);
+        let mut enc = device.create_command_encoder(&Default::default());
+        render::dispatch(device, &mut enc, shader, b, "overlay", w * oh);
+        let (tex, _) = self.overlay.as_ref().unwrap();
+        enc.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: b.peek(render::frame::PIXELS).unwrap(),
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(oh) },
+            },
+            tex.as_image_copy(),
+            wgpu::Extent3d { width: ow, height: oh, depth_or_array_layers: 1 },
         );
         queue.submit([enc.finish()]);
     }
@@ -827,6 +889,14 @@ impl App {
             }
             if let Some((_, id)) = &self.image {
                 ui.painter().image(*id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            }
+            // defeated: the magic over it, at the window's own resolution
+            if let Some((t, kind)) = self.game.defeat_overlay() {
+                let (ow, oh) = (((rect.width() * ppp) as u32).max(1), ((rect.height() * ppp) as u32).max(1));
+                self.render_overlay(rs, ow, oh, &values, &out, t, kind);
+                if let Some((_, id)) = &self.overlay {
+                    ui.painter().image(*id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                }
             }
         });
         self.game.ui(&ctx);

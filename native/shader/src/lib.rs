@@ -15,6 +15,7 @@
 pub mod anim;
 pub mod chip;
 pub mod collide;
+pub mod defeat;
 pub mod enemies;
 pub mod figure;
 pub mod foes;
@@ -272,6 +273,33 @@ pub fn pack_pixels(
     }
     let px = srem(i, u.a_w);
     out[i as usize] = if px >= u.a_vw { 0xff000000 } else { pack(colour[(sdiv(i, u.a_w) * u.a_vw + px) as usize].truncate()) };
+}
+
+// ---------------------------------------------------------------------
+// The defeat screen's magic (see defeat.rs): a thread per pixel of out (w *
+// h, the window's own size: a_vw wide, rows padded to a_w), its colour
+// premultiplied by its coverage, packed with it (BGRA, the alpha its
+// coverage), a_o_t seconds since his defeat, by a_o_kind (a kill code's
+// kind).
+#[spirv(compute(threads(256)))]
+pub fn overlay(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] out: &mut [u32],
+) {
+    let i = gid.x as i32;
+    if i >= u.a_w * u.a_h {
+        return;
+    }
+    let px = srem(i, u.a_w);
+    if px >= u.a_vw {
+        out[i as usize] = 0;
+        return;
+    }
+    let x = px as f32 + 0.5;
+    let y = sdiv(i, u.a_w) as f32 + 0.5;
+    let c = defeat::defeat_overlay(u.a_o_kind, u.a_o_t, u.a_vw, u.a_h, x, y);
+    out[i as usize] = byte(c.z) | (byte(c.y) << 8) | (byte(c.x) << 16) | (byte(c.w) << 24);
 }
 
 // ---------------------------------------------------------------------

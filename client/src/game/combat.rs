@@ -429,7 +429,8 @@ impl Combat {
                 k => crate::i18n::trf("{} enemies defeated", &[&k]),
             });
         }
-        h.hurt = if lost { 0.6 } else { 0.7 * (-4.0 * e.hurt).exp() };
+        // (defeated too: the flash fades, the defeat screen's own colours after)
+        h.hurt = 0.7 * (-4.0 * e.hurt).exp();
         h.locked = spells.selected == STRIKE as usize && spells.lock.map_or_else(|| spells.lock_on(m.origin, m.dir).is_some(), |l| l.target.is_some());
         h.shielded = self.shield.raised_now();
     }
@@ -693,7 +694,7 @@ mod tests {
         }
         c.update(&moment(), &mut s, &mut rng);
         assert_eq!(c.hud.lost.as_deref(), Some("No enemies defeated"));
-        assert_eq!(c.hud.hurt, 0.6);
+        assert!(c.hud.hurt > 0.0);
         c.reset(&mut s);
         c.update(&moment(), &mut s, &mut rng);
         assert!(c.hud.lost.is_none());

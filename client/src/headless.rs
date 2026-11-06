@@ -95,7 +95,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     let (vw, h) = o.size;
     let mut frame = Frame::default();
     let n_spells = (o.spells.len() / 10) as u32;
-    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
+    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0, o_t: 0.0, o_kind: 0 };
     let timer = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
         (
             device.create_query_set(&wgpu::QuerySetDescriptor { label: None, ty: wgpu::QueryType::Timestamp, count: 2 }),

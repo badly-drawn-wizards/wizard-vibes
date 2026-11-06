@@ -122,6 +122,8 @@ pub struct Game {
     picture: Option<Picture>,
     // the enemies fighting, as last logged
     enemies_shown: usize,
+    // (?open=die-...: defeated by that, so many frames into the fight)
+    die_soon: Option<(u32, u32)>,
     // the souls he has gathered, all told (to spend: the start of an
     // incremental game)
     pub souls: u64,
@@ -291,6 +293,7 @@ impl Game {
             over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
             picture: None,
             enemies_shown: 0,
+            die_soon: None,
             souls: get(STORE_SOULS).and_then(|v| v.parse().ok()).unwrap_or(0),
             ffa: get(STORE_FFA).as_deref() == Some("1"),
             death: None,
@@ -822,6 +825,15 @@ impl Game {
             shielding: pad.is_some_and(|p| p.shield),
         };
         self.combat.update(&moment, &mut self.spells, &mut self.rng);
+        if let Some((kind, frames)) = self.die_soon.take() {
+            if frames > 0 {
+                self.die_soon = Some((kind, frames - 1));
+            } else {
+                let e = &mut self.combat.enemies;
+                e.hit_with(spells::HIS, kind, Some(([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 20.0])), 99.0, 0);
+                log::info!("defeated, as asked: hp {} down {} shielded {}", e.hp, e.down, e.shielded);
+            }
+        }
         self.spells.update(game_dt, casting || pad_cast);
         self.combat.handle(&mut self.spells);
         self.souls += std::mem::take(&mut self.combat.souls_taken) as u64;
@@ -1020,12 +1032,23 @@ impl Game {
         self.loadout[k] = next;
     }
 
-    // A screen opened as the page asks (?open=tree or ?open=loadout: for
-    // looking at them without a defeat first).
+    // A screen opened as the page asks (?open=tree, loadout, or die-fire,
+    // die-lightning, die-wind: for looking at them without a defeat first).
     pub fn open_screen(&mut self, what: &str) {
         match what {
             "tree" => self.ask_skills(),
             "loadout" => self.open_loadout(),
+            // (defeated at once, in a fight, by that: for the defeat screen)
+            "die-fire" | "die-lightning" | "die-wind" => {
+                self.set_mode(ModeName::Fight);
+                let kind = match what {
+                    "die-fire" => spells::BURST,
+                    "die-lightning" => spells::STRIKE,
+                    _ => spells::WIND,
+                };
+                self.die_soon = Some((kind, 30));
+                log::info!("to be defeated by {kind}");
+            }
             _ => {}
         }
     }
@@ -1095,6 +1118,12 @@ impl Game {
         if self.skills.buy(&skills::SKILLS[t.sel], &mut self.souls) {
             self.combat.sfx.push(sfx::here(sfx::APPEAR));
         }
+    }
+
+    // Defeated: the overlay's seconds since, and by what (a kill code's
+    // kind: 0 fire, 1 lightning, 2 wind).
+    pub fn defeat_overlay(&self) -> Option<(f32, u32)> {
+        self.death.map(|d| (d.since.elapsed().as_secs_f32(), (d.code.max(0.0) as u32) % 4))
     }
 
     // How fast time runs: slowing to a stop as he comes apart.
@@ -1354,27 +1383,35 @@ impl Game {
             }
             let y = rect.top() + 0.25 * rect.height();
             let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("wizard-defeat")));
-            let band = 110.0;
-            let mut mesh = egui::epaint::Mesh::default();
-            for (k, a) in [(0.0, 0.0), (0.5, 0.75), (1.0, 0.0)] {
-                let c = egui::Color32::from_black_alpha((255.0 * a * alpha) as u8);
-                let yy = y - 0.5 * band + k * band;
-                mesh.colored_vertex(egui::pos2(rect.left(), yy), c);
-                mesh.colored_vertex(egui::pos2(rect.right(), yy), c);
+            // (the magic behind it is the shader's: see the overlay; here
+            // the word, glowing in the colour of what defeated him, and what
+            // did)
+            let kind = self.defeat_overlay().map_or(0, |(_, k)| k);
+            let (glow, line) = match kind {
+                0 => (egui::Color32::from_rgb(0xff, 0x8a, 0x3a), "Burnt to cinders"),
+                1 => (egui::Color32::from_rgb(0x9c, 0xc0, 0xff), "Struck down"),
+                2 => (egui::Color32::from_rgb(0x7a, 0xf0, 0xff), "Torn apart by the wind"),
+                _ => (egui::Color32::from_rgb(0xd0, 0x9c, 0xff), "Undone"),
+            };
+            let size = 54.0 * (1.0 + 0.04 * alpha);
+            let word: String = tr("Defeated").to_uppercase().chars().map(|c| format!("{c} ")).collect::<String>().trim_end().to_string();
+            let font = egui::FontId::proportional(size);
+            let centre = egui::pos2(rect.center().x, y);
+            // (a glow: the word faint in its colour, about it)
+            for k in 0..12 {
+                let a = std::f32::consts::TAU * k as f32 / 12.0;
+                let off = Vec2::new(a.cos(), a.sin()) * (3.0 + 2.0 * (k % 2) as f32);
+                let c = glow.gamma_multiply(0.12 * alpha);
+                let g = painter.layout_no_wrap(word.clone(), font.clone(), c);
+                painter.galley(Align2::CENTER_CENTER.anchor_size(centre + off, g.size()).min, g, c);
             }
-            for k in 0..2u32 {
-                let b = 2 * k;
-                mesh.add_triangle(b, b + 1, b + 3);
-                mesh.add_triangle(b, b + 3, b + 2);
-            }
-            painter.add(egui::Shape::mesh(mesh));
-            let size = 52.0 * (1.0 + 0.06 * alpha);
-            let word = tr("Defeated").to_uppercase();
-            let red = egui::Color32::from_rgb(0xa8, 0x1c, 0x18).gamma_multiply(alpha);
-            let g = painter.layout_no_wrap(word.chars().map(|c| format!("{c} ")).collect::<String>().trim_end().to_string(), egui::FontId::proportional(size), red);
-            painter.galley(Align2::CENTER_CENTER.anchor_size(egui::pos2(rect.center().x, y), g.size()).min, g, red);
+            let ink = egui::Color32::from_rgb(0xff, 0xf6, 0xe8).gamma_multiply(alpha);
+            let g = painter.layout_no_wrap(word, font, ink);
+            painter.galley(Align2::CENTER_CENTER.anchor_size(centre, g.size()).min, g, ink);
+            let g = painter.layout_no_wrap(tr(line).to_string(), egui::FontId::proportional(20.0), glow.gamma_multiply(alpha));
+            painter.galley(Align2::CENTER_TOP.anchor_size(centre + Vec2::new(0.0, 0.6 * size), g.size()).min, g, glow);
             let g = painter.layout_no_wrap(stats.clone(), hud::mono(hud::FONT), hud::DIM.gamma_multiply(alpha));
-            painter.galley(Align2::CENTER_TOP.anchor_size(egui::pos2(rect.center().x, y + 0.5 * band + 8.0), g.size()).min, g, hud::DIM);
+            painter.galley(Align2::CENTER_TOP.anchor_size(centre + Vec2::new(0.0, 0.6 * size + 32.0), g.size()).min, g, hud::DIM);
             let pad = self.spellbar.device == Device::Pad;
             let mut skills = false;
             let mut loadout = false;
@@ -1825,6 +1862,19 @@ mod tests {
         g.combat.boosts.spells = [true, false, true, false];
         g.fit_loadout();
         assert_eq!(g.loadout, vec![Some(2), Some(0)]);
+    }
+
+    #[test]
+    fn a_death_asked_for_comes() {
+        let ctx = egui::Context::default();
+        let mut g = Game::new(None);
+        let p = params(3.0);
+        g.open_screen("die-wind");
+        for _ in 0..40 {
+            frame(&ctx, &mut g, &p, vec![]);
+        }
+        assert!(g.combat.enemies.down >= 0.0, "hp {}", g.combat.enemies.hp);
+        assert_eq!(g.defeat_overlay().map(|d| d.1), Some(2));
     }
 
     #[test]

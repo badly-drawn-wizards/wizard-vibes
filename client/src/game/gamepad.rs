@@ -135,6 +135,11 @@ impl Pads {
     // The first connected controller's state, if there is one, its
     // buttons as bound.
     pub fn read(&mut self, binds: &Binds) -> Option<Pad> {
+        // (the tests play without one: a real controller, plugged in, would
+        // steer them)
+        if cfg!(test) {
+            return None;
+        }
         let raw = self.raw()?;
         Some(self.pad(raw, binds))
     }

@@ -146,7 +146,7 @@ pub struct Field {
 
 // The arguments in the block after the uniforms and the drive record.
 const ARGS: &[(&str, &str)] =
-    &[("vw", "i32"), ("h", "i32"), ("tm", "f32"), ("yaw", "f32"), ("pitch", "f32"), ("dst", "f32"), ("w", "i32"), ("n_spells", "i32"), ("m_t0", "f32"), ("m_rate", "f32"), ("m_n", "i32"), ("m_chunk", "i32"), ("m_song", "i32")];
+    &[("vw", "i32"), ("h", "i32"), ("tm", "f32"), ("yaw", "f32"), ("pitch", "f32"), ("dst", "f32"), ("w", "i32"), ("n_spells", "i32"), ("m_t0", "f32"), ("m_rate", "f32"), ("m_n", "i32"), ("m_chunk", "i32"), ("m_song", "i32"), ("o_t", "f32"), ("o_kind", "i32")];
 
 fn uniforms(s: &Schema) -> Vec<Param> {
     let mut u: Vec<Param> = s.params().into_iter().filter(|p| !p.compile).collect();
