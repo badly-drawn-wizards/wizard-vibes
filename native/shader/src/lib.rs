@@ -275,9 +275,10 @@ pub fn pack_pixels(
 }
 
 // ---------------------------------------------------------------------
-// The music (fut/music.fut sound_chunk), an entry point a song (music0 ..
-// music4, as music::songs numbers them: each kernel holds its own song
-// alone, so it is a fraction of the size, and quicker): a thread a frame,
+// The music (fut/music.fut sound_chunk), an entry point a song
+// (music::song_kernels names them: each kernel holds its own song alone,
+// so it is a fraction of the size, and quicker; no name ends in a digit,
+// which naga's WGSL would rename): a thread a frame,
 // a_m_n frames from time a_m_t0 within the loop, at a_m_rate a second;
 // each frame's mix before the limit (left, right), the harpsichord in it,
 // and the room's send.
@@ -297,7 +298,7 @@ fn music_into(gid: UVec3, u: &Uniforms, dry: &mut [f32], period: f32, parts: imp
 }
 
 #[spirv(compute(threads(256)))]
-pub fn music0(
+pub fn music_disco(
     #[spirv(global_invocation_id)] gid: UVec3,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
@@ -306,7 +307,7 @@ pub fn music0(
 }
 
 #[spirv(compute(threads(256)))]
-pub fn music1(
+pub fn music_cracktro(
     #[spirv(global_invocation_id)] gid: UVec3,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
@@ -318,7 +319,7 @@ pub fn music1(
 }
 
 #[spirv(compute(threads(256)))]
-pub fn music2(
+pub fn music_starscape(
     #[spirv(global_invocation_id)] gid: UVec3,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
@@ -330,7 +331,7 @@ pub fn music2(
 }
 
 #[spirv(compute(threads(256)))]
-pub fn music3(
+pub fn music_glitch(
     #[spirv(global_invocation_id)] gid: UVec3,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
@@ -342,7 +343,7 @@ pub fn music3(
 }
 
 #[spirv(compute(threads(256)))]
-pub fn music4(
+pub fn music_wub(
     #[spirv(global_invocation_id)] gid: UVec3,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],

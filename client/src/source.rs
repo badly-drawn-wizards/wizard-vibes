@@ -60,6 +60,27 @@ pub struct Meta {
     pub preset: Option<String>,
     // the compile-time values it was built with
     pub compile: HashMap<String, Value>,
+    // the SPIR-V's and the WGSL's hashes (FNV-1a, in hex)
+    #[serde(default)]
+    pub hash: String,
+    #[serde(default)]
+    pub wgsl_hash: String,
+}
+
+// FNV-1a of some bytes, in hex (as shader-builder writes them).
+fn fnv(bytes: &[u8]) -> String {
+    format!("{:016x}", bytes.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3)))
+}
+
+impl ShaderFiles {
+    // Whether the modules read are the ones its shader.json describes (a
+    // build writing them meanwhile can leave one build's shader.json beside
+    // another's module: then wait for it to finish, and read them again).
+    pub fn consistent(&self) -> bool {
+        let spv = self.spv.as_ref().is_none_or(|s| self.meta.hash.is_empty() || fnv(s) == self.meta.hash);
+        let wgsl = self.wgsl.is_empty() || self.meta.wgsl_hash.is_empty() || fnv(self.wgsl.as_bytes()) == self.meta.wgsl_hash;
+        spv && wgsl
+    }
 }
 
 pub struct ShaderFiles {
@@ -175,15 +196,19 @@ mod native {
                     let dir = f.lock().unwrap().clone();
                     let t = mtime(&r.join(&dir).join("shader.json"));
                     if seen.as_ref() != Some(&(dir.clone(), t)) && t.is_some() {
-                        seen = Some((dir.clone(), t));
                         let ev = match load(&r, &dir, want_spv) {
-                            Ok(s) => Event::Shader(s),
-                            Err(e) => Event::Error(e),
+                            // (mid-build: read it again next time round)
+                            Ok(s) if !s.consistent() => None,
+                            Ok(s) => Some(Event::Shader(s)),
+                            Err(e) => Some(Event::Error(e)),
                         };
-                        if tx.send(ev).is_err() {
-                            return;
+                        if let Some(ev) = ev {
+                            seen = Some((dir.clone(), t));
+                            if tx.send(ev).is_err() {
+                                return;
+                            }
+                            ctx.request_repaint();
                         }
-                        ctx.request_repaint();
                     }
                     std::thread::sleep(Duration::from_millis(250));
                 }
@@ -275,31 +300,56 @@ mod web {
 
     fn load(base: String, dir: String, queue: Rc<RefCell<VecDeque<Event>>>, ctx: egui::Context) {
         wasm_bindgen_futures::spawn_local(async move {
-            let r = async {
-                let meta = fetch_text(&format!("{base}/{dir}/shader.json")).await?;
-                let mut files = parse(&meta, String::new(), None)?;
-                // with ?split=1, each entry point's own module where the
-                // build has them (for drivers that cannot take a pipeline
-                // made from the whole module; the shared code is then sent
-                // once per entry point), else the whole one
-                let names: Vec<(String, String)> = files.meta.entries.iter().filter_map(|e| Some((e.name.clone(), e.wgsl.clone()?))).collect();
-                if crate::app::url_param("split").is_some_and(|v| v == "1") && names.len() == files.meta.entries.len() {
-                    for (name, file) in names {
-                        let text = fetch_text(&format!("{base}/{dir}/{file}")).await?;
-                        files.entry_wgsl.insert(name, text);
+            // (read again, after a moment, while a build is mid-write and
+            // shader.json and the module do not match: see consistent)
+            let mut tries = 0;
+            let r = loop {
+                let r = load_once(&base, &dir).await;
+                match r {
+                    Ok(f) if !f.consistent() && tries < 20 => {
+                        tries += 1;
+                        sleep_ms(300).await;
                     }
-                } else {
-                    files.wgsl = fetch_text(&format!("{base}/{dir}/shader.wgsl")).await?;
+                    r => break r,
                 }
-                Ok(files)
-            }
-            .await;
+            };
             queue.borrow_mut().push_back(match r {
                 Ok(s) => Event::Shader(s),
                 Err(e) => Event::Error(e),
             });
             ctx.request_repaint();
         });
+    }
+
+    // A promise resolved after `ms` milliseconds, awaited.
+    async fn sleep_ms(ms: i32) {
+        let p = js_sys::Promise::new(&mut |done, _| {
+            let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(&done, ms);
+        });
+        let _ = wasm_bindgen_futures::JsFuture::from(p).await;
+    }
+
+    // A build's files, fetched once.
+    async fn load_once(base: &str, dir: &str) -> Result<ShaderFiles, String> {
+        async {
+            let meta = fetch_text(&format!("{base}/{dir}/shader.json")).await?;
+            let mut files = parse(&meta, String::new(), None)?;
+            // with ?split=1, each entry point's own module where the
+            // build has them (for drivers that cannot take a pipeline
+            // made from the whole module; the shared code is then sent
+            // once per entry point), else the whole one
+            let names: Vec<(String, String)> = files.meta.entries.iter().filter_map(|e| Some((e.name.clone(), e.wgsl.clone()?))).collect();
+            if crate::app::url_param("split").is_some_and(|v| v == "1") && names.len() == files.meta.entries.len() {
+                for (name, file) in names {
+                    let text = fetch_text(&format!("{base}/{dir}/{file}")).await?;
+                    files.entry_wgsl.insert(name, text);
+                }
+            } else {
+                files.wgsl = fetch_text(&format!("{base}/{dir}/shader.wgsl")).await?;
+            }
+            Ok(files)
+        }
+        .await
     }
 
     impl Source {
@@ -486,5 +536,21 @@ mod web {
         pub fn has_server(&self) -> bool {
             self.server.get()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A shader.json beside a module of another build is told apart.
+    #[test]
+    fn a_mismatched_build_is_not_taken() {
+        let meta = |wgsl: &str| format!(r#"{{"fields": [], "workgroup": 256, "entries": [], "preset": null, "compile": {{}}, "hash": "", "wgsl_hash": "{}"}}"#, fnv(wgsl.as_bytes()));
+        assert!(parse(&meta("fn a() {}"), "fn a() {}".into(), None).unwrap().consistent());
+        assert!(!parse(&meta("fn a() {}"), "fn b() {}".into(), None).unwrap().consistent());
+        // (an older shader.json, with no hashes: taken)
+        let old = r#"{"fields": [], "workgroup": 256, "entries": [], "preset": null, "compile": {}}"#;
+        assert!(parse(old, "fn b() {}".into(), None).unwrap().consistent());
     }
 }

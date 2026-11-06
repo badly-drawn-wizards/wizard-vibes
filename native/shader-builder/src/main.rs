@@ -85,6 +85,11 @@ fn main() {
         .unwrap_or_else(|e| die(&format!("naga could not write WGSL: {e}")));
     eprintln!("naga: {} bytes of WGSL in {:.1} s", wgsl.len(), t.elapsed().as_secs_f32());
 
+    // (naga's WGSL renames a name ending in a digit, music0 to music0_, so
+    // the browser would not find that entry point by its name)
+    if let Some(e) = module.entry_points.iter().find(|e| e.name.ends_with(|c: char| c.is_ascii_digit())) {
+        die(&format!("entry point {}: a name ending in a digit is renamed in WGSL; end it otherwise", e.name));
+    }
     std::fs::create_dir_all(&out).unwrap_or_else(|e| die(&format!("{}: {e}", out.display())));
     // each entry point's own WGSL: the module cut down to what it reaches (a
     // pipeline made from the whole module hands the driver all of it, and
@@ -136,7 +141,10 @@ fn main() {
     // (the SPIR-V's hash: what tells builds apart, as their other metadata
     // is mostly the same)
     let hash = spv.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3));
-    let meta = json!({ "hash": format!("{hash:016x}"), "fields": fields, "workgroup": WORKGROUP, "entries": entries, "preset": preset, "compile": values });
+    // (and the WGSL's: a loader reading shader.json, then the module, while
+    // another build writes them, can tell the two apart)
+    let wgsl_hash = wgsl.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let meta = json!({ "hash": format!("{hash:016x}"), "wgsl_hash": format!("{wgsl_hash:016x}"), "fields": fields, "workgroup": WORKGROUP, "entries": entries, "preset": preset, "compile": values });
     write_atomic(&out.join("shader.spv"), &spv);
     write_atomic(&out.join("shader.wgsl"), wgsl.as_bytes());
     write_atomic(&out.join("shader.json"), serde_json::to_string_pretty(&meta).unwrap().as_bytes());

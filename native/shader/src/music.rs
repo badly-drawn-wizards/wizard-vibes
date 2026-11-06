@@ -573,6 +573,9 @@ pub fn music_parts(rate: f32, t: f32) -> (f32, f32, f32, f32) {
 pub const songs: i32 = 5;
 #[cfg(not(target_arch = "spirv"))]
 pub const song_names: [&str; 5] = ["Wizard disco", "Cracktro", "Starscape", "Glitch Familiar", "Wub Ward"];
+// (and each one's music kernel: see lib.rs)
+#[cfg(not(target_arch = "spirv"))]
+pub const song_kernels: [&str; 5] = ["music_disco", "music_cracktro", "music_starscape", "music_glitch", "music_wub"];
 
 // The beat a song is danced to (beats a minute): its tempo, but the
 // dubstep's half time.

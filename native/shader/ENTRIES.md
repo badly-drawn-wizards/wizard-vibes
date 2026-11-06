@@ -42,7 +42,7 @@ the music when no frame buffers exist yet). Binding 4 is atomic in edge_mark
 | `edge_rays`    | `4 * edges` (indirect `args[0..3]`) | 0, 3, 4         | 5 |
 | `edge_resolve` | `edges` (indirect `args[3..6]`)     | 2, 4, 5         | 2 (edge pixels' colour: the mean of their 5 samples) |
 | `pack_pixels`  | `a_w * a_h`                | 0, 2                     | 1 (colour packed, and padding) |
-| `music0` .. `music4` | `a_m_n`              | 0                        | 8 |
+| `music_disco` .. `music_wub` (a song each) | `a_m_n` | 0          | 8 |
 | `soundboard`   | `modes` (64)               | 0, 8, 10 (slot (a_m_chunk - 1) % 2; none for chunk 0) | 9, 10 (slot a_m_chunk % 2) |
 | `music_mix`    | `a_m_n`                    | 0, 8, 9                  | 7 |
 
