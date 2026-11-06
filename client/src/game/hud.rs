@@ -497,12 +497,18 @@ fn face_colours(b: char) -> (Color32, Color32) {
     }
 }
 
-// The spells' colours: fire, lightning, wind (cyan), healing (green).
-pub const SPELL_COLOURS: [Color32; 4] = [
+// The spells' colours: fire, lightning, wind (cyan), healing (green), and the rest.
+pub const SPELL_COLOURS: [Color32; crate::game::spells::N_SPELLS] = [
     Color32::from_rgb(0xff, 0x8a, 0x3a),
     Color32::from_rgb(0xff, 0xe2, 0x6a),
     Color32::from_rgb(0x6a, 0xe8, 0xff),
     Color32::from_rgb(0x6a, 0xff, 0x8a),
+    // frost lance, arcane missiles, meteor, gravity well, spirit familiar
+    Color32::from_rgb(0xb0, 0xe8, 0xff),
+    Color32::from_rgb(0xc8, 0x8a, 0xff),
+    Color32::from_rgb(0xff, 0x6a, 0x30),
+    Color32::from_rgb(0x9a, 0x7a, 0xff),
+    Color32::from_rgb(0xd8, 0xf0, 0xff),
 ];
 
 // Spell `i`'s glyph in a circle of radius `r` round `c`: a flame, a

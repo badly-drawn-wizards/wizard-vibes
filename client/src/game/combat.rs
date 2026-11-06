@@ -16,7 +16,8 @@ use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
 
-const CAST_SOUND: [usize; 4] = [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP];
+const CAST_SOUND: [usize; super::spells::N_SPELLS] =
+    [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP, sfx::CAST_WIND, sfx::CAST_STRIKE, sfx::CAST_FIRE, sfx::GUST, sfx::APPEAR];
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
 const SOUL_MANA: f32 = 30.0; // mana a defeated enemy's soul brings him
 const BUFFER: f32 = 0.35; // seconds a press of cast is remembered, to start a spell not yet ready

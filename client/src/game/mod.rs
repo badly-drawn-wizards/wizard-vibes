@@ -304,7 +304,7 @@ impl Game {
             skill_shown: 0,
             tree: None,
             loadout: get(STORE_LOADOUT).map_or_else(|| vec![Some(0)], |v| {
-                v.split(',').map(|x| x.parse::<usize>().ok().filter(|&i| i < 4)).collect()
+                v.split(',').map(|x| x.parse::<usize>().ok().filter(|&i| i < spells::N_SPELLS)).collect()
             }),
             loadout_open: None,
             cross: None,
@@ -844,7 +844,7 @@ impl Game {
         self.spellbar.spell = self.spells.selected;
         self.spellbar.unlocked = self.spells.unlocked;
         self.spellbar.loadout = self.loadout.clone();
-        self.spellbar.cooling = [0, 1, 2, 3].map(|i| self.spells.cooling(i));
+        self.spellbar.cooling = std::array::from_fn(|i| self.spells.cooling(i));
         self.spellbar.heat = self.spells.gatling.heat;
         self.spellbar.overheated = self.spells.gatling.overheated;
         // right stick: look right turns the view right (the camera's yaw is its
@@ -1007,7 +1007,7 @@ impl Game {
         }
         for k in 0..n {
             if self.loadout[k].is_none() {
-                self.loadout[k] = (0..4).find(|&i| have[i] && !self.loadout.contains(&Some(i)));
+                self.loadout[k] = (0..spells::N_SPELLS).find(|&i| have[i] && !self.loadout.contains(&Some(i)));
             }
         }
     }
@@ -1023,7 +1023,7 @@ impl Game {
     // (by) of those he has: swapped with a slot that held it.
     fn cycle_slot(&mut self, k: usize, by: i32) {
         let have = self.combat.boosts.spells;
-        let mut opts: Vec<Option<usize>> = (0..4).filter(|&i| have[i]).map(Some).collect();
+        let mut opts: Vec<Option<usize>> = (0..spells::N_SPELLS).filter(|&i| have[i]).map(Some).collect();
         opts.push(None);
         let Some(cur) = self.loadout.get(k).copied() else { return };
         let at = opts.iter().position(|o| *o == cur).unwrap_or(0) as i32;
@@ -1848,7 +1848,7 @@ mod tests {
     #[test]
     fn the_loadout_fills_its_slots_and_swaps() {
         let mut g = Game::new(None);
-        g.combat.boosts.spells = [true, true, true, false];
+        g.combat.boosts.spells = [true, true, true, false, false, false, false, false, false];
         g.combat.boosts.slots = 3;
         g.loadout = vec![Some(0)];
         g.fit_loadout();
@@ -1861,7 +1861,7 @@ mod tests {
         assert_eq!(g.spells.selected, 0);
         // (fewer slots, a spell lost: out)
         g.combat.boosts.slots = 2;
-        g.combat.boosts.spells = [true, false, true, false];
+        g.combat.boosts.spells = [true, false, true, false, false, false, false, false, false];
         g.fit_loadout();
         assert_eq!(g.loadout, vec![Some(2), Some(0)]);
     }

@@ -23,7 +23,16 @@
 use super::vec::{dist, dot, len, sub, V3};
 use super::Rng;
 
-pub const SPELL_NAMES: [&str; 4] = ["Fire bolt", "Lightning strike", "Wind blade", "Healing"];
+// His spells, by number (a spell's number is not a kind of spell in flight,
+// below, though the first three are the same).
+pub const N_SPELLS: usize = 9;
+pub const SPELL_NAMES: [&str; N_SPELLS] =
+    ["Fire bolt", "Lightning strike", "Wind blade", "Healing", "Frost lance", "Arcane missiles", "Meteor", "Gravity well", "Spirit familiar"];
+pub const FROST_LANCE: usize = 4;
+pub const ARCANE: usize = 5;
+pub const METEOR: usize = 6;
+pub const GRAVITY: usize = 7;
+pub const FAMILIAR: usize = 8;
 pub const HEALING: usize = 3; // (the spell number: channelled, not cast)
 
 // kinds, as in fut/spells.fut
@@ -48,8 +57,8 @@ pub const STRIDE: usize = 10;
 const LIFE: [f32; 11] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5, 12.0]; // seconds, by kind
 pub const WARMUP: f32 = 0.5; // seconds wind blades warm up before the first flies
 pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
-const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s
-const COOLDOWN: [f32; 4] = [0.9, 2.0, 0.0, 0.0]; // seconds before the spell's next cast (wind: see Gatling)
+const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s, by kind (fire, strike, wind)
+const COOLDOWN: [f32; N_SPELLS] = [0.9, 2.0, 0.0, 0.0, 0.7, 2.5, 6.0, 8.0, 15.0]; // seconds before the spell's next cast (wind: see Gatling)
 const GATLING_LIFE: f32 = 0.75; // seconds a gatling's blade flies (then fades, not bursting)
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
 const STRIKE_HEIGHT: f32 = 25.0; // it comes down from this far above the orb
@@ -172,7 +181,7 @@ pub struct Gatling {
 pub struct Spells {
     pub selected: usize,
     // the spells he has (his skills unlock them: see the game)
-    pub unlocked: [bool; 4],
+    pub unlocked: [bool; N_SPELLS],
     pub limit: usize,
     pub staff: f32,      // how far the staff is held out (0..1)
     pub since_cast: f32, // seconds
@@ -195,7 +204,7 @@ pub struct Spells {
     pub lock_time: f32,
     items: Vec<Spell>,
     // each spell's cooldown left (seconds)
-    cooldowns: [f32; 4],
+    cooldowns: [f32; N_SPELLS],
     next_id: u32,
 }
 
@@ -203,7 +212,7 @@ impl Default for Spells {
     fn default() -> Self {
         Spells {
             selected: 0, // the fire bolt: the one he starts with
-            unlocked: [true, true, true, true],
+            unlocked: [true; N_SPELLS],
             limit: 6,
             staff: 0.0,
             since_cast: 10.0,
@@ -219,7 +228,7 @@ impl Default for Spells {
             blast: 1.0,
             lock_time: LOCK_TIME,
             items: Vec::new(),
-            cooldowns: [0.0; 4],
+            cooldowns: [0.0; N_SPELLS],
             next_id: 1,
         }
     }

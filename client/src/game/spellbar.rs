@@ -8,6 +8,7 @@
 
 use super::binds::{Action, Binds, PadButton};
 use super::hud;
+use super::spells::N_SPELLS;
 use egui::{Align2, Rect, Stroke, Vec2};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,11 +24,11 @@ pub struct SpellBar {
     pub spell: usize,
     // each spell's cooldown left (1 just cast .. 0 ready), and the wind
     // blades' heat (0..1), overheated or not
-    pub cooling: [f32; 4],
+    pub cooling: [f32; N_SPELLS],
     pub heat: f32,
     pub overheated: bool,
     // the spells he has (the others shown locked)
-    pub unlocked: [bool; 4],
+    pub unlocked: [bool; N_SPELLS],
     // the spell in each of his slots (slot k cast by Spell(k)'s binding;
     // none: an empty slot)
     pub loadout: Vec<Option<usize>>,
@@ -35,7 +36,7 @@ pub struct SpellBar {
 
 impl Default for SpellBar {
     fn default() -> Self {
-        SpellBar { device: Device::Keyboard, spell: 0, cooling: [0.0; 4], heat: 0.0, overheated: false, unlocked: [true; 4], loadout: vec![Some(0)] }
+        SpellBar { device: Device::Keyboard, spell: 0, cooling: [0.0; N_SPELLS], heat: 0.0, overheated: false, unlocked: [true; N_SPELLS], loadout: vec![Some(0)] }
     }
 }
 
@@ -47,7 +48,8 @@ impl SpellBar {
     // The glyphs, at the bottom right of `rect` (the view).
     pub fn ui(&self, ctx: &egui::Context, rect: Rect, binds: &Binds) {
         let pad = self.device == Device::Pad;
-        let n = self.loadout.len().clamp(1, 4);
+        // (all four slots: those he has not yet, locked)
+        let n = 4;
         // (the circles' centres, from the area's top left)
         let centres: Vec<Vec2> = if pad {
             let d = 1.5 * R + 5.0;
@@ -88,7 +90,14 @@ impl SpellBar {
                 let p = ui.painter();
                 for (slot, off) in centres.iter().enumerate() {
                     let c = area.min + *off;
-                    let Some(i) = self.loadout.get(slot).copied().flatten().map(|i| i.min(3)) else {
+                    if slot >= self.loadout.len() {
+                        // (a slot he has yet to unlock: a padlock)
+                        p.circle_filled(c, R, hud::bg(0.35));
+                        p.circle_stroke(c, R, Stroke::new(1.0, hud::BORDER));
+                        hud::paint_lock(p, c, 0.45 * R, hud::DIM);
+                        continue;
+                    }
+                    let Some(i) = self.loadout.get(slot).copied().flatten().map(|i| i.min(N_SPELLS - 1)) else {
                         // (an empty slot)
                         p.circle_filled(c, R, hud::bg(0.35));
                         p.circle_stroke(c, R, Stroke::new(1.0, hud::BORDER));

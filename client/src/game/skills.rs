@@ -63,7 +63,7 @@ pub struct Boosts {
     pub lock: f32,        // lightning's lock-on time, times
     pub soul_mana: f32,   // more mana a soul brings
     pub souls: u32,       // souls a defeat brings
-    pub spells: [bool; 4], // the spells he can cast (the fire bolt always)
+    pub spells: [bool; super::spells::N_SPELLS], // the spells he can cast (the fire bolt always)
     pub slots: usize,      // his spell slots (1 to 4)
 }
 
@@ -105,7 +105,17 @@ impl Skills {
             lock: 0.8f32.powf(l("static")),
             soul_mana: 5.0 * l("soul"),
             souls: 1 + self.level("reaper") as u32,
-            spells: [true, self.level("lightning") > 0, self.level("wind") > 0, self.level("healing") > 0],
+            spells: [
+                true,
+                self.level("lightning") > 0,
+                self.level("wind") > 0,
+                self.level("healing") > 0,
+                self.level("frost") > 0,
+                self.level("arcane") > 0,
+                self.level("meteor") > 0,
+                self.level("gravity") > 0,
+                self.level("familiar") > 0,
+            ],
             slots: 1 + ["slot2", "slot3", "slot4"].iter().filter(|s| self.level(s) > 0).count(),
         }
     }
@@ -146,7 +156,7 @@ mod tests {
     fn learnt_in_order_for_souls() {
         let mut k = Skills::default();
         let mut souls = 20;
-        assert_eq!(k.boosts().spells, [true, false, false, false]);
+        assert_eq!(k.boosts().spells, [true, false, false, false, false, false, false, false, false]);
         let vit = skill("vitality").unwrap();
         // (not before the root)
         assert!(!k.buy(vit, &mut souls));
