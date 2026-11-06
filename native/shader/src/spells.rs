@@ -28,6 +28,7 @@ pub const spell_burst: i32 = 3;
 pub const spell_gust: i32 = 4;
 pub const spell_mark: i32 = 5;
 pub const spell_heal: i32 = 6;
+pub const spell_lock: i32 = 7; // his strike locking on: a mark, green
 
 // Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 // (distance, t, and how far beyond tmax the nearest point of the segment
@@ -237,10 +238,16 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             scale(seen(t, behind, 0.5), scale(9.0 * core, vec(0.85, 0.9, 1.0)) + scale(0.8 * halo, vec(0.55, 0.6, 1.0)))
                 + scale(1.5 * ground * seen(gt, gb, 2.0), vec(0.6, 0.65, 1.0)),
         ) + scale(2.0 * ring * seen(gt, gb, 3.0), vec(0.7, 0.8, 1.0))
-    } else if kind == spell_mark {
+    } else if kind == spell_mark || kind == spell_lock {
         // a red ring closing in on where the strike will land, turning,
         // brighter and faster to pulse as it comes; and a thread of light
-        // down to it from the sky
+        // down to it from the sky (his own lock-on: the same, green)
+        let green = kind == spell_lock;
+        let (c_core, c_halo, c_thread, c_thread_halo) = if green {
+            (vec(0.35, 1.0, 0.4), vec(0.15, 1.0, 0.2), vec(0.5, 1.0, 0.5), vec(0.1, 1.0, 0.2))
+        } else {
+            (vec(1.0, 0.25, 0.3), vec(1.0, 0.1, 0.15), vec(1.0, 0.4, 0.4), vec(1.0, 0.1, 0.1))
+        };
         let u = saturate(age / life);
         let r = 2.2 - 1.3 * u;
         let point = move |k: i32| {
@@ -254,8 +261,8 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         let env = (0.4 + u) * (0.75 + 0.25 * (age * (12.0 + 25.0 * u)).sin());
         scale(
             env,
-            scale(seen(t, behind, 0.5), scale(3.0 * core, vec(1.0, 0.25, 0.3)) + scale(0.25 * halo, vec(1.0, 0.1, 0.15)))
-                + scale(u * seen(bt, bb, 0.5), scale(1.5 * bcore, vec(1.0, 0.4, 0.4)) + scale(0.1 * bhalo, vec(1.0, 0.1, 0.1))),
+            scale(seen(t, behind, 0.5), scale(3.0 * core, c_core) + scale(0.25 * halo, c_halo))
+                + scale(u * seen(bt, bb, 0.5), scale(1.5 * bcore, c_thread) + scale(0.1 * bhalo, c_thread_halo)),
         )
     } else if kind == spell_heal {
         // healing, channelled: green motes spiralling up round him (p his

@@ -11,7 +11,7 @@ use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
 use super::mana::{Mana, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{Sound, SpellEvent, Spells, FIRE, HEALING, MARK, STRIKE};
+use super::spells::{Lock, Sound, SpellEvent, Spells, FIRE, HEALING, LOCK_TIME, MARK, STRIKE};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
@@ -137,7 +137,50 @@ impl Combat {
             spells.channel = -1.0;
         }
         spells.here = m.him;
-        if spells.selected != HEALING && able && !self.shield.raised_now() && m.casting && spells.ready() {
+        // the lightning strike: held, it locks on to the enemy in his aim
+        // (the ring closing in round it, following it), and lands on it
+        // once locked; let go before, and it is not cast
+        let striking = spells.selected == STRIKE as usize;
+        if striking && able && !self.shield.raised_now() && m.casting && (spells.lock.is_some() || spells.ready()) {
+            let aimed = spells.lock_target(m.origin, m.dir);
+            let mut lock = spells.lock.unwrap_or(Lock { age: 0.0, target: None, side: -1 });
+            // (keep to the target locked, while it is still there; else the
+            // one in his aim)
+            let kept = lock.target.and_then(|_| spells.targets.iter().filter(|t| t.side == lock.side).map(|t| t.c).min_by(|a, b| {
+                let p = lock.target.unwrap();
+                super::vec::dist(*a, p).total_cmp(&super::vec::dist(*b, p))
+            }));
+            match (kept, aimed) {
+                (Some(c), _) => lock.target = Some(c),
+                (None, Some((c, side))) => {
+                    lock.target = Some(c);
+                    lock.side = side;
+                    lock.age = 0.0;
+                }
+                (None, None) => lock.target = None,
+            }
+            if spells.lock.is_none() {
+                self.sfx.push(sfx::here(sfx::MARK));
+            }
+            lock.age += m.dt;
+            spells.lock = Some(lock);
+            if lock.age >= LOCK_TIME {
+                spells.lock = None;
+                if self.mana.spend(SPELL_COST[STRIKE as usize]) {
+                    spells.cast_at(m.origin, m.dir, lock.target, rng);
+                    self.sfx.push(sfx::here(CAST_SOUND[STRIKE as usize]));
+                } else if m.time - self.fizzled > 0.5 || m.time < self.fizzled {
+                    self.fizzled = m.time;
+                    self.sfx.push(sfx::here(sfx::FIZZLE));
+                }
+            }
+        } else if striking {
+            spells.lock = None;
+        }
+        if !striking {
+            spells.lock = None;
+        }
+        if spells.selected != HEALING && !striking && able && !self.shield.raised_now() && m.casting && spells.ready() {
             if self.mana.spend(SPELL_COST[spells.selected]) {
                 spells.cast(m.origin, m.dir, rng);
                 self.sfx.push(sfx::here(CAST_SOUND[spells.selected]));
@@ -261,6 +304,30 @@ mod tests {
             casting: false,
             shielding: false,
         }
+    }
+
+    #[test]
+    fn the_strike_locks_on_while_held() {
+        let mut c = Combat::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(1);
+        spells.select(STRIKE as usize);
+        let held = Moment { casting: true, n: 0, ..moment() };
+        // held under the lock-on time: locking, nothing cast
+        for _ in 0..(LOCK_TIME * 0.5 * 60.0) as usize {
+            c.update(&held, &mut spells, &mut rng);
+        }
+        assert!(spells.lock.is_some());
+        assert_eq!(spells.count(), 0);
+        // let go: no strike
+        c.update(&Moment { casting: false, n: 0, ..moment() }, &mut spells, &mut rng);
+        assert!(spells.lock.is_none());
+        assert_eq!(spells.count(), 0);
+        // held through it: one strike
+        for _ in 0..(LOCK_TIME * 60.0) as usize + 2 {
+            c.update(&held, &mut spells, &mut rng);
+        }
+        assert_eq!(spells.count(), 1);
     }
 
     #[test]

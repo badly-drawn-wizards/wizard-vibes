@@ -29,9 +29,11 @@ pub const BURST: u32 = 3;
 pub const GUST: u32 = 4; // a wind blade's burst into small blades
 pub const MARK: u32 = 5; // where a strike is about to land
 pub const HEAL: u32 = 6; // healing being channelled, round him
+pub const LOCK: u32 = 7; // his strike locking on to a target (held)
 pub const STRIDE: usize = 10;
 
-const LIFE: [f32; 7] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3]; // seconds, by kind
+const LIFE: [f32; 8] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME]; // seconds, by kind
+pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
 const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s
 const COOLDOWN: [f32; 4] = [0.25, 0.5, 0.3, 0.0]; // seconds before the next cast
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
@@ -48,6 +50,16 @@ pub const HIS: i32 = -1;
 pub struct Target {
     pub c: V3,
     pub r: f32,
+    pub side: i32,
+}
+
+// His strike locking on: how long the cast has been held, and the target
+// (an enemy's centre and number), if there is one in his aim; else it
+// lands where he aims.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lock {
+    pub age: f32,
+    pub target: Option<V3>,
     pub side: i32,
 }
 
@@ -92,6 +104,8 @@ pub struct Spells {
     // seconds he has been channelling healing (or -1), and where he is
     pub channel: f32,
     pub here: V3,
+    // his strike locking on, while the cast is held
+    pub lock: Option<Lock>,
     items: Vec<Spell>,
     cooldown: f32,
     next_id: u32,
@@ -108,6 +122,7 @@ impl Default for Spells {
             events: Vec::new(),
             channel: -1.0,
             here: [0.0; 3],
+            lock: None,
             items: Vec::new(),
             cooldown: 0.0,
             next_id: 1,
@@ -143,6 +158,17 @@ impl Spells {
             return false;
         }
         self.cooldown = COOLDOWN[self.selected];
+        self.since_cast = 0.0;
+        true
+    }
+
+    // Casts his strike at `at` (a locked target), or where he aims if none,
+    // unless at the limit; with its cooldown.
+    pub fn cast_at(&mut self, origin: V3, dir: V3, at: Option<V3>, rng: &mut Rng) -> bool {
+        if !self.launch(STRIKE, origin, dir, HIS, at, rng) {
+            return false;
+        }
+        self.cooldown = COOLDOWN[STRIKE as usize];
         self.since_cast = 0.0;
         true
     }
@@ -191,6 +217,11 @@ impl Spells {
 
     // The enemy target nearest his aim, within LOCK_ON of it and in range.
     pub fn lock_on(&self, origin: V3, dir: V3) -> Option<V3> {
+        self.lock_target(origin, dir).map(|(c, _)| c)
+    }
+
+    // The same, and whose it is.
+    pub fn lock_target(&self, origin: V3, dir: V3) -> Option<(V3, i32)> {
         let mut best = None;
         let mut best_angle = LOCK_ON;
         for t in &self.targets {
@@ -205,7 +236,7 @@ impl Spells {
             let angle = (dot(v, dir) / d).min(1.0).acos() - (t.r / d).atan();
             if angle < best_angle {
                 best_angle = angle;
-                best = Some(t.c);
+                best = Some((t.c, t.side));
             }
         }
         best
@@ -349,6 +380,14 @@ impl Spells {
                 s.kind as f32, s.pos[0], s.pos[1], s.pos[2], extra[0], extra[1], extra[2], s.age, s.life, s.seed,
             ];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
+        }
+        // (locking on, the ring round the target: likewise)
+        if let (Some(l), true) = (&self.lock, self.limit > 0) {
+            if let Some(p) = l.target {
+                let i = self.items.len().min(self.limit - 1);
+                let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, LOCK_TIME, 11.0];
+                out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
+            }
         }
         // (channelling, the healing round him: in the first free slot, or
         // the last)
