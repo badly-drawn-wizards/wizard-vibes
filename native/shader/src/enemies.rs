@@ -413,7 +413,7 @@ pub fn giblets_span(prm: Params, e: Enemy, i: i32, fl: Flight, ro: Vec3, rd: Vec
 pub fn blood_mist(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Vec3, tend: f32) -> (Vec3, f32) {
     let (mut rad, mut tr) = (splat(0.0), 1f32);
     // (and him, defeated: see him_dying)
-    let n = prm.enemies.min(max_enemies) + if him_dying(fs) { 1 } else { 0 };
+    let n = prm.enemies.min(enemy_slots) + if him_dying(fs) { 1 } else { 0 };
     let mut i = 0;
     while i < n {
         let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
@@ -687,7 +687,7 @@ pub fn enemies_dist(prm: Params, fs: Foes, secs: f32, fl: Flight, p: Vec3) -> Hi
     let seed = prm.enemy_seed;
     let mut best = nothing;
     // (and him, defeated: only his remains, see him_dying)
-    let n = prm.enemies.min(max_enemies) + if him_dying(fs) { 1 } else { 0 };
+    let n = prm.enemies.min(enemy_slots) + if him_dying(fs) { 1 } else { 0 };
     let mut i = 0;
     while i < n {
         let e = enemy_at(seed, fs, i, secs, fl);
@@ -734,7 +734,7 @@ pub fn enemies_dist(prm: Params, fs: Foes, secs: f32, fl: Flight, p: Vec3) -> Hi
 // ray-sphere test each).
 pub fn march_enemies(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Vec3, tmax: f32) -> (f32, i32) {
     let (mut t0, mut t1) = (INF, -INF);
-    let n = prm.enemies.min(max_enemies) + if him_dying(fs) { 1 } else { 0 };
+    let n = prm.enemies.min(enemy_slots) + if him_dying(fs) { 1 } else { 0 };
     let mut i = 0;
     while i < n {
         let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);

@@ -443,7 +443,7 @@ impl Game {
 
     // Enemies for the renderer: the drawer's count in fight mode, else none.
     fn enemy_count(&self, params: &ParamValues) -> usize {
-        if self.mode.fight() { params.f32("enemies").clamp(0.0, 6.0) as usize } else { 0 }
+        if self.mode.fight() { (params.f32("enemies").max(0.0) as usize).min(enemies::ENEMY_SLOTS) } else { 0 }
     }
 
     // Where the renderer has his orb (posed as he holds the staff, and
@@ -929,17 +929,14 @@ impl Game {
         }
         // (else that slot says nothing of the kind: an enemy there before,
         // with more of them, may have been defeated)
-        if n < enemies::MAX {
-            match &self.death {
-                Some(d) => {
-                    drive.foe[n] = 16.0 * e.his_deaths as f32 + 8.0 + e.down.min(7.9);
-                    drive.kill[n] = d.code;
-                    drive.foe_pos[n] = d.pos;
-                }
-                None => drive.foe[n] = 0.0,
+        match &self.death {
+            Some(d) => {
+                drive.foe[n] = 16.0 * e.his_deaths as f32 + 8.0 + e.down.min(7.9);
+                drive.kill[n] = d.code;
+                drive.foe_pos[n] = d.pos;
             }
+            None => drive.foe[n] = 0.0,
         }
-
 
         // (and for a lock on the ground, its height)
         let probe = (self.flight.active || self.spells.count() > 0 || self.spells.lock.is_some()).then(|| {

@@ -16,7 +16,11 @@ use super::vec::{add, dist, dot, len, normalise, scale, sub, turn, V3};
 use super::Rng;
 use std::f32::consts::PI;
 
-pub const MAX: usize = 6; // as max_enemies in fut/materials.fut
+// The enemies (at most), and the wizards' slots the renderer is sent: theirs,
+// then one more for him (defeated, he comes apart there as they do): as
+// enemy_slots and wizard_slots in the shader's materials.rs.
+pub const ENEMY_SLOTS: usize = 6;
+pub const WIZARD_SLOTS: usize = ENEMY_SLOTS + 1;
 const HP: i32 = 3;
 const APPEAR: f32 = 1.5; // seconds (appear_time in fut/enemies.fut)
 const RESPAWN: f32 = 5.0; // seconds after a defeat until the next one appears
@@ -95,7 +99,7 @@ pub fn home(seed: i64, generation: i64, i: usize, secs: f32, arena: V3) -> V3 {
     let r = |k| rnd(seed, generation, i, k);
     let radius = 9.0 + 12.0 * r(0);
     let speed = (0.04 + 0.06 * r(1)) * if r(2) < 0.5 { -1.0 } else { 1.0 };
-    let a = 2.0 * PI * (i as f32 / MAX as f32 + 0.12 * r(3)) + speed * secs;
+    let a = 2.0 * PI * (i as f32 / ENEMY_SLOTS as f32 + 0.12 * r(3)) + speed * secs;
     let h = -1.5 + 4.0 * r(4) + 0.5 * (0.6 * secs + 6.3 * r(5)).sin();
     add(arena, [radius * a.sin(), h, radius * a.cos()])
 }
@@ -198,7 +202,7 @@ struct Slot {
     target: i32, // whom it casts at: him (HIS), or free for all another
     chosen: bool, // (free for all) its next target chosen
     slow: f32,    // seconds still slowed (a frost lance): it moves, and casts, the slower
-    aggro: [f32; MAX + 1], // against each other one, and (last) him
+    aggro: [f32; ENEMY_SLOTS + 1], // against each other one, and (last) him
 }
 
 impl Slot {
@@ -259,7 +263,7 @@ impl Default for Enemies {
             shielded: false,
             arena: [0.0, ARENA_FLOOR, 12.0],
             events: Vec::new(),
-            slots: (0..MAX).map(|i| Slot::new(0, 0.0, 5.0 + i as f32 * 2.0, [0.0; 3])).collect(),
+            slots: (0..ENEMY_SLOTS).map(|i| Slot::new(0, 0.0, 5.0 + i as f32 * 2.0, [0.0; 3])).collect(),
             seen: (0, 0.0, [0.0; 3]),
             last: None,
             vel: [0.0; 3],
@@ -273,9 +277,9 @@ impl Default for Enemies {
 }
 
 impl Enemies {
-    // The renderer's states (foe0 .. foe5 of the drive record).
-    pub fn foes(&self) -> [f32; MAX] {
-        let mut f = [0.0; MAX];
+    // The renderer's states (foe0 .. foe6 of the drive record; his slot left for the game to fill).
+    pub fn foes(&self) -> [f32; WIZARD_SLOTS] {
+        let mut f = [0.0; WIZARD_SLOTS];
         for (i, s) in self.slots.iter().enumerate() {
             let phase = if s.down >= 0.0 { 8.0 + s.down.min(7.9) } else { s.appear.min(7.9) };
             f[i] = 16.0 * s.generation as f32 + phase;
@@ -283,18 +287,18 @@ impl Enemies {
         f
     }
 
-    // What defeated each (kill0 .. kill5 of the drive record).
-    pub fn kills(&self) -> [f32; MAX] {
-        let mut f = [0.0; MAX];
+    // What defeated each (kill0 .. kill6 of the drive record).
+    pub fn kills(&self) -> [f32; WIZARD_SLOTS] {
+        let mut f = [0.0; WIZARD_SLOTS];
         for (i, s) in self.slots.iter().enumerate() {
             f[i] = s.kill;
         }
         f
     }
 
-    // Where each stands (fx0 .. fz5 of the drive record).
-    pub fn positions(&self) -> [V3; MAX] {
-        let mut f = [[0.0; 3]; MAX];
+    // Where each stands (fx0 .. fz6 of the drive record).
+    pub fn positions(&self) -> [V3; WIZARD_SLOTS] {
+        let mut f = [[0.0; 3]; WIZARD_SLOTS];
         for (i, s) in self.slots.iter().enumerate() {
             f[i] = s.pos;
         }
@@ -385,12 +389,12 @@ impl Enemies {
                 s.slow = FROST_SLOW;
             }
             if s.hp > 0 {
-                s.aggro[if owner == HIS { MAX } else { (owner as usize).min(MAX) }] += AGGRO_HIT;
+                s.aggro[if owner == HIS { ENEMY_SLOTS } else { (owner as usize).min(ENEMY_SLOTS) }] += AGGRO_HIT;
             }
             if s.hp <= 0 {
                 s.down = 0.0;
                 // (the one who hit it is held against, the more)
-                s.aggro[if owner == HIS { MAX } else { (owner as usize).min(MAX) }] += AGGRO_HIT;
+                s.aggro[if owner == HIS { ENEMY_SLOTS } else { (owner as usize).min(ENEMY_SLOTS) }] += AGGRO_HIT;
                 s.vel = [0.0; 3];
                 let his = owner == HIS;
                 if his {
@@ -437,7 +441,7 @@ impl Enemies {
         }
         let others: Vec<(bool, V3, V3)> = self.slots.iter().take(n).map(|s| (s.down < 0.0 && s.appear <= 0.0, s.pos, s.vel)).collect();
         let (ffa, his_vel, he_stands) = (self.ffa, self.vel, self.down < 0.0);
-        for i in 0..MAX {
+        for i in 0..ENEMY_SLOTS {
             let arena = self.arena;
             let missiles = spells.missiles_at(i as i32);
         let wells = spells.wells();
@@ -579,7 +583,7 @@ impl Enemies {
                         s.chosen = true;
                         // (by aggro, nearer counting for more, give or take)
                         let score = |a: f32, p: V3, rng: &mut Rng| a * (0.7 + 0.6 * rng.uniform()) / (1.0 + dist(p, s.pos) / 15.0);
-                        let mut best = (if he_stands { score(s.aggro[MAX], him, rng) } else { -1.0 }, HIS);
+                        let mut best = (if he_stands { score(s.aggro[ENEMY_SLOTS], him, rng) } else { -1.0 }, HIS);
                         for (j, &(up, p, _)) in others.iter().enumerate() {
                             let sc = score(s.aggro[j], p, rng);
                             if j != i && up && sc > best.0 {
@@ -657,9 +661,9 @@ impl Enemies {
 }
 
 // Aggro at rest: AGGRO_OTHER against each other one, AGGRO_HIM against him.
-fn aggro_at_rest() -> [f32; MAX + 1] {
-    let mut a = [AGGRO_OTHER; MAX + 1];
-    a[MAX] = AGGRO_HIM;
+fn aggro_at_rest() -> [f32; ENEMY_SLOTS + 1] {
+    let mut a = [AGGRO_OTHER; ENEMY_SLOTS + 1];
+    a[ENEMY_SLOTS] = AGGRO_HIM;
     a
 }
 

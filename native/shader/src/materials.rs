@@ -33,22 +33,26 @@ pub const m_ice: i32 = 33;
 pub const m_carpet: i32 = 34;
 pub const m_enemy: i32 = 40;
 pub const enemy_parts: i32 = 10;
-pub const max_enemies: i32 = 6;
-pub const m_enemy_full: i32 = 100;
+// the enemies (at most), and the wizards' slots: theirs, then one more for
+// him (defeated, he is drawn coming apart there as they do)
+pub const enemy_slots: i32 = 6;
+pub const wizard_slots: i32 = enemy_slots + 1;
+pub const m_enemy_full: i32 = m_enemy + enemy_parts * wizard_slots;
 pub const full_parts: i32 = 25;
 
-// Layers: a hit's material id carries its layer in bits 8 and up.
+// Layers: a hit's material id carries its layer in bits 9 and up (the
+// materials need 9: the wizards' full figures reach past 255).
 #[inline]
 pub fn tag(layer: i32, h: Hit) -> Hit {
-    (h.0, h.1 | (layer << 8))
+    (h.0, h.1 | (layer << 9))
 }
 #[inline]
 pub fn hit_material(m: i32) -> i32 {
-    m & 255
+    m & 511
 }
 #[inline]
 pub fn hit_layer(m: i32) -> i32 {
-    m >> 8
+    m >> 9
 }
 #[inline]
 pub fn has(mask: i32, layer: i32) -> bool {

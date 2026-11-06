@@ -3,6 +3,7 @@
 // says about itself, and the sounds and music asked of it.
 
 use std::collections::HashMap;
+use crate::game::enemies::WIZARD_SLOTS;
 
 // The orbit camera round him (fut/wizard.fut's camera_ray): yaw and pitch
 // in radians, distance in units.
@@ -55,15 +56,16 @@ pub struct Drive {
     pub cam_y: f32,
     pub cam_z: f32,
     pub beat: f32,
-    // the enemies' states, and the point they circle
+    // the wizards' states (the enemies', then his: see WIZARD_SLOTS), and
+    // the point they circle
     pub arena_x: f32,
     pub arena_y: f32,
     pub arena_z: f32,
-    pub foe: [f32; 6],
-    // where each stands (its platform's top, in the world: fx0 .. fz5)
-    pub foe_pos: [[f32; 3]; 6],
+    pub foe: [f32; WIZARD_SLOTS],
+    // where each stands (its platform's top, in the world: fx0 .. fz6)
+    pub foe_pos: [[f32; 3]; WIZARD_SLOTS],
     // what defeated each (a kill code: see kill_of in the shader's enemies.rs)
-    pub kill: [f32; 6],
+    pub kill: [f32; WIZARD_SLOTS],
 }
 
 // On the flight path (fut/rig.fut's on_path).
@@ -97,14 +99,14 @@ pub const ON_PATH: Drive = Drive {
     arena_x: 0.0,
     arena_y: 12.0,
     arena_z: 12.0,
-    foe: [0.0; 6],
-    foe_pos: [[0.0; 3]; 6],
-    kill: [0.0; 6],
+    foe: [0.0; WIZARD_SLOTS],
+    foe_pos: [[0.0; 3]; WIZARD_SLOTS],
+    kill: [0.0; WIZARD_SLOTS],
 };
 
 impl Drive {
     // A field by its name in the drive record (as wizard.kernels.json names
-    // them: foe0 .. foe5 for the array).
+    // them: foe0 .. foe6 for the array).
     pub fn field(&self, id: &str) -> f32 {
         match id {
             "free" => self.free as i32 as f32,

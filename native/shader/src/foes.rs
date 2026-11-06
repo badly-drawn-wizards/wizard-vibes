@@ -5,12 +5,12 @@ use crate::prelude::*;
 
 #[derive(Clone, Copy)]
 pub struct Foes {
-    pub states: (f32, f32, f32, f32, f32, f32),
+    pub states: (f32, f32, f32, f32, f32, f32, f32),
     // what defeated each (a kill code: see kill_of in enemies.rs)
-    pub kills: (f32, f32, f32, f32, f32, f32),
+    pub kills: (f32, f32, f32, f32, f32, f32, f32),
     pub arena: Vec3,
     // where each stands (its platform's top, in the world)
-    pub pos: (Vec3, Vec3, Vec3, Vec3, Vec3, Vec3),
+    pub pos: (Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3),
     // the slot after the enemies fighting (their count): defeated, he is
     // drawn coming apart there as they do (see him_dying)
     pub him: i32,
@@ -21,7 +21,7 @@ pub struct Foes {
 #[inline]
 pub fn him_dying(fs: Foes) -> bool {
     let s = foe_state(fs, fs.him);
-    fs.him < max_enemies && s - 16.0 * (s / 16.0).floor() >= 8.0
+    s - 16.0 * (s / 16.0).floor() >= 8.0
 }
 
 #[inline]
@@ -37,8 +37,10 @@ pub fn foe_pos(fs: Foes, i: i32) -> Vec3 {
         s.3
     } else if i == 4 {
         s.4
-    } else {
+    } else if i == 5 {
         s.5
+    } else {
+        s.6
     }
 }
 
@@ -55,8 +57,10 @@ pub fn foe_kill(fs: Foes, i: i32) -> f32 {
         s.3
     } else if i == 4 {
         s.4
-    } else {
+    } else if i == 5 {
         s.5
+    } else {
+        s.6
     }
 }
 
@@ -73,7 +77,9 @@ pub fn foe_state(fs: Foes, i: i32) -> f32 {
         s.3
     } else if i == 4 {
         s.4
-    } else {
+    } else if i == 5 {
         s.5
+    } else {
+        s.6
     }
 }

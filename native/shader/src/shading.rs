@@ -464,8 +464,8 @@ pub fn tree_material(trunk: Vec3, leaf: Vec3, needle: Vec3, fp: f32, m: i32, w: 
 // The enemies' materials (see enemies.fut), at point p of his space.
 #[inline]
 pub fn is_enemy(m: i32) -> bool {
-    (m >= m_enemy && m < m_enemy + enemy_parts * max_enemies)
-        || (full_enemies && m >= m_enemy_full && m < m_enemy_full + full_parts * max_enemies)
+    (m >= m_enemy && m < m_enemy + enemy_parts * wizard_slots)
+        || (full_enemies && m >= m_enemy_full && m < m_enemy_full + full_parts * wizard_slots)
 }
 
 // An enemy's part (in its space, q), before what happens to it.
@@ -810,7 +810,7 @@ pub fn orb_of(pose: Pose, k: i32) -> Option<(Vec3, f32, Vec3)> {
     let vis = pose.prm.layers;
     if k == 0 {
         if has(vis, layers_orb) && !pose.dead { Some((pose.orb, orb_radius, splat(1.0))) } else { None }
-    } else if has(vis, layers_enemies) && k - 1 < pose.prm.enemies.min(max_enemies) {
+    } else if has(vis, layers_enemies) && k - 1 < pose.prm.enemies.min(enemy_slots) {
         enemy_orb_at(pose.prm, pose.foes, k - 1, pose.secs, pose.fl)
     } else {
         None
@@ -844,7 +844,7 @@ pub fn orbs_hit(pose: Pose, ro: Vec3, rd: Vec3, within: i32) -> (f32, f32, Vec3,
     } else {
         let mut best = (INF, -INF, vec(0.0, 1.0, 0.0), -1);
         let mut k = 0;
-        while k <= max_enemies {
+        while k <= enemy_slots {
             let (a, b, n) = trace(k, false);
             if a < best.0 {
                 best = (a, b, n, k);

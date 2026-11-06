@@ -151,18 +151,21 @@ pub const on_path: Drive = Drive {
     fx3: 0.0,
     fx4: 0.0,
     fx5: 0.0,
+    fx6: 0.0,
     fy0: 0.0,
     fy1: 0.0,
     fy2: 0.0,
     fy3: 0.0,
     fy4: 0.0,
     fy5: 0.0,
+    fy6: 0.0,
     fz0: 0.0,
     fz1: 0.0,
     fz2: 0.0,
     fz3: 0.0,
     fz4: 0.0,
     fz5: 0.0,
+    fz6: 0.0,
     beat: 0.0,
     arena_x: 0.0,
     arena_y: 12.0,
@@ -173,12 +176,14 @@ pub const on_path: Drive = Drive {
     foe3: 0.0,
     foe4: 0.0,
     foe5: 0.0,
+    foe6: 0.0,
     kill0: 0.0,
     kill1: 0.0,
     kill2: 0.0,
     kill3: 0.0,
     kill4: 0.0,
     kill5: 0.0,
+    kill6: 0.0,
 };
 
 pub fn flight_of(prm: Params, dr: Drive, secs: f32) -> Flight {
@@ -309,10 +314,10 @@ pub fn held_orb(prm: Params, dr: Drive, secs: f32) -> Vec3 {
 #[inline]
 pub fn foes_of(prm: Params, dr: Drive) -> Foes {
     Foes {
-            states: (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5),
-            kills: (dr.kill0, dr.kill1, dr.kill2, dr.kill3, dr.kill4, dr.kill5),
+            states: (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5, dr.foe6),
+            kills: (dr.kill0, dr.kill1, dr.kill2, dr.kill3, dr.kill4, dr.kill5, dr.kill6),
             arena: vec(dr.arena_x, dr.arena_y, dr.arena_z),
-            him: prm.enemies.min(max_enemies).max(0),
+            him: prm.enemies.min(enemy_slots).max(0),
             pos: (
                 vec(dr.fx0, dr.fy0, dr.fz0),
                 vec(dr.fx1, dr.fy1, dr.fz1),
@@ -320,6 +325,7 @@ pub fn foes_of(prm: Params, dr: Drive) -> Foes {
                 vec(dr.fx3, dr.fy3, dr.fz3),
                 vec(dr.fx4, dr.fy4, dr.fz4),
                 vec(dr.fx5, dr.fy5, dr.fz5),
+                vec(dr.fx6, dr.fy6, dr.fz6),
             ),
     }
 }

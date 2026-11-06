@@ -200,7 +200,7 @@ pub fn enemy_orb_glow(prm: Params, dr: Drive, tm: f32, fl: Flight, ro: Vec3, rd:
         return c;
     }
     let mut i = 0;
-    while i < prm.enemies.min(max_enemies) {
+    while i < prm.enemies.min(enemy_slots) {
         if let Some((p, r, tint)) = enemy_orb_at(prm, fs, i, tm, fl) {
             let t = dot(p - ro, rd);
             if t > 0.0 && t < seen + r {

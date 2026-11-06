@@ -7,7 +7,7 @@
 // strike would find a target. Defeated, he stays down: a panel says so,
 // until he tries again (its button, Enter, or the reset button).
 
-use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
+use super::enemies::{EnemyEvent, Enemies, PLAYER_HP, WIZARD_SLOTS};
 use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
@@ -136,7 +136,7 @@ impl Combat {
     }
 
     // The drive record's share: (shield, shield_hit, arena, foes, kills).
-    pub fn drive(&self) -> (f32, f32, V3, [f32; 6], [f32; 6]) {
+    pub fn drive(&self) -> (f32, f32, V3, [f32; WIZARD_SLOTS], [f32; WIZARD_SLOTS]) {
         (self.shield.amount, self.shield.since_hit, self.enemies.arena, self.enemies.foes(), self.enemies.kills())
     }
 
