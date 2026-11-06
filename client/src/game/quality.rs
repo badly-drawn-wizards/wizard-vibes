@@ -24,9 +24,9 @@ impl Level {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Level::Low => "Low",
-            Level::Med => "Med",
-            Level::High => "High",
+            Level::Low => crate::i18n::tr("Low"),
+            Level::Med => crate::i18n::tr("Med"),
+            Level::High => crate::i18n::tr("High"),
         }
     }
     pub fn from_key(s: &str) -> Option<Self> {
@@ -102,7 +102,7 @@ impl Quality {
             ui.spacing_mut().item_spacing.x = 0.0;
             for l in LEVELS {
                 let pressed = Some(l) == self.choice;
-                let tip = format!("Quality: {}{}", l.name(), if self.busy && pressed { " (loading…)" } else { "" });
+                let tip = crate::i18n::trf("Quality: {}{}", &[&l.name(), &if self.busy && pressed { crate::i18n::tr(" (loading…)") } else { "" }]);
                 let r = super::hud::toggle_button(ui, l.name(), pressed, false).on_hover_text(tip);
                 nav.item(ui, &r);
                 if r.clicked() {

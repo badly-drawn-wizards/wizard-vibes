@@ -9,6 +9,7 @@
 //
 // Colours are linear RGB.
 
+use crate::i18n::{tr, trf};
 use crate::nav::Nav;
 use crate::types::{ParamValues, Value};
 use serde::Deserialize;
@@ -141,14 +142,14 @@ impl Params {
     pub fn ui(&mut self, ui: &mut egui::Ui, now: f64, nav: &mut Nav) {
         nav.row();
         ui.horizontal(|ui| {
-            let r = ui.button("Copy changes").on_hover_text("Every value that differs from its default, as JSON");
+            let r = ui.button(tr("Copy changes")).on_hover_text(tr("Every value that differs from its default, as JSON"));
             nav.item(ui, &r);
             if r.clicked() {
                 let text = serde_json::to_string_pretty(&self.changes()).unwrap();
                 ui.ctx().copy_text(text);
-                self.copied = Some(("copied".into(), now));
+                self.copied = Some((tr("copied").into(), now));
             }
-            let r = ui.button("Reset all");
+            let r = ui.button(tr("Reset all"));
             nav.item(ui, &r);
             if r.clicked() {
                 let all: Vec<Param> = self.schema.params().into_iter().cloned().collect();
@@ -186,7 +187,7 @@ impl Params {
             nav.item(ui, &toggle);
             ui.strong(&g.name);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let r = ui.small_button("↺").on_hover_text(format!("Reset {}", g.name));
+                let r = ui.small_button("↺").on_hover_text(trf("Reset {}", &[&g.name]));
                 nav.item(ui, &r);
                 if r.clicked() {
                     let mut ps = vec![];
@@ -239,7 +240,7 @@ impl Params {
             ui.add_enabled_ui(enabled, |ui| {
                 let label = if p.compile { format!("{} *", p.label) } else { p.label.clone() };
                 let tip = if p.compile {
-                    if enabled { "Compile-time: changing it rebuilds the shader" } else { "Compile-time: fixed without the dev server" }
+                    tr(if enabled { "Compile-time: changing it rebuilds the shader" } else { "Compile-time: fixed without the dev server" })
                 } else {
                     ""
                 };
@@ -320,7 +321,7 @@ impl Params {
                     }
                 }
                 if v != p.default {
-                    let r = ui.small_button("↺").on_hover_text("Reset");
+                    let r = ui.small_button("↺").on_hover_text(tr("Reset"));
                     nav.item(ui, &r);
                     if r.clicked() {
                         v = p.default.clone();

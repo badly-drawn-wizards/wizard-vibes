@@ -29,6 +29,7 @@ pub mod spellbar;
 pub mod spells;
 pub mod vec;
 
+use crate::i18n::{tr, trf};
 use crate::types::{BuildInfo, Camera, FrameOut, ParamValues, ProbeRequest, Value, PROBE_SPHERES};
 use camera::Orbit;
 use combat::{Combat, Moment};
@@ -745,7 +746,7 @@ impl Game {
             }
         })
         .response
-        .on_hover_text("Mode (F)");
+        .on_hover_text(tr("Mode (F)"));
         if let Some(m) = chosen {
             self.set_mode(m);
         }
@@ -792,13 +793,13 @@ impl Game {
             ("Over the shoulder", true, "The camera looks past his right shoulder"),
             ("Centred", false, "The camera looks at him, centred"),
         ] {
-            let r = hud::fill_toggle(ui, name, self.over_shoulder == over).on_hover_text(tip);
+            let r = hud::fill_toggle(ui, tr(name), self.over_shoulder == over).on_hover_text(tr(tip));
             nav.item(ui, &r);
             if r.clicked() {
                 self.over_shoulder = over;
             }
         }
-        let r = hud::fill_toggle(ui, "Picture", false).on_hover_text("Hold the scene still and fly the camera freely to frame a picture (Escape to come back)");
+        let r = hud::fill_toggle(ui, tr("Picture"), false).on_hover_text(tr("Hold the scene still and fly the camera freely to frame a picture (Escape to come back)"));
         nav.item(ui, &r);
         if r.clicked() {
             self.enter_picture();
@@ -846,7 +847,7 @@ impl Game {
                     .show(ctx, |ui| {
                         ui.set_opacity(alpha);
                         hud::panel(0.6, 6, Margin::symmetric(14, 6)).show(ui, |ui| {
-                            ui.label(hud::text("Picture mode · click to look, fly as he would · Esc to return", hud::FONT, hud::FG));
+                            ui.label(hud::text(tr("Picture mode · click to look, fly as he would · Esc to return"), hud::FONT, hud::FG));
                         });
                     });
             }
@@ -915,7 +916,7 @@ impl Game {
                                 );
                             })
                             .response
-                            .on_hover_text("Health");
+                            .on_hover_text(tr("Health"));
                         }
                         ui.horizontal(|ui| {
                             hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
@@ -929,13 +930,13 @@ impl Game {
                             );
                         })
                         .response
-                        .on_hover_text("Mana");
+                        .on_hover_text(tr("Mana"));
                         if h.n > 0 {
                             ui.horizontal(|ui| {
-                                ui.label(hud::text(format!("{} defeated", h.defeated), 0.85 * hud::FONT, hud::DIM));
+                                ui.label(hud::text(trf("{} defeated", &[&h.defeated]), 0.85 * hud::FONT, hud::DIM));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let b = hud::plain_button(ui, "↺ Reset", 0.85 * hud::FONT, Vec2::new(8.0, 2.0));
-                                    if b.on_hover_text("Start the fight again (View / Back on a controller)").clicked() {
+                                    let b = hud::plain_button(ui, tr("↺ Reset"), 0.85 * hud::FONT, Vec2::new(8.0, 2.0));
+                                    if b.on_hover_text(tr("Start the fight again (View / Back on a controller)")).clicked() {
                                         reset = true;
                                     }
                                 });
@@ -965,11 +966,11 @@ impl Game {
                     hud::panel(0.8, 8, Margin::symmetric(32, 20)).show(ui, |ui| {
                         ui.vertical_centered(|ui| {
                             ui.spacing_mut().item_spacing.y = 10.0;
-                            ui.label(hud::text("Defeated", 1.8 * hud::FONT, hud::DEFEAT).extra_letter_spacing(0.1 * 1.8 * hud::FONT));
+                            ui.label(hud::text(tr("Defeated"), 1.8 * hud::FONT, hud::DEFEAT).extra_letter_spacing(0.1 * 1.8 * hud::FONT));
                             ui.label(hud::text(stats.clone(), hud::FONT, hud::FG));
                             // (its glyph: the controller's A, or a click)
                             let glyph = if self.spellbar.device == Device::Pad { hud::Chip::Face('A') } else { hud::Chip::Mouse };
-                            if hud::glyph_button(ui, glyph, "Try again", 1.05 * hud::FONT).clicked() {
+                            if hud::glyph_button(ui, glyph, tr("Try again"), 1.05 * hud::FONT).clicked() {
                                 reset = true;
                             }
                         });
@@ -992,8 +993,8 @@ impl Game {
         let now_mods = ui.input(|i| i.modifiers);
         egui::Grid::new("controls").num_columns(3).min_col_width(130.0).spacing([24.0, 6.0]).show(ui, |ui| {
             ui.label("");
-            ui.label(hud::text("Keyboard", 12.0, hud::DIM));
-            ui.label(hud::text("Controller", 12.0, hud::DIM));
+            ui.label(hud::text(tr("Keyboard"), 12.0, hud::DIM));
+            ui.label(hud::text(tr("Controller"), 12.0, hud::DIM));
             ui.end_row();
             for a in ACTIONS {
                 ui.label(a.label());
@@ -1001,7 +1002,7 @@ impl Game {
                 for device in [Device::Keyboard, Device::Pad] {
                     let waiting = self.capture.is_some_and(|c| c.action == a && c.device == device);
                     let chip = match device {
-                        Device::Keyboard => self.binds.key(a).map(|k| Chip::Key(k.name())),
+                        Device::Keyboard => self.binds.key(a).map(|k| Chip::Key(k.shown())),
                         Device::Pad => self.binds.pad(a).map(|b| b.chip()),
                     };
                     let r = bind_cell(ui, (a, device), chip, waiting);
@@ -1015,11 +1016,11 @@ impl Game {
             // (fixed)
             for (what, key, pad) in [
                 ("Fly (controller)", Chip::Text("—"), Chip::Stick('L')),
-                ("Camera (click to take the mouse)", Chip::Text("mouse · wheel"), Chip::Stick('R')),
+                ("Camera (click to take the mouse)", Chip::Text(tr("mouse · wheel")), Chip::Stick('R')),
                 ("Try again (defeated)", Chip::Key("Enter"), Chip::Face('A')),
                 ("Music", Chip::Key("M"), Chip::Text("—")),
             ] {
-                ui.label(hud::text(what, 12.5, hud::DIM));
+                ui.label(hud::text(tr(what), 12.5, hud::DIM));
                 for c in [key, pad] {
                     ui.horizontal(|ui| {
                         ui.add_space(7.0);
@@ -1032,7 +1033,7 @@ impl Game {
         ui.add_space(6.0);
         nav.row();
         ui.horizontal(|ui| {
-            let r = hud::fill_toggle(ui, "Swap X and Y", self.pads.swap_xy).on_hover_text("For controllers that report X and Y the other way round");
+            let r = hud::fill_toggle(ui, tr("Swap X and Y"), self.pads.swap_xy).on_hover_text(tr("For controllers that report X and Y the other way round"));
             nav.item(ui, &r);
             if r.clicked() {
                 self.pads.swap_xy = !self.pads.swap_xy;
@@ -1040,7 +1041,7 @@ impl Game {
         });
         ui.add_space(6.0);
         nav.row();
-        let r = ui.button("Reset to defaults");
+        let r = ui.button(tr("Reset to defaults"));
         nav.item(ui, &r);
         if r.clicked() {
             self.binds = Binds::default();
@@ -1168,11 +1169,11 @@ fn bind_cell(ui: &mut egui::Ui, id: (Action, Device), chip: Option<hud::Chip>, w
             ui.spacing_mut().item_spacing.x = 0.0;
             match (waiting, chip) {
                 (true, _) => {
-                    ui.label(hud::text("press…", 12.0, hud::FOCUS));
+                    ui.label(hud::text(tr("press…"), 12.0, hud::FOCUS));
                 }
                 (false, Some(c)) => hud::chip(ui, c),
                 (false, None) => {
-                    ui.label(hud::text("—", 12.0, hud::DIM));
+                    ui.label(hud::text(tr("—"), 12.0, hud::DIM));
                 }
             }
         });
@@ -1181,5 +1182,5 @@ fn bind_cell(ui: &mut egui::Ui, id: (Action, Device), chip: Option<hud::Chip>, w
     if r.hovered() && !waiting {
         ui.painter().rect_stroke(inner.response.rect, 4, egui::Stroke::new(1.0, hud::DIM), egui::StrokeKind::Inside);
     }
-    r.on_hover_text(if waiting { "Press a key, or a button (Escape gives up)" } else { "Choose, then press the key or button to bind" })
+    r.on_hover_text(tr(if waiting { "Press a key, or a button (Escape gives up)" } else { "Choose, then press the key or button to bind" }))
 }

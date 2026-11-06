@@ -7,6 +7,7 @@ pub mod audio;
 pub mod game;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
+pub mod i18n;
 pub mod nav;
 pub mod params;
 pub mod render;

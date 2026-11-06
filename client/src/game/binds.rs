@@ -47,7 +47,7 @@ pub const ACTIONS: [Action; 17] = [
 
 impl Action {
     pub fn label(self) -> &'static str {
-        match self {
+        crate::i18n::tr(match self {
             Action::Forward => "Forward",
             Action::Back => "Back",
             Action::Left => "Left",
@@ -62,7 +62,7 @@ impl Action {
             Action::ZoomOut => "Zoom out",
             Action::Mode => "Mode",
             Action::Pause => "Pause / menu",
-        }
+        })
     }
 
     fn key(self) -> String {
@@ -101,6 +101,11 @@ impl KeyBind {
             KeyBind::Mouse(egui::PointerButton::Extra1) => "Mouse 4",
             KeyBind::Mouse(egui::PointerButton::Extra2) => "Mouse 5",
         }
+    }
+
+    // Its name as shown (a mouse button's in the language chosen).
+    pub fn shown(self) -> &'static str {
+        if self.is_mouse() { crate::i18n::tr(self.name()) } else { self.name() }
     }
 
     pub fn is_mouse(self) -> bool {
