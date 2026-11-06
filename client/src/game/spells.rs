@@ -53,6 +53,13 @@ pub struct Target {
     pub side: i32,
 }
 
+// Where his aim meets sea level, within a strike's range (the probe finds
+// the ground beneath).
+pub fn aim_ground(origin: V3, dir: V3) -> V3 {
+    let t = if dir[1] < -0.05 { STRIKE_RANGE.min(origin[1] / -dir[1]) } else { STRIKE_RANGE };
+    [origin[0] + dir[0] * t, 0.0, origin[2] + dir[2] * t]
+}
+
 // The normal of a wind blade's plane, as it is drawn (spell_light in the
 // shader's spells.rs: its travel and its span, rolled by its seed and age).
 fn blade_normal(s: &Spell) -> V3 {
@@ -78,7 +85,13 @@ pub struct Lock {
     pub age: f32,
     pub target: Option<V3>,
     pub side: i32,
+    // no enemy in his aim: where it meets the ground, and the ground's
+    // height there once the probe has found it
+    pub ground: Option<(V3, Option<f32>)>,
 }
+
+// (the probe's id for a lock's ground point)
+const LOCK_PROBE: u32 = u32::MAX;
 
 // What happened, for the fight to deal with.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -218,8 +231,7 @@ impl Spells {
             } else {
                 // where the view meets sea level, within range; the probe then
                 // finds the actual ground beneath
-                let t = if dir[1] < -0.05 { STRIKE_RANGE.min(origin[1] / -dir[1]) } else { STRIKE_RANGE };
-                s.pos = [origin[0] + dir[0] * t, 0.0, origin[2] + dir[2] * t];
+                s.pos = aim_ground(origin, dir);
             }
             s.top = origin[1].max(s.pos[1]) + STRIKE_HEIGHT;
         } else {
@@ -362,6 +374,14 @@ impl Spells {
         for i in ids.len()..self.limit {
             pts[i * 3 + 1] = 1e5;
         }
+        // (a lock on the ground: the ground there, in a free slot)
+        if let Some(Lock { ground: Some((g, _)), .. }) = self.lock {
+            let i = ids.len();
+            if i < self.limit {
+                ids.push(LOCK_PROBE);
+                pts[i * 3..i * 3 + 3].copy_from_slice(&[g[0], PROBE_HEIGHT, g[2]]);
+            }
+        }
         (ids, pts)
     }
 
@@ -369,6 +389,13 @@ impl Spells {
     pub fn apply_probe(&mut self, ids: &[u32], data: &[f32]) {
         for (i, &id) in ids.iter().enumerate() {
             let Some(&d) = data.get(i * 4) else { break };
+            if id == LOCK_PROBE {
+                if let (Some(Lock { ground: Some((_, y)), .. }), true) = (&mut self.lock, d < 1e5) {
+                    let ny = data.get(i * 4 + 2).copied().unwrap_or(1.0);
+                    *y = Some(PROBE_HEIGHT - d / ny.max(0.2));
+                }
+                continue;
+            }
             let Some(s) = self.items.iter_mut().find(|x| x.id == id) else { continue };
             if !(d < 1e5) {
                 continue;
@@ -402,7 +429,8 @@ impl Spells {
         }
         // (locking on, the ring round the target: likewise)
         if let (Some(l), true) = (&self.lock, self.limit > 0) {
-            if let Some(p) = l.target {
+            let at = l.target.or(l.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
+            if let Some(p) = at {
                 let i = self.items.len().min(self.limit - 1);
                 let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, LOCK_TIME, 11.0];
                 out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);

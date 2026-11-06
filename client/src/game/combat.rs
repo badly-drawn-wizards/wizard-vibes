@@ -11,7 +11,7 @@ use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
 use super::mana::{Mana, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{Lock, Sound, SpellEvent, Spells, FIRE, HEALING, LOCK_TIME, MARK, STRIKE};
+use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, FIRE, HEALING, LOCK_TIME, MARK, STRIKE};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
@@ -143,7 +143,7 @@ impl Combat {
         let striking = spells.selected == STRIKE as usize;
         if striking && able && !self.shield.raised_now() && m.casting && (spells.lock.is_some() || spells.ready()) {
             let aimed = spells.lock_target(m.origin, m.dir);
-            let mut lock = spells.lock.unwrap_or(Lock { age: 0.0, target: None, side: -1 });
+            let mut lock = spells.lock.unwrap_or(Lock { age: 0.0, target: None, side: -1, ground: None });
             // (keep to the target locked, while it is still there; else the
             // one in his aim)
             let kept = lock.target.and_then(|_| spells.targets.iter().filter(|t| t.side == lock.side).map(|t| t.c).min_by(|a, b| {
@@ -155,9 +155,16 @@ impl Combat {
                 (None, Some((c, side))) => {
                     lock.target = Some(c);
                     lock.side = side;
+                    lock.ground = None;
                     lock.age = 0.0;
                 }
-                (None, None) => lock.target = None,
+                (None, None) => {
+                    // the ground where he aims, following his aim (its height
+                    // kept until the probe answers for the new place)
+                    lock.target = None;
+                    let g = aim_ground(m.origin, m.dir);
+                    lock.ground = Some((g, lock.ground.and_then(|(_, y)| y)));
+                }
             }
             if spells.lock.is_none() {
                 self.sfx.push(sfx::here(sfx::MARK));
@@ -167,7 +174,8 @@ impl Combat {
             if lock.age >= LOCK_TIME {
                 spells.lock = None;
                 if self.mana.spend(SPELL_COST[STRIKE as usize]) {
-                    spells.cast_at(m.origin, m.dir, lock.target, rng);
+                    let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
+                    spells.cast_at(m.origin, m.dir, at, rng);
                     self.sfx.push(sfx::here(CAST_SOUND[STRIKE as usize]));
                 } else if m.time - self.fizzled > 0.5 || m.time < self.fizzled {
                     self.fizzled = m.time;
@@ -323,11 +331,24 @@ mod tests {
         c.update(&Moment { casting: false, n: 0, ..moment() }, &mut spells, &mut rng);
         assert!(spells.lock.is_none());
         assert_eq!(spells.count(), 0);
-        // held through it: one strike
+        // (no enemy in his aim: locked on the ground where he aims, the
+        // ring drawn once the probe has found its height)
+        c.update(&held, &mut spells, &mut rng);
+        let (ids, _) = spells.probe_points();
+        assert_eq!(ids.last(), Some(&u32::MAX));
+        assert!(spells.pack().chunks(10).all(|s| s[0] != 7.0));
+        let mut data = vec![0.0; ids.len() * 4];
+        let n = ids.len() - 1;
+        data[n * 4] = 58.0;
+        data[n * 4 + 2] = 1.0;
+        spells.apply_probe(&ids, &data);
+        assert!(spells.pack().chunks(10).any(|s| s[0] == 7.0 && (s[2] - 2.0).abs() < 1e-4));
+        // held through it: one strike, there
         for _ in 0..(LOCK_TIME * 60.0) as usize + 2 {
             c.update(&held, &mut spells, &mut rng);
         }
         assert_eq!(spells.count(), 1);
+        assert!(spells.pack().chunks(10).any(|s| s[0] == 1.0 && (s[2] - 2.0).abs() < 1e-4));
     }
 
     #[test]

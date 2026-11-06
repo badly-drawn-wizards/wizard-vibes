@@ -348,7 +348,8 @@ impl Game {
         drive.kill = kills;
 
 
-        let probe = (self.flight.active || self.spells.count() > 0).then(|| {
+        // (and for a lock on the ground, its height)
+        let probe = (self.flight.active || self.spells.count() > 0 || self.spells.lock.is_some()).then(|| {
             let (ids, pts) = self.spells.probe_points();
             ProbeRequest { ids, pts }
         });
