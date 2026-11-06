@@ -48,6 +48,21 @@ pub struct Mixer {
     voices: Vec<Voice>,
     // the loudest music sample played (for tests)
     pub peak: f32,
+    // the volumes set (0..1): all of it, the music, the effects
+    pub volumes: Volumes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Volumes {
+    pub master: f32,
+    pub music: f32,
+    pub sfx: f32,
+}
+
+impl Default for Volumes {
+    fn default() -> Self {
+        Volumes { master: 1.0, music: 1.0, sfx: 1.0 }
+    }
 }
 
 impl Mixer {
@@ -62,6 +77,7 @@ impl Mixer {
             coef: 1.0,
             voices: Vec::new(),
             peak: 0.0,
+            volumes: Volumes::default(),
         }
     }
 
@@ -136,24 +152,26 @@ impl Mixer {
                 }
             }
         }
+        let Volumes { master, music, sfx } = self.volumes;
         for f in out.chunks_exact_mut(2) {
             self.gain += (self.target - self.gain) * self.coef;
             self.peak = self.peak.max(f[0].abs()).max(f[1].abs());
-            f[0] *= self.gain;
-            f[1] *= self.gain;
+            f[0] *= self.gain * music;
+            f[1] *= self.gain * music;
         }
         // the effects
         for v in &mut self.voices {
             let left = v.data.len() / 2 - v.i;
+            let m = v.m.map(|x| x * sfx);
             for (f, s) in out.chunks_exact_mut(2).zip(v.data[2 * v.i..].chunks_exact(2)) {
-                f[0] += v.m[0] * s[0] + v.m[1] * s[1];
-                f[1] += v.m[2] * s[0] + v.m[3] * s[1];
+                f[0] += m[0] * s[0] + m[1] * s[1];
+                f[1] += m[2] * s[0] + m[3] * s[1];
             }
             v.i += left.min(n);
         }
         self.voices.retain(|v| 2 * v.i < v.data.len());
         for s in out.iter_mut() {
-            *s = s.clamp(-1.0, 1.0);
+            *s = (*s * master).clamp(-1.0, 1.0);
         }
         self.pos = p1;
         self.chunks.retain(|c| c.at + (c.data.len() / 2) as u64 > p1);

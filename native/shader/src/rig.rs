@@ -77,7 +77,11 @@ pub struct Pose {
     pub breath: f32,
     pub lean: f32,  // sideways shear of the body above the hips, per unit height
     pub head: Vec3, // offset of the head, beard and hat
-    pub look: f32,  // head turn (radians, towards +x)
+    pub look: f32,  // head turn (radians, towards +x; the torso's twist with it)
+    pub nod: f32,   // head tilt (radians, up)
+    pub twist: f32, // the torso's turn (radians, towards +x), full at the shoulders
+    pub glance: f32,    // the eyes' turn in the head (radians, towards +x)
+    pub glance_up: f32, // and up
     pub point: f32, // 0 idle .. 1 pointing with the right hand
     pub thumb: f32, // 0 .. 1 thumbing back over his right shoulder (flying backwards)
     pub pix: f32,   // angle one pixel spans (for texture filtering)
@@ -233,6 +237,45 @@ pub fn staff_hold(prm: Params, dr: Drive, fl: Flight) -> StaffHold {
     StaffHold { tilt_c: tilt.cos(), tilt_s: tilt.sin(), pivot: staff_pivot, axis: staff_axis, c: staff_cos, s: staff_sin, shift: staff_shift, leaned_dir }
 }
 
+// Following the camera's view (over his shoulder: by the drive's shoulder,
+// 0..1), he turns to look the same way: first his torso, then his head,
+// then his eyes, each up to a soft limit (and his head and eyes up and
+// down); looking back at him, not at all.
+#[derive(Clone, Copy)]
+pub struct Follow {
+    pub twist: f32,
+    pub turn: f32,
+    pub eyes: f32,
+    pub nod: f32,
+    pub eyes_up: f32,
+}
+
+// x, softly limited to `l` (as x for small x).
+#[inline]
+fn soft(x: f32, l: f32) -> f32 {
+    x / (1.0 + x.abs() / l)
+}
+
+#[inline]
+pub fn follow_view(dr: Drive) -> Follow {
+    let v = normalise(vec(dr.sx, dr.sy, dr.sz) + vec(0.0, 0.0, 1e-4));
+    let w = saturate(dr.shoulder) * smoothstep(-0.6, -0.2, v.z);
+    let a = w * v.x.atan2(v.z);
+    let up = w * clamp(-1.0, 1.0, v.y).asin();
+    let twist = soft(a, 0.45);
+    let turn = soft(a - twist, 0.7);
+    let eyes = soft(a - twist - turn, 0.4);
+    let nod = soft(up, 0.45);
+    Follow { twist, turn, eyes, nod, eyes_up: soft(up - nod, 0.3) }
+}
+
+// How much of the torso's twist a height has: none at the hips, all at the
+// shoulders.
+#[inline]
+pub fn twist_at(y: f32) -> f32 {
+    smoothstep(0.7, 1.3, y)
+}
+
 // The orb as he holds the staff (his frame), at `secs`.
 #[inline]
 pub fn held_orb(prm: Params, dr: Drive, secs: f32) -> Vec3 {
@@ -265,8 +308,10 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let dip = groove * on_beat;
     let lift = vec(0.0, 0.012 * bd - 0.022 * dip, 0.004 * bd) + shift(1.33);
     let head = vec(0.0, 0.012 * bd - 0.04 * dip, 0.007 * bd + 0.025 * dip) + shift(1.6);
-    let l_shoulder = vec(0.2, 1.33, 0.0) + lift;
-    let r_shoulder = vec(-0.2, 1.33, 0.0) + lift;
+    // (he turns to look the way the camera does: see follow_view)
+    let follow = follow_view(dr);
+    let l_shoulder = yaw(follow.twist, vec(0.2, 1.33, 0.0) + lift);
+    let r_shoulder = yaw(follow.twist, vec(-0.2, 1.33, 0.0) + lift);
     let hold = staff_hold(prm, dr, fl);
     let held = move |q: Vec3| hold.at(q);
     let (staff_axis, staff_cos, staff_sin, leaned_dir) = (hold.axis, hold.c, hold.s, hold.leaned_dir);
@@ -314,7 +359,7 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     // (dancing, it conducts: up and out, swinging across over two beats and
     // bouncing on each)
     let conduct = vec(-0.06 * (PI * dr.beat).sin(), 0.14 + 0.06 * on_beat, 0.08);
-    let rest = vec(-0.25, 1.02, 0.27) + idle + scale(groove, conduct) + shift(1.02);
+    let rest = yaw(follow.twist * twist_at(1.02), vec(-0.25, 1.02, 0.27) + idle + scale(groove, conduct) + shift(1.02));
     // (pointing to his left means reaching across the body, so aim higher and more
     // forward to keep the arm clear of the beard)
     let aim_dir = if dr.free {
@@ -338,6 +383,7 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let pole = normalise(mix(vec(-0.6, -1.0, -0.5), vec(-1.0, -0.35, 0.1), thumb));
     let (r_elbow, r_wrist) = two_bone(r_shoulder, target, 0.31, 0.27, pole);
     let moon_world = moon_dir(prm.moon_azimuth, prm.moon_elevation);
+    let point_look = 0.45 * point * side * (if dr.free { 1f32.minimum(2.0 * dr.ax.abs()) } else { 1.0 }) - 0.4 * thumb;
     Pose {
         tm,
         secs,
@@ -349,7 +395,11 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         lean,
         head,
         // (and thumbing back, he glances over that shoulder: his right, -x)
-        look: 0.45 * point * side * (if dr.free { 1f32.minimum(2.0 * dr.ax.abs()) } else { 1.0 }) - 0.4 * thumb,
+        look: point_look + follow.twist + follow.turn,
+        nod: follow.nod,
+        twist: follow.twist,
+        glance: 0.8 * point_look + follow.eyes,
+        glance_up: follow.eyes_up,
         point,
         thumb,
         pix: 0.0008,

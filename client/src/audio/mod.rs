@@ -27,6 +27,7 @@ use output::Output;
 
 const STORE_SFX: &str = "wizard-sfx";
 const STORE_SONG: &str = "wizard-song";
+const STORE_VOLUMES: &str = "wizard-volumes";
 
 pub struct Audio {
     out: Option<Output>,
@@ -34,6 +35,8 @@ pub struct Audio {
     failed: Option<String>,
     music: Music,
     sfx_on: bool,
+    // all of it, the music's and the effects' volumes (0..1)
+    volumes: mixer::Volumes,
     // the song playing (see wizard_shader::music::songs), and the build's
     // effects (interleaved stereo at sfx_rate, and at the output's rate)
     song: u32,
@@ -47,12 +50,16 @@ impl Audio {
     pub fn new(storage: Option<&dyn eframe::Storage>) -> Audio {
         let sfx_on = storage.and_then(|s| s.get_string(STORE_SFX)).is_none_or(|v| v != "0");
         let song = storage.and_then(|s| s.get_string(STORE_SONG)).and_then(|v| v.parse().ok()).filter(|&k: &u32| (k as i32) < wizard_shader::music::songs).unwrap_or(0);
+        let volumes = storage
+            .and_then(|s| eframe::get_value::<[f32; 3]>(s, STORE_VOLUMES))
+            .map_or_else(mixer::Volumes::default, |[master, music, sfx]| mixer::Volumes { master, music, sfx });
         #[allow(unused_mut)]
         let mut audio = Audio {
             out: None,
             failed: None,
             music: Music::new(),
             sfx_on,
+            volumes,
             song,
             sfx_rate: 0.0,
             sfx_src: Vec::new(),
@@ -67,6 +74,8 @@ impl Audio {
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
         storage.set_string(STORE_SFX, if self.sfx_on { "1" } else { "0" }.into());
         storage.set_string(STORE_SONG, self.song.to_string());
+        let v = self.volumes;
+        eframe::set_value(storage, STORE_VOLUMES, &[v.master, v.music, v.sfx]);
     }
 
     // Call each frame: starts the output on the first user input, and stops
@@ -185,6 +194,52 @@ impl Audio {
         }
     }
 
+    // The settings' sound rows (the app's grid, a row of the navigation
+    // each): the master volume; the music, and the effects, each a switch
+    // and a volume.
+    pub fn settings(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        let off = self.failed.as_ref().map(|e| format!("No sound: {e}"));
+        let enabled = off.is_none();
+        ui.label("Volume");
+        nav.row();
+        ui.add_enabled_ui(enabled, |ui| ui.horizontal(|ui| volume(ui, nav, &mut self.volumes.master)));
+        ui.end_row();
+        for music in [true, false] {
+            ui.label(if music { "Music" } else { "Effects" });
+            nav.row();
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.horizontal(|ui| {
+                    let on = enabled && if music { self.music.on } else { self.sfx_on };
+                    let r = crate::game::hud::fill_toggle(ui, if on { "on" } else { "off" }, on);
+                    let r = match &off {
+                        Some(e) => r.on_disabled_hover_text(e),
+                        None => r.on_hover_text(if music { "Music on or off (M)" } else { "Sound effects on or off" }),
+                    };
+                    nav.item(ui, &r);
+                    if r.clicked() {
+                        if music {
+                            self.toggle_music();
+                        } else {
+                            self.start();
+                            self.sfx_on = !self.sfx_on;
+                        }
+                    }
+                    volume(ui, nav, if music { &mut self.volumes.music } else { &mut self.volumes.sfx });
+                });
+            });
+            ui.end_row();
+        }
+        self.apply_volumes();
+    }
+
+    // The volumes, to the mixer.
+    fn apply_volumes(&mut self) {
+        if let Some(out) = &self.out {
+            let v = self.volumes;
+            out.with(|m| m.volumes = v);
+        }
+    }
+
     // The songs, for the pause menu: a button each, the chosen one filled
     // (a switch computes the new one from its start, unless its loop is
     // kept from before): one row of the menu's navigation, however they
@@ -223,6 +278,7 @@ impl Audio {
             Ok(out) => {
                 self.out = Some(out);
                 self.resample_sfx();
+                self.apply_volumes();
             }
             Err(e) => {
                 log::warn!("audio: {e} (no music or sound effects)");
@@ -284,4 +340,15 @@ mod smoke {
         assert!(t1 > t0, "the audio clock does not run");
         assert!(out.with(|m| m.peak) > 0.0 || t1 - t0 < 0.3);
     }
+}
+
+// A volume's slider (0..1, a row's item; left and right, held, by 5%), and
+// its percentage.
+fn volume(ui: &mut egui::Ui, nav: &mut crate::nav::Nav, v: &mut f32) {
+    let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(v, 0.0..=1.0).show_value(false));
+    let steps = nav.slider(ui, &r);
+    if steps != 0 {
+        *v = (*v + 0.05 * steps as f32).clamp(0.0, 1.0);
+    }
+    ui.monospace(format!("{:>3.0}%", 100.0 * *v));
 }

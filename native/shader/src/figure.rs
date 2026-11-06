@@ -208,19 +208,30 @@ pub fn sd_hands(pose: Pose, p: Vec3) -> f32 {
 }
 
 // The head, beard and hat move together: offset by the pose, and turned
-// about the neck to look where he points.
+// about the neck to look where he points (or the camera looks), and tilted
+// up or down.
 pub const neck: Vec3 = Vec3::new(0.0, 1.45, 0.0);
 
 #[inline]
 pub fn head_space(pose: Pose, p: Vec3) -> Vec3 {
-    neck + yaw(-pose.look, p - pose.head - neck)
+    neck + tilt_up(-pose.nod, yaw(-pose.look, p - pose.head - neck))
+}
+
+// v turned about x by a: +z rising towards +y for positive a.
+#[inline]
+pub fn tilt_up(a: f32, v: Vec3) -> Vec3 {
+    let (s, c) = (a.sin(), a.cos());
+    vec(v.x, v.y * c + v.z * s, v.z * c - v.y * s)
 }
 
 // The body above the hips leans sideways into turns (a shear; the hem stays
-// put). The lean is at most 0.15, so distances stretch by under 2%.
+// put), and twists from the hips to the shoulders to look the camera's way.
+// The lean is at most 0.15 and the twist about 0.45 over 0.6, so distances
+// stretch by a few percent.
 #[inline]
 pub fn body_space(pose: Pose, p: Vec3) -> Vec3 {
-    p - vec(pose.lean * 0f32.maximum(p.y - 0.45), 0.0, 0.0)
+    let q = p - vec(pose.lean * 0f32.maximum(p.y - 0.45), 0.0, 0.0);
+    yaw(-pose.twist * twist_at(q.y), q)
 }
 
 // head space, mirrored onto the left side
@@ -600,6 +611,7 @@ pub const potions_radius: f32 = 0.26;
 // From body space (which leans into turns) back to the figure's local space.
 #[inline]
 pub fn from_body_space(pose: Pose, q: Vec3) -> Vec3 {
+    let q = yaw(pose.twist * twist_at(q.y), q);
     q + vec(pose.lean * 0f32.maximum(q.y - 0.45), 0.0, 0.0)
 }
 

@@ -198,14 +198,14 @@ pub fn hair_tangent() -> Vec3 {
 // ---------------------------------------------------------------------
 // Eyes: sclera, an icy blue iris with a darker rim, and a pupil, laid out
 // by the angle from each eye's gaze. The eyes glance further than the head
-// turns when he points.
+// turns when he points, or as he looks the camera's way.
 
 pub fn eye_albedo(pose: Pose, p: Vec3) -> Vec3 {
     let q = head_space(pose, p);
     let side = if q.x < 0.0 { -1.0 } else { 1f32 };
     let c = vec(side * eye_centre.x, eye_centre.y, eye_centre.z);
     let dir = normalise(q - c);
-    let gaze = normalise(yaw(0.8 * pose.look, vec(0.0, -0.08, 1.0)));
+    let gaze = normalise(yaw(pose.glance, tilt_up(pose.glance_up, vec(0.0, -0.08, 1.0))));
     let cosa = dot(dir, gaze);
     let iris = smoothstep(0.86, 0.875, cosa);
     let pupil = smoothstep(0.955, 0.965, cosa);

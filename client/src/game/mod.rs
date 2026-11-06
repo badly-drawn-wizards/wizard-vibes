@@ -51,6 +51,7 @@ const STORE_CAMERA: &str = "wizard-camera";
 const STORE_FLIGHT: &str = "wizard-flight";
 const STORE_MODE: &str = "wizard-mode";
 const STORE_BINDS: &str = "wizard-binds";
+const STORE_SHOULDER: &str = "wizard-over-shoulder";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -102,8 +103,9 @@ pub struct Game {
     menu: Option<gamepad::Pad>,
     pad_connected: bool,
     // the camera over his shoulder (0..1, easing in as he flies and out as
-    // he stands on the path)
+    // he stands on the path), if so chosen (else centred on him)
     shoulder: f32,
+    over_shoulder: bool,
     // his orb as the renderer last posed it (his frame, before his heading:
     // see set_orb), and where he was last step and how fast he went
     orb: V3,
@@ -163,6 +165,7 @@ impl Game {
             menu: None,
             pad_connected: false,
             shoulder: 0.0,
+            over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -180,6 +183,7 @@ impl Game {
         eframe::set_value(storage, STORE_FLIGHT, &self.flight.saved());
         storage.set_string(STORE_MODE, self.mode.name.key().to_string());
         eframe::set_value(storage, STORE_BINDS, &self.binds.saved());
+        storage.set_string(STORE_SHOULDER, if self.over_shoulder { "1" } else { "0" }.to_string());
         if let Some(c) = self.quality.choice {
             storage.set_string(STORE_QUALITY, c.key().to_string());
         }
@@ -510,7 +514,7 @@ impl Game {
         // the drive record: the flight, casting (in his frame: along the
         // camera's view), and the fight
         let mut drive = self.flight.drive();
-        let goal = if self.flight.active { 1.0 } else { 0.0 };
+        let goal = if self.flight.active && self.over_shoulder { 1.0 } else { 0.0 };
         self.shoulder += (goal - self.shoulder) * (1.0 - (-dt / 0.35).exp());
         drive.shoulder = self.shoulder;
         let [sx, sy, sz] = self.orbit.view_dir();
@@ -575,6 +579,21 @@ impl Game {
         .on_hover_text("Mode (F)");
         if let Some(m) = chosen {
             self.set_mode(m);
+        }
+    }
+
+    // The camera's choice (for the pause menu: a row of its navigation):
+    // over his shoulder as he flies, or centred on him.
+    pub fn camera_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        for (name, over, tip) in [
+            ("Over the shoulder", true, "Flying, the camera looks past his right shoulder"),
+            ("Centred", false, "The camera looks at him, centred"),
+        ] {
+            let r = hud::fill_toggle(ui, name, self.over_shoulder == over).on_hover_text(tip);
+            nav.item(ui, &r);
+            if r.clicked() {
+                self.over_shoulder = over;
+            }
         }
     }
 

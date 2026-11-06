@@ -456,6 +456,11 @@ impl App {
             ui.horizontal(|ui| game.mode_ui(ui, nav));
             ui.end_row();
 
+            ui.label("Camera");
+            nav.row();
+            ui.horizontal(|ui| game.camera_ui(ui, nav));
+            ui.end_row();
+
             ui.label("Platform");
             nav.row();
             ui.horizontal(|ui| {
@@ -476,6 +481,8 @@ impl App {
             nav.row();
             audio.songs(ui, nav);
             ui.end_row();
+
+            audio.settings(ui, nav);
 
             ui.label("Quality");
             nav.row();
