@@ -115,6 +115,9 @@ pub struct Game {
     picture: Option<Picture>,
     // the enemies fighting, as last logged
     enemies_shown: usize,
+    // where his spell will go, aim assisted (see assist), for the
+    // crosshair's cross
+    cross: Option<V3>,
     // his orb as the renderer last posed it (his frame, before his heading:
     // see set_orb), and where he was last step and how fast he went
     orb: V3,
@@ -198,6 +201,7 @@ impl Game {
             over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
             picture: None,
             enemies_shown: 0,
+            cross: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -331,6 +335,70 @@ impl Game {
     // so spells leave from it: from the app, each frame.
     pub fn set_orb(&mut self, orb: V3) {
         self.orb = orb;
+    }
+
+    // Aim assist: with an enemy near his aim (within ASSIST_CONE of the
+    // view), a fire bolt or wind blade is turned part of the way (the more,
+    // the nearer the aim) towards where it will be when the spell gets
+    // there (its motion against his, for a bolt he carries along). Where
+    // the spell then goes shows as the crosshair's cross (see cross).
+    fn assist(&mut self, origin: V3, dir: V3) -> V3 {
+        const ASSIST_CONE: f32 = 0.14;
+        const ASSIST: f32 = 0.6;
+        self.cross = None;
+        let sel = self.spells.selected as u32;
+        let speed = if sel == spells::FIRE {
+            30.0 * (1.0 + 0.6 * (self.spells.charge.max(0.0) / spells::CHARGE_TIME))
+        } else if sel == spells::WIND {
+            24.0
+        } else {
+            return dir;
+        };
+        let (pos, heading) = self.flight.place(self.time);
+        let eye = vec::add(pos, turn(heading, self.orbit.eye(self.shoulder)));
+        let view = turn(heading, self.orbit.view_dir());
+        let best = self
+            .spells
+            .targets
+            .iter()
+            .filter(|t| t.side >= 0 && t.r < 1.0)
+            .map(|t| {
+                let v = vec::sub(t.c, eye);
+                ((vec::dot(v, view) / vec::len(v)).clamp(-1.0, 1.0).acos(), t)
+            })
+            .filter(|(a, _)| *a < ASSIST_CONE)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((angle, t)) = best else { return dir };
+        let ev = self.combat.enemies.velocity(t.side).unwrap_or([0.0; 3]);
+        let rel = if sel == spells::FIRE { vec::sub(ev, self.vel) } else { ev };
+        let mut at = t.c;
+        for _ in 0..3 {
+            let time = vec::dist(at, origin) / speed;
+            at = vec::add(t.c, vec::scale(time, rel));
+        }
+        let k = ASSIST * (1.0 - angle / ASSIST_CONE).clamp(0.0, 1.0);
+        let to = vec::normalise(vec::sub(at, origin));
+        let d = vec::normalise(vec::add(vec::scale(1.0 - k, dir), vec::scale(k, to)));
+        self.cross = Some(vec::add(origin, vec::scale(vec::dist(at, origin), d)));
+        d
+    }
+
+    // Where world point `p` is in the view (points), if in front of the
+    // camera (as camera_ray has it; his bank aside).
+    fn on_screen(&self, p: V3, rect: Rect) -> Option<egui::Pos2> {
+        let (pos, heading) = self.flight.place(self.time);
+        let v = vec::sub(turn(-heading, vec::sub(p, pos)), self.orbit.eye(self.shoulder));
+        let f = self.orbit.view_dir();
+        let r = vec::normalise([-f[2], 0.0, f[0]]);
+        let u = vec::cross(r, f);
+        let z = vec::dot(v, f);
+        if z <= 0.1 {
+            return None;
+        }
+        let h = rect.height();
+        let x = 2.414 * vec::dot(v, r) / z;
+        let y = 2.414 * vec::dot(v, u) / z;
+        Some(rect.center() + Vec2::new(x * 0.5 * h, -y * 0.5 * h))
     }
 
     // The orb, and the way to cast from it, in the world: towards the point
@@ -538,6 +606,7 @@ impl Game {
             self.vel = if vec::len(v) < 60.0 { v } else { [0.0; 3] };
             self.last_pos = Some(him);
         }
+        let dir = self.assist(origin, dir);
         let moment = Moment {
             dt: game_dt,
             time: self.time,
@@ -794,7 +863,9 @@ impl Game {
                 let painter = ui.painter_at(rect);
                 hud::hurt(&painter, rect, h.hurt);
                 if h.drawn && h.lost.is_none() {
-                    hud::crosshair(&painter, rect.center(), h.locked, h.shielded);
+                    let cross = self.cross.and_then(|p| self.on_screen(p, rect)).unwrap_or(rect.center());
+                    let vitals = (h.n > 0).then_some(h.health);
+                    hud::crosshair(&painter, rect.center(), cross, h.locked, h.shielded, vitals, h.mana, h.short);
                 }
             });
 

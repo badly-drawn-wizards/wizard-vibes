@@ -140,11 +140,38 @@ pub fn bar(ui: &mut Ui, width: f32, frac: f32, a: Color32, b: Color32, border: C
 
 // The crosshair (#crosshair), centred on `c`: a cross in a ring, or in a
 // red diamond when `locked`; faint while the shield is up.
-pub fn crosshair(painter: &egui::Painter, c: Pos2, locked: bool, shielded: bool) {
+// Round it, his health (when there is a fight) on the left and his mana on
+// the right, as arcs filling from below (the mana's red, short of it); its
+// cross at `cross`, where aim assist turns his spell (else its centre).
+#[allow(clippy::too_many_arguments)]
+pub fn crosshair(painter: &egui::Painter, c: Pos2, cross: Pos2, locked: bool, shielded: bool, health: Option<f32>, mana: f32, short: bool) {
     let opacity = if shielded { 0.3 } else if locked { 1.0 } else { 0.75 };
     let white = Color32::WHITE.gamma_multiply(opacity);
-    painter.rect_filled(Rect::from_center_size(c, Vec2::new(2.0, 7.0)), 0, white);
-    painter.rect_filled(Rect::from_center_size(c, Vec2::new(7.0, 2.0)), 0, white);
+    painter.rect_filled(Rect::from_center_size(cross, Vec2::new(2.0, 7.0)), 0, white);
+    painter.rect_filled(Rect::from_center_size(cross, Vec2::new(7.0, 2.0)), 0, white);
+    // (the gauges: 100° each side, from below up)
+    let gauge = |left: bool, frac: f32, colour: Color32| {
+        let r = 22.0;
+        let span = 100f32.to_radians();
+        let at = |f: f32| {
+            let a = std::f32::consts::PI - 0.5 * (std::f32::consts::PI - span) - f * span;
+            let a = if left { -a } else { a };
+            c + Vec2::new(a.sin(), -a.cos()) * r
+        };
+        let line = |f0: f32, f1: f32, stroke: Stroke| {
+            let n = 24;
+            let pts: Vec<Pos2> = (0..=n).map(|k| at(f0 + (f1 - f0) * k as f32 / n as f32)).collect();
+            painter.add(Shape::line(pts, stroke));
+        };
+        line(0.0, 1.0, Stroke::new(3.0, Color32::from_black_alpha(110)));
+        if frac > 0.0 {
+            line(0.0, frac.clamp(0.0, 1.0), Stroke::new(2.0, colour.gamma_multiply(opacity.max(0.6))));
+        }
+    };
+    if let Some(hp) = health {
+        gauge(true, hp, Color32::from_rgb(0xff, 0x5a, 0x5a));
+    }
+    gauge(false, mana, if short { SHORT } else { Color32::from_rgb(0x6f, 0xb4, 0xff) });
     if locked {
         // a 22 px square with rounded corners, turned 45°
         let r = 11.0 * std::f32::consts::SQRT_2 - 0.75;
