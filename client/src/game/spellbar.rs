@@ -2,7 +2,9 @@
 // round glyph each, the one in hand lit. For a controller, laid out as its
 // face buttons are (Y above, X and B either side, A below; a spell bound
 // elsewhere takes a place left free), each with its button's glyph at its
-// lower right; for the keyboard, in a row, each with its key.
+// lower right; for the keyboard, in a row, each with its key. A spell
+// cooling down is shaded, the shade sweeping away as it comes ready; the
+// wind blades' heat rings theirs, red and flashing once overheated.
 
 use super::binds::{Action, Binds, PadButton};
 use super::hud;
@@ -19,11 +21,16 @@ pub struct SpellBar {
     // the device used last (its glyphs shown)
     pub device: Device,
     pub spell: usize,
+    // each spell's cooldown left (1 just cast .. 0 ready), and the wind
+    // blades' heat (0..1), overheated or not
+    pub cooling: [f32; 4],
+    pub heat: f32,
+    pub overheated: bool,
 }
 
 impl Default for SpellBar {
     fn default() -> Self {
-        SpellBar { device: Device::Keyboard, spell: 1 }
+        SpellBar { device: Device::Keyboard, spell: 1, cooling: [0.0; 4], heat: 0.0, overheated: false }
     }
 }
 
@@ -86,6 +93,27 @@ impl SpellBar {
                         p.circle_stroke(c, R, Stroke::new(1.0, hud::BORDER));
                     }
                     hud::paint_spell(p, c, 0.62 * R, i, if on { colour } else { colour.gamma_multiply(0.45) });
+                    // cooling down: the part still to come shaded, from the
+                    // top round clockwise
+                    if self.cooling[i] > 0.0 {
+                        let f = self.cooling[i];
+                        sector(p, c, R - 1.0, f, egui::Color32::from_rgba_unmultiplied(170, 160, 230, 80));
+                        // (its edge, sweeping)
+                        let a = std::f32::consts::TAU * f;
+                        p.line_segment([c, c + Vec2::new(a.sin(), -a.cos()) * (R - 1.0)], Stroke::new(1.5, hud::FG));
+                        ctx.request_repaint();
+                    }
+                    // the wind blades' heat round theirs
+                    if i == 2 && (self.heat > 0.0 || self.overheated) {
+                        let hot = if self.overheated {
+                            let flash = 0.6 + 0.4 * (ctx.input(|i| i.time) as f32 * 10.0).sin();
+                            egui::Color32::from_rgb(0xff, 0x40, 0x30).gamma_multiply(flash)
+                        } else {
+                            heat_colour(self.heat)
+                        };
+                        arc(p, c, R + 4.0, self.heat.max(if self.overheated { 1.0 } else { 0.0 }), Stroke::new(3.0, hot));
+                        ctx.request_repaint();
+                    }
                     // its button, or key, at its lower right
                     let corner = c + Vec2::splat(0.7 * R);
                     if pad {
@@ -98,4 +126,39 @@ impl SpellBar {
                 }
             });
     }
+}
+
+// The part `frac` (0..1) of the disc of radius r round c, from the top
+// clockwise, filled.
+fn sector(p: &egui::Painter, c: egui::Pos2, r: f32, frac: f32, fill: egui::Color32) {
+    let n = (48.0 * frac).ceil().max(1.0) as usize;
+    let at = |k: usize| {
+        let a = std::f32::consts::TAU * frac * k as f32 / n as f32;
+        c + Vec2::new(a.sin(), -a.cos()) * r
+    };
+    // (a fan of thin slices: each convex)
+    for k in 0..n {
+        p.add(egui::Shape::convex_polygon(vec![c, at(k), at(k + 1)], fill, Stroke::NONE));
+    }
+}
+
+// The part `frac` (0..1) of the circle of radius r round c, from the top
+// clockwise.
+fn arc(p: &egui::Painter, c: egui::Pos2, r: f32, frac: f32, stroke: Stroke) {
+    let n = (64.0 * frac).ceil().max(1.0) as usize;
+    let pts = (0..=n)
+        .map(|k| {
+            let a = std::f32::consts::TAU * frac * k as f32 / n as f32;
+            c + Vec2::new(a.sin(), -a.cos()) * r
+        })
+        .collect();
+    p.add(egui::Shape::line(pts, stroke));
+}
+
+// The heat's colour: cool cyan, through amber, to red.
+fn heat_colour(h: f32) -> egui::Color32 {
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * t);
+    let (cyan, amber, red) = ([0.42, 0.91, 1.0], [1.0, 0.75, 0.25], [1.0, 0.25, 0.19]);
+    let c = if h < 0.6 { lerp(cyan, amber, h / 0.6) } else { lerp(amber, red, (h - 0.6) / 0.4) };
+    egui::Color32::from_rgb((255.0 * c[0]) as u8, (255.0 * c[1]) as u8, (255.0 * c[2]) as u8)
 }

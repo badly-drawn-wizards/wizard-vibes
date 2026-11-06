@@ -7,8 +7,10 @@
 // finds the ground it hits. His fire bolt is charged first, while the cast
 // is held (see combat.rs): the longer, up to CHARGE_TIME, the faster and
 // bigger the bolt and the wider and harder its burst, which hurts every
-// enemy within its reach, most at its heart. At most `limit` (a compile-time parameter) are
-// out at once, and casting has a short cooldown on top.
+// enemy within its reach, most at its heart. His wind blades come like a
+// gatling gun's while the cast is held (see Gatling). At most `limit` (a
+// compile-time parameter) are out at once, and each spell has its own
+// cooldown on top.
 //
 // The enemies cast them too (see enemies.rs). Each spell has a side: his
 // hit the enemies, theirs hit him, as spheres listed in `targets`; a hit is
@@ -39,7 +41,8 @@ pub const STRIDE: usize = 10;
 const LIFE: [f32; 8] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME]; // seconds, by kind
 pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
 const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s
-const COOLDOWN: [f32; 4] = [0.25, 0.5, 0.3, 0.0]; // seconds before the next cast
+const COOLDOWN: [f32; 4] = [0.9, 2.0, 0.0, 0.0]; // seconds before the spell's next cast (wind: see Gatling)
+const GATLING_LIFE: f32 = 0.75; // seconds a gatling's blade flies (then fades, not bursting)
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
 const STRIKE_HEIGHT: f32 = 25.0; // it comes down from this far above the orb
 const PROBE_HEIGHT: f32 = 60.0; // a strike's ground is probed from up here
@@ -130,6 +133,18 @@ struct Spell {
     owner: i32,
     done: bool, // its blast (a burst's or a strike's) has been dealt
     power: f32, // a fire bolt's (and its burst's) charge, 0..1
+    quiet: bool, // a wind blade that fades at the end of its flight (not bursting)
+}
+
+// His wind blades held: they come faster as it spins up (spin 0..1), and
+// each heats it; too hot, it overheats and will not fire until it has
+// cooled (see combat.rs). `next`: seconds until it may fire again.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gatling {
+    pub spin: f32,
+    pub heat: f32,
+    pub overheated: bool,
+    pub next: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -149,8 +164,10 @@ pub struct Spells {
     // it charges
     pub charge: f32,
     pub orb: V3,
+    pub gatling: Gatling,
     items: Vec<Spell>,
-    cooldown: f32,
+    // each spell's cooldown left (seconds)
+    cooldowns: [f32; 4],
     next_id: u32,
 }
 
@@ -168,8 +185,9 @@ impl Default for Spells {
             lock: None,
             charge: -1.0,
             orb: [0.0; 3],
+            gatling: Gatling::default(),
             items: Vec::new(),
-            cooldown: 0.0,
+            cooldowns: [0.0; 4],
             next_id: 1,
         }
     }
@@ -191,18 +209,27 @@ impl Spells {
         self.items.clear();
     }
 
-    // Whether he could cast now (not cooling down, nor at the limit).
-    pub fn ready(&self) -> bool {
-        self.cooldown <= 0.0 && self.items.len() < self.limit
+    // Whether he could cast spell `i` now (not cooling down, nor at the
+    // limit).
+    pub fn ready(&self, i: usize) -> bool {
+        self.cooldowns[i] <= 0.0 && self.items.len() < self.limit
     }
 
-    // Casts the selected spell from `origin` along the unit vector `dir`
-    // (world space), unless cooling down or at the limit.
-    pub fn cast(&mut self, origin: V3, dir: V3, rng: &mut Rng) -> bool {
-        if self.cooldown > 0.0 || !self.launch(self.selected as u32, origin, dir, HIS, None, rng) {
+    // How much of spell i's cooldown is left (1 just cast .. 0 ready).
+    pub fn cooling(&self, i: usize) -> f32 {
+        if COOLDOWN[i] > 0.0 { (self.cooldowns[i] / COOLDOWN[i]).clamp(0.0, 1.0) } else { 0.0 }
+    }
+
+    // Casts one of his gatling's wind blades from `origin` along the unit
+    // vector `dir` (world space), unless at the limit: it flies briefly,
+    // and fades rather than bursting at the end.
+    pub fn cast_blade(&mut self, origin: V3, dir: V3, rng: &mut Rng) -> bool {
+        if !self.launch(WIND, origin, dir, HIS, None, rng) {
             return false;
         }
-        self.cooldown = COOLDOWN[self.selected];
+        let s = self.items.last_mut().unwrap();
+        s.life = GATLING_LIFE;
+        s.quiet = true;
         self.since_cast = 0.0;
         true
     }
@@ -220,7 +247,7 @@ impl Spells {
         s.vel = super::vec::add(s.vel.map(|v| v * k), carry);
         // (the renderer reads its charge from its seed: see pack)
         s.seed += 100000.0 * (100.0 * s.power).round();
-        self.cooldown = COOLDOWN[FIRE as usize];
+        self.cooldowns[FIRE as usize] = COOLDOWN[FIRE as usize];
         self.since_cast = 0.0;
         true
     }
@@ -231,7 +258,7 @@ impl Spells {
         if !self.launch(STRIKE, origin, dir, HIS, at, rng) {
             return false;
         }
-        self.cooldown = COOLDOWN[STRIKE as usize];
+        self.cooldowns[STRIKE as usize] = COOLDOWN[STRIKE as usize];
         self.since_cast = 0.0;
         true
     }
@@ -255,6 +282,7 @@ impl Spells {
             owner,
             done: false,
             power: 0.0,
+            quiet: false,
         };
         self.next_id += 1;
         if kind == STRIKE || kind == MARK {
@@ -372,7 +400,9 @@ impl Spells {
     // `holding`: the cast button is down. The staff comes out quickly while
     // casting and stays out between repeated casts, then lowers slowly.
     pub fn update(&mut self, dt: f32, holding: bool) {
-        self.cooldown = (self.cooldown - dt).max(0.0);
+        for c in &mut self.cooldowns {
+            *c = (*c - dt).max(0.0);
+        }
         self.since_cast += dt;
         let out = holding || self.since_cast < 0.7;
         let goal = if out { 1.0 } else { 0.0 };
@@ -385,8 +415,9 @@ impl Spells {
                     s.pos[i] += s.vel[i] * dt;
                 }
             }
-            // a wind blade that flew its course bursts too
-            if s.kind == WIND && s.age >= s.life {
+            // a wind blade that flew its course bursts too (a gatling's
+            // fades)
+            if s.kind == WIND && !s.quiet && s.age >= s.life {
                 Self::gust(s, &mut self.events);
             }
             // a mark's time is up: the strike comes down
@@ -524,8 +555,8 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut s = Spells { selected: 0, ..Default::default() };
         s.targets = vec![Target { c: [0.0, 0.0, 10.0], r: 0.9, side: 0 }, Target { c: [0.0, 0.0, 9.0], r: 1.4, side: 0 }];
-        assert!(s.cast([0.0; 3], [0.0, 0.0, 1.0], &mut rng));
-        assert!(!s.ready()); // cooling down
+        assert!(s.cast_fire([0.0; 3], [0.0, 0.0, 1.0], 0.0, [0.0; 3], &mut rng));
+        assert!(!s.ready(FIRE as usize)); // cooling down
         for _ in 0..20 {
             s.update(1.0 / 60.0, false);
         }
@@ -569,7 +600,7 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
         let dir = super::super::vec::normalise([0.0, -1.0, 1.0]);
-        assert!(s.cast([0.0, 10.0, 0.0], dir, &mut rng));
+        assert!(s.cast_at([0.0, 10.0, 0.0], dir, None, &mut rng));
         let (ids, pts) = s.probe_points();
         assert_eq!(ids.len(), 1);
         assert!((pts[0]).abs() < 1e-4 && pts[1] == PROBE_HEIGHT && (pts[2] - 10.0).abs() < 1e-4);
@@ -590,7 +621,7 @@ mod tests {
         assert!(s.launch(FIRE, [0.0; 3], [1.0, 0.0, 0.0], 0, None, &mut rng));
         assert!(s.launch(FIRE, [0.0; 3], [1.0, 0.0, 0.0], 0, None, &mut rng));
         assert!(!s.launch(FIRE, [0.0; 3], [1.0, 0.0, 0.0], 0, None, &mut rng));
-        assert!(!s.ready());
+        assert!(!s.ready(FIRE as usize));
     }
 
     #[test]

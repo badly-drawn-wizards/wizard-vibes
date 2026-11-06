@@ -7,9 +7,9 @@ const PAUSE: f32 = 0.6; // seconds after spending before it refills
 
 // What each spell costs (fire bolt, lightning strike, wind blade; healing
 // costs by the second instead: HEAL_DRAIN).
-pub const SPELL_COST: [f32; 4] = [12.0, 25.0, 8.0, 0.0];
-pub const HEAL_DRAIN: f32 = 16.0; // a second, while channelling healing
-pub const CHARGE_DRAIN: f32 = 22.0; // a second, while charging a fire bolt (on top of its cost)
+pub const SPELL_COST: [f32; 4] = [7.0, 15.0, 2.5, 0.0]; // (wind: each of a gatling's blades)
+pub const HEAL_DRAIN: f32 = 12.0; // a second, while channelling healing
+pub const CHARGE_DRAIN: f32 = 12.0; // a second, while charging a fire bolt (on top of its cost)
 
 #[derive(Clone, Debug)]
 pub struct Mana {
@@ -65,12 +65,12 @@ mod tests {
     fn spend_and_refill() {
         let mut m = Mana::default();
         assert!(m.spend(SPELL_COST[1]));
-        assert_eq!(m.value, 75.0);
+        assert_eq!(m.value, 85.0);
         // no refill during the pause
         m.update(0.5);
-        assert_eq!(m.value, 75.0);
+        assert_eq!(m.value, 85.0);
         m.update(0.2);
-        assert!((m.value - (75.0 + 14.0 * 0.2)).abs() < 1e-4);
+        assert!((m.value - (85.0 + 14.0 * 0.2)).abs() < 1e-4);
         // short of it
         m.value = 5.0;
         assert!(!m.spend(8.0));

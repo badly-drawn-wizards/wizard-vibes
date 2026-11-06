@@ -50,7 +50,8 @@ pub use quality::{Level, LEVELS};
 const STORE_CAMERA: &str = "wizard-camera";
 const STORE_FLIGHT: &str = "wizard-flight";
 const STORE_MODE: &str = "wizard-mode";
-const STORE_BINDS: &str = "wizard-binds";
+// (renamed as the defaults changed: casting by mouse, not Space)
+const STORE_BINDS: &str = "wizard-binds-2";
 const STORE_SHOULDER: &str = "wizard-over-shoulder";
 const STORE_QUALITY: &str = "wizard-quality";
 
@@ -89,6 +90,9 @@ pub struct Game {
     capture: Option<Capture>,
     // the modifiers held last frame (one pressed alone can be bound)
     mods: egui::Modifiers,
+    // the mouse's buttons count (bound: casting, the shield): it is taken,
+    // and the click that took it let go of
+    mouse_armed: bool,
     // the pause menu has a slider held (the controller's B lets it go,
     // rather than resuming): set by the app
     pub menu_holds: bool,
@@ -178,6 +182,7 @@ impl Game {
             binds,
             capture: None,
             mods: egui::Modifiers::NONE,
+            mouse_armed: false,
             menu_holds: false,
             pads: Pads::default(),
             look: look::MouseLook::default(),
@@ -254,9 +259,17 @@ impl Game {
         let Some(c) = self.capture else { return };
         let mut taken = None;
         for e in events.iter() {
-            if let egui::Event::Key { key, pressed: true, repeat: false, .. } = e {
-                taken = Some(if *key == Key::Escape { None } else { Some(KeyBind::Key(*key)) });
-                break;
+            match e {
+                egui::Event::Key { key, pressed: true, repeat: false, .. } => {
+                    taken = Some(if *key == Key::Escape { None } else { Some(KeyBind::Key(*key)) });
+                    break;
+                }
+                // (a mouse button, for the keyboard's binding)
+                egui::Event::PointerButton { button, pressed: true, .. } if c.device == Device::Keyboard => {
+                    taken = Some(Some(KeyBind::Mouse(*button)));
+                    break;
+                }
+                _ => {}
             }
         }
         if taken.is_none() && c.device == Device::Keyboard {
@@ -264,7 +277,7 @@ impl Game {
                 taken = Some(Some(m));
             }
         }
-        events.retain(|e| !matches!(e, egui::Event::Key { .. }));
+        events.retain(|e| !matches!(e, egui::Event::Key { .. }) && !(c.device == Device::Keyboard && matches!(e, egui::Event::PointerButton { .. })));
         if let Some(k) = taken {
             if let (Some(k), Device::Keyboard) = (k, c.device) {
                 self.binds.set_key(c.action, k);
@@ -370,6 +383,14 @@ impl Game {
         let mut held = Held::default();
         let mut casting = false;
         let binds = self.binds.clone();
+        // (the mouse's buttons count once it is taken, and the click that
+        // took it has been let go of)
+        if !self.look.held() {
+            self.mouse_armed = false;
+        } else if !ctx.input(|i| i.pointer.any_down()) {
+            self.mouse_armed = true;
+        }
+        let mouse = self.mouse_armed;
         if !ctx.egui_wants_keyboard_input() {
             let (keys, typed_any, mods) = ctx.input(|i| {
                 let pressed: Vec<(Key, egui::Modifiers)> = i
@@ -382,7 +403,7 @@ impl Game {
                     .collect();
                 let any = i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. }));
                 // (as bound; the arrows fly too)
-                let down = |a: Action| binds.key(a).is_some_and(|k| k.down(i));
+                let down = |a: Action| binds.key(a).is_some_and(|k| (mouse || !k.is_mouse()) && k.down(i));
                 held = Held {
                     fwd: down(Action::Forward) || i.key_down(Key::ArrowUp),
                     back: down(Action::Back) || i.key_down(Key::ArrowDown),
@@ -407,6 +428,17 @@ impl Game {
                 .filter_map(|(k, _)| binds.key_action(KeyBind::Key(*k)))
                 .collect();
             acts.extend(KeyBind::modifier_pressed(self.mods, mods).and_then(|m| binds.key_action(m)));
+            if mouse {
+                acts.extend(ctx.input(|i| {
+                    i.events
+                        .iter()
+                        .filter_map(|e| match e {
+                            egui::Event::PointerButton { button, pressed: true, .. } => binds.key_action(KeyBind::Mouse(*button)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            }
             self.mods = mods;
             for a in acts {
                 match a {
@@ -511,6 +543,9 @@ impl Game {
         self.spells.update(game_dt, casting || pad_cast);
         self.combat.handle(&mut self.spells);
         self.spellbar.spell = self.spells.selected;
+        self.spellbar.cooling = [0, 1, 2, 3].map(|i| self.spells.cooling(i));
+        self.spellbar.heat = self.spells.gatling.heat;
+        self.spellbar.overheated = self.spells.gatling.overheated;
         // right stick: look right turns the view right (the camera's yaw is its
         // azimuth round him, so it decreases), up raises the view
         // (and the D-pad zooms)

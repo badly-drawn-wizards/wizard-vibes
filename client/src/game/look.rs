@@ -137,11 +137,17 @@ impl MouseLook {
                 m.set((x + e.movement_x() as f32, y + e.movement_y() as f32));
             }
         });
+        // (and no context menu from a right click, which raises the shield)
+        let no_menu = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| e.prevent_default());
         if let Some(d) = web_sys::window().and_then(|w| w.document()) {
             let _ = d.add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+            if let Some(c) = d.get_element_by_id("view") {
+                let _ = c.add_event_listener_with_callback("contextmenu", no_menu.as_ref().unchecked_ref());
+            }
         }
         // (for the page's life)
         on_move.forget();
+        no_menu.forget();
         self.web = Some(moved);
     }
 }

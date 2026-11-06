@@ -77,13 +77,15 @@ impl Action {
     }
 }
 
-// A key, or a modifier held alone (egui has no keys for those).
+// A key, or a modifier held alone (egui has no keys for those), or a mouse
+// button (counted only while the mouse is taken: see look.rs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyBind {
     Key(egui::Key),
     Shift,
     Ctrl,
     Alt,
+    Mouse(egui::PointerButton),
 }
 
 impl KeyBind {
@@ -93,7 +95,16 @@ impl KeyBind {
             KeyBind::Shift => "Shift",
             KeyBind::Ctrl => "Ctrl",
             KeyBind::Alt => "Alt",
+            KeyBind::Mouse(egui::PointerButton::Primary) => "Left click",
+            KeyBind::Mouse(egui::PointerButton::Secondary) => "Right click",
+            KeyBind::Mouse(egui::PointerButton::Middle) => "Middle click",
+            KeyBind::Mouse(egui::PointerButton::Extra1) => "Mouse 4",
+            KeyBind::Mouse(egui::PointerButton::Extra2) => "Mouse 5",
         }
+    }
+
+    pub fn is_mouse(self) -> bool {
+        matches!(self, KeyBind::Mouse(_))
     }
 
     fn from_name(s: &str) -> Option<KeyBind> {
@@ -101,6 +112,11 @@ impl KeyBind {
             "Shift" => Some(KeyBind::Shift),
             "Ctrl" => Some(KeyBind::Ctrl),
             "Alt" => Some(KeyBind::Alt),
+            "Left click" => Some(KeyBind::Mouse(egui::PointerButton::Primary)),
+            "Right click" => Some(KeyBind::Mouse(egui::PointerButton::Secondary)),
+            "Middle click" => Some(KeyBind::Mouse(egui::PointerButton::Middle)),
+            "Mouse 4" => Some(KeyBind::Mouse(egui::PointerButton::Extra1)),
+            "Mouse 5" => Some(KeyBind::Mouse(egui::PointerButton::Extra2)),
             _ => egui::Key::from_name(s).map(KeyBind::Key),
         }
     }
@@ -112,6 +128,7 @@ impl KeyBind {
             KeyBind::Shift => i.modifiers.shift,
             KeyBind::Ctrl => i.modifiers.ctrl,
             KeyBind::Alt => i.modifiers.alt,
+            KeyBind::Mouse(b) => i.pointer.button_down(b),
         }
     }
 
@@ -221,8 +238,8 @@ impl Default for Binds {
             (Action::Climb, k(K::E), Some(PadButton::RT)),
             (Action::Descend, k(K::Q), Some(PadButton::LT)),
             (Action::Boost, Some(KeyBind::Shift), Some(PadButton::LS)),
-            (Action::Cast, k(K::Space), Some(PadButton::RB)),
-            (Action::Shield, k(K::R), Some(PadButton::LB)),
+            (Action::Cast, Some(KeyBind::Mouse(egui::PointerButton::Primary)), Some(PadButton::RB)),
+            (Action::Shield, Some(KeyBind::Mouse(egui::PointerButton::Secondary)), Some(PadButton::LB)),
             (Action::Spell(0), k(K::Num1), Some(PadButton::X)),
             (Action::Spell(1), k(K::Num2), Some(PadButton::A)),
             (Action::Spell(2), k(K::Num3), Some(PadButton::B)),
@@ -305,7 +322,7 @@ mod tests {
         let mut b = Binds::default();
         b.set_key(Action::Cast, KeyBind::Key(egui::Key::W));
         assert_eq!(b.key(Action::Cast), Some(KeyBind::Key(egui::Key::W)));
-        assert_eq!(b.key(Action::Forward), Some(KeyBind::Key(egui::Key::Space)));
+        assert_eq!(b.key(Action::Forward), Some(KeyBind::Mouse(egui::PointerButton::Primary)));
         b.set_pad(Action::Spell(0), PadButton::A);
         assert_eq!(b.pad(Action::Spell(0)), Some(PadButton::A));
         assert_eq!(b.pad(Action::Spell(1)), Some(PadButton::X));
@@ -315,6 +332,7 @@ mod tests {
     fn kept_and_restored() {
         let mut b = Binds::default();
         b.set_key(Action::Boost, KeyBind::Ctrl);
+        b.set_key(Action::Mode, KeyBind::Mouse(egui::PointerButton::Middle));
         b.set_pad(Action::ZoomIn, PadButton::RS);
         assert_eq!(Binds::restored(&b.saved()), b);
     }

@@ -11,13 +11,26 @@ use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
 use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, CHARGE_TIME, FIRE, HEALING, LOCK_TIME, MARK, STRIKE};
+use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, CHARGE_TIME, FIRE, HEALING, LOCK_TIME, MARK, STRIKE, WIND};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
 
 const CAST_SOUND: [usize; 4] = [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP];
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
+const BUFFER: f32 = 0.35; // seconds a press of cast is remembered, to start a spell not yet ready
+// the wind blades' gatling: seconds between blades, spun down and up; how
+// long it takes to spin up, and down; the heat each blade adds (1:
+// overheated), and how fast it cools, and overheated, and down to what it
+// cools before firing again
+const SLOW_SHOT: f32 = 0.33;
+const FAST_SHOT: f32 = 0.125;
+const SPIN_UP: f32 = 1.2;
+const SPIN_DOWN: f32 = 0.6;
+const SHOT_HEAT: f32 = 0.09;
+const HEAT_COOL: f32 = 0.35;
+const OVERHEAT_COOL: f32 = 0.5;
+const HEAT_RESUME: f32 = 0.25;
 
 // What the fight needs to know of the frame.
 #[derive(Clone, Copy, Debug)]
@@ -58,6 +71,9 @@ pub struct Combat {
     pub mana: Mana,
     pub shield: Shield,
     fizzled: f32, // when the last fizzle sounded (holding the key does not drone)
+    was_casting: bool, // the cast button held last update (for its presses)
+    buffered: f32,     // seconds a press of cast is still remembered (see BUFFER)
+    short: bool,       // the press remembered has waited on mana (it fizzles if it runs out)
     healed: f32,  // healing channelled towards the next point of health
     here: (V3, V3), // him, and the way he looks
     started: bool,  // the fight has an arena (it starts with the first enemies)
@@ -73,6 +89,9 @@ impl Default for Combat {
             mana: Mana::default(),
             shield: Shield::default(),
             fizzled: -1.0,
+            was_casting: false,
+            buffered: 0.0,
+            short: false,
             healed: 0.0,
             here: ([0.0; 3], [0.0, 0.0, 1.0]),
             started: false,
@@ -138,84 +157,138 @@ impl Combat {
             spells.channel = -1.0;
         }
         spells.here = m.him;
-        // the fire bolt: held, it charges at the orb (its cost as it
-        // starts, then mana drained while it grows: short of it, it stops
-        // growing; none comes back while it is held), and flies when let
-        // go, as charged
-        let firing = spells.selected == FIRE as usize;
-        if firing && able && !self.shield.raised_now() {
-            if m.casting {
-                if spells.charge < 0.0 {
-                    if spells.ready() {
-                        if self.mana.spend(SPELL_COST[FIRE as usize]) {
-                            spells.charge = 0.0;
-                        } else {
-                            self.fizzle(m.time);
-                        }
-                    }
-                } else if spells.charge < CHARGE_TIME && self.mana.drain(CHARGE_DRAIN * m.dt) {
-                    spells.charge = (spells.charge + m.dt).min(CHARGE_TIME);
+        // A press of cast is remembered a moment (BUFFER): a spell not yet
+        // ready (cooling down, or short of mana) starts as soon as it is,
+        // if that is within it. Each press casts once (the fire bolt and the
+        // strike); only the wind blades come again while it is held.
+        let pressed = m.casting && !self.was_casting;
+        self.was_casting = m.casting;
+        let had = self.buffered > 0.0;
+        self.buffered = if pressed { BUFFER } else { self.buffered - m.dt };
+        if had && self.buffered <= 0.0 && self.short {
+            self.fizzle(m.time);
+        }
+        if pressed {
+            self.short = false;
+        }
+        let can = able && !self.shield.raised_now();
+        let selected = spells.selected;
+        // the fire bolt: pressed, it charges at the orb while held (its cost
+        // as it starts, then mana drained while it grows: short of it, it
+        // stops growing; none comes back while it is held), and flies when
+        // let go, as charged (a press let go before it could start: as soon
+        // as it can, uncharged)
+        let firing = selected == FIRE as usize;
+        if firing && can {
+            let cost = SPELL_COST[FIRE as usize];
+            if spells.charge < 0.0 && self.buffered > 0.0 && spells.ready(FIRE as usize) {
+                if self.mana.value >= cost {
+                    self.mana.spend(cost);
+                    spells.charge = 0.0;
+                    self.buffered = 0.0;
+                    self.short = false;
                 } else {
-                    // (held charged: no refill meanwhile)
-                    self.mana.drain(0.0);
+                    self.short = true;
                 }
-                if spells.charge >= 0.0 {
+            }
+            if spells.charge >= 0.0 {
+                if m.casting {
+                    if spells.charge < CHARGE_TIME && self.mana.drain(CHARGE_DRAIN * m.dt) {
+                        spells.charge = (spells.charge + m.dt).min(CHARGE_TIME);
+                    } else {
+                        // (held charged: no refill meanwhile)
+                        self.mana.drain(0.0);
+                    }
                     spells.since_cast = 0.0;
+                } else {
+                    spells.cast_fire(m.origin, m.dir, spells.charge / CHARGE_TIME, m.vel, rng);
+                    spells.charge = -1.0;
+                    self.sfx.push(sfx::here(CAST_SOUND[FIRE as usize]));
                 }
-            } else if spells.charge >= 0.0 {
-                spells.cast_fire(m.origin, m.dir, spells.charge / CHARGE_TIME, m.vel, rng);
-                spells.charge = -1.0;
-                self.sfx.push(sfx::here(CAST_SOUND[FIRE as usize]));
             }
         } else {
             spells.charge = -1.0;
         }
         spells.orb = m.origin;
-        // the lightning strike: held, it locks on to what is in his aim as
-        // it starts, an enemy (the ring closing in round it, following it)
-        // or the ground there (staying put, however he turns), and lands
-        // there once locked; let go before, and it is not cast
-        let striking = spells.selected == STRIKE as usize;
-        if striking && able && !self.shield.raised_now() && m.casting && (spells.lock.is_some() || spells.ready()) {
-            let mut lock = spells.lock.unwrap_or_else(|| match spells.lock_target(m.origin, m.dir) {
-                Some((c, side)) => Lock { age: 0.0, target: Some(c), side, ground: None },
-                None => Lock { age: 0.0, target: None, side: -1, ground: Some((aim_ground(m.origin, m.dir), None)) },
-            });
-            // (an enemy locked: followed while it is there; gone, the
-            // place it was)
-            if let Some(p) = lock.target {
-                let near = spells.targets.iter().filter(|t| t.side == lock.side).map(|t| t.c).min_by(|a, b| {
-                    super::vec::dist(*a, p).total_cmp(&super::vec::dist(*b, p))
-                });
-                lock.target = near.or(Some(p));
-            }
-            if spells.lock.is_none() {
-                self.sfx.push(sfx::here(sfx::MARK));
-            }
-            lock.age += m.dt;
-            spells.lock = Some(lock);
-            if lock.age >= LOCK_TIME {
-                spells.lock = None;
-                if self.mana.spend(SPELL_COST[STRIKE as usize]) {
-                    let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
-                    spells.cast_at(m.origin, m.dir, at, rng);
-                    self.sfx.push(sfx::here(CAST_SOUND[STRIKE as usize]));
+        // the lightning strike: pressed and held, it locks on to what is in
+        // his aim as it starts, an enemy (the ring closing in round it,
+        // following it) or the ground there (staying put, however he
+        // turns), and lands there once locked (its cost then); let go
+        // before, and it is not cast
+        let striking = selected == STRIKE as usize;
+        if striking && can && m.casting {
+            if spells.lock.is_none() && self.buffered > 0.0 && spells.ready(STRIKE as usize) {
+                if self.mana.value >= SPELL_COST[STRIKE as usize] {
+                    spells.lock = Some(match spells.lock_target(m.origin, m.dir) {
+                        Some((c, side)) => Lock { age: 0.0, target: Some(c), side, ground: None },
+                        None => Lock { age: 0.0, target: None, side: -1, ground: Some((aim_ground(m.origin, m.dir), None)) },
+                    });
+                    self.sfx.push(sfx::here(sfx::MARK));
+                    self.buffered = 0.0;
+                    self.short = false;
                 } else {
-                    self.fizzle(m.time);
+                    self.short = true;
                 }
             }
-        } else if striking {
+            if let Some(mut lock) = spells.lock {
+                // (an enemy locked: followed while it is there; gone, the
+                // place it was)
+                if let Some(p) = lock.target {
+                    let near = spells.targets.iter().filter(|t| t.side == lock.side).map(|t| t.c).min_by(|a, b| {
+                        super::vec::dist(*a, p).total_cmp(&super::vec::dist(*b, p))
+                    });
+                    lock.target = near.or(Some(p));
+                }
+                lock.age += m.dt;
+                spells.lock = Some(lock);
+                if lock.age >= LOCK_TIME {
+                    spells.lock = None;
+                    if self.mana.spend(SPELL_COST[STRIKE as usize]) {
+                        let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
+                        spells.cast_at(m.origin, m.dir, at, rng);
+                        self.sfx.push(sfx::here(CAST_SOUND[STRIKE as usize]));
+                    } else {
+                        self.fizzle(m.time);
+                    }
+                }
+            }
+        } else {
             spells.lock = None;
         }
-        if !striking {
-            spells.lock = None;
+        // the wind blades, like a gatling gun: held, they come faster and
+        // faster as it spins up, each heating it, which cools all the
+        // while; too hot, it overheats, and will not fire again until it
+        // has cooled well down
+        let winding = selected == WIND as usize;
+        let g = &mut spells.gatling;
+        g.heat = (g.heat - m.dt * if g.overheated { OVERHEAT_COOL } else { HEAT_COOL }).max(0.0);
+        if g.overheated && g.heat <= HEAT_RESUME {
+            g.overheated = false;
         }
-        if spells.selected != HEALING && !striking && !firing && able && !self.shield.raised_now() && m.casting && spells.ready() {
-            if self.mana.spend(SPELL_COST[spells.selected]) {
-                spells.cast(m.origin, m.dir, rng);
-                self.sfx.push(sfx::here(CAST_SOUND[spells.selected]));
-            } else {
-                self.fizzle(m.time);
+        g.next = (g.next - m.dt).max(0.0);
+        let spinning = winding && can && m.casting && !g.overheated;
+        g.spin = (g.spin + m.dt * if spinning { 1.0 / SPIN_UP } else { -1.0 / SPIN_DOWN }).clamp(0.0, 1.0);
+        let wants = m.casting || self.buffered > 0.0;
+        if winding && can && wants && !spells.gatling.overheated && spells.gatling.next <= 0.0 && spells.ready(WIND as usize) {
+            let cost = SPELL_COST[WIND as usize];
+            if self.mana.value >= cost && spells.cast_blade(m.origin, m.dir, rng) {
+                self.mana.spend(cost);
+                self.sfx.push(sfx::here(CAST_SOUND[WIND as usize]));
+                self.buffered = 0.0;
+                self.short = false;
+                let g = &mut spells.gatling;
+                g.next = SLOW_SHOT + (FAST_SHOT - SLOW_SHOT) * g.spin;
+                g.heat += SHOT_HEAT;
+                if g.heat >= 1.0 {
+                    g.heat = 1.0;
+                    g.overheated = true;
+                    self.sfx.push(sfx::here(sfx::FIZZLE));
+                }
+            } else if self.mana.value < cost {
+                self.short = true;
+                if m.casting && !pressed && self.buffered <= 0.0 {
+                    self.fizzle(m.time);
+                }
             }
         }
         self.mana.update(m.dt);
@@ -448,6 +521,85 @@ mod tests {
         let bolt = s.pack();
         assert!((bolt[4] - 5.0).abs() < 1e-3 && (bolt[6] - 30.0 * 1.6).abs() < 1e-3, "{:?}", &bolt[4..7]);
         assert_eq!((bolt[9] as i32) / 100000, 100);
+    }
+
+    #[test]
+    fn a_press_is_remembered_and_casts_once() {
+        let mut c = Combat::default();
+        let mut s = Spells::default();
+        s.selected = FIRE as usize;
+        let mut rng = Rng::new(1);
+        let up = Moment { casting: false, n: 0, ..moment() };
+        let down = Moment { casting: true, n: 0, ..moment() };
+        // a tap: a bolt
+        c.update(&down, &mut s, &mut rng);
+        c.update(&up, &mut s, &mut rng);
+        s.update(up.dt, false);
+        assert_eq!(s.count(), 1);
+        // tapped again while it cools down, 0.2 s before it is ready: the
+        // press waits, and the bolt goes as soon as it can
+        for _ in 0..((0.9 - 0.2) * 60.0) as usize {
+            c.update(&up, &mut s, &mut rng);
+            s.update(up.dt, false);
+        }
+        c.update(&down, &mut s, &mut rng);
+        c.update(&up, &mut s, &mut rng);
+        s.update(up.dt, false);
+        assert_eq!(s.count(), 1);
+        for _ in 0..15 {
+            c.update(&up, &mut s, &mut rng);
+            s.update(up.dt, false);
+        }
+        assert_eq!(s.count(), 2);
+        // held on and on: one bolt (when let go), not one after another
+        let mut s = Spells::default();
+        s.selected = FIRE as usize;
+        let mut c = Combat::default();
+        for _ in 0..240 {
+            c.update(&down, &mut s, &mut rng);
+            s.update(down.dt, true);
+        }
+        c.update(&up, &mut s, &mut rng);
+        assert_eq!(s.count(), 1);
+    }
+
+    #[test]
+    fn the_wind_blades_spin_up_and_overheat() {
+        let mut c = Combat::default();
+        let mut s = Spells::default();
+        (s.selected, s.limit) = (WIND as usize, 16);
+        let mut rng = Rng::new(1);
+        let held = Moment { casting: true, n: 0, ..moment() };
+        // held: blades one after another, faster once spun up
+        let mut casts = Vec::new();
+        for f in 0..240 {
+            let n = c.sfx.len();
+            c.update(&held, &mut s, &mut rng);
+            s.update(held.dt, true);
+            if c.sfx[n..].iter().any(|e| e.kind == sfx::CAST_WIND) {
+                casts.push(f);
+            }
+            if s.gatling.overheated {
+                break;
+            }
+        }
+        assert!(casts.len() >= 6, "{casts:?}");
+        let gap = |k: usize| casts[k + 1] - casts[k];
+        assert!(gap(0) > gap(casts.len() - 2), "{casts:?}");
+        // until it overheats: no more, held or not, until it has cooled
+        assert!(s.gatling.overheated);
+        let n = casts.len();
+        for _ in 0..30 {
+            let k = c.sfx.len();
+            c.update(&held, &mut s, &mut rng);
+            assert!(!c.sfx[k..].iter().any(|e| e.kind == sfx::CAST_WIND));
+        }
+        let up = Moment { casting: false, n: 0, ..moment() };
+        for _ in 0..240 {
+            c.update(&up, &mut s, &mut rng);
+        }
+        assert!(!s.gatling.overheated && s.gatling.heat == 0.0 && s.gatling.spin == 0.0);
+        assert_eq!(casts.len(), n);
     }
 
     #[test]
