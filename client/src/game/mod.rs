@@ -102,8 +102,8 @@ pub struct Game {
     // app: see menu_input)
     menu: Option<gamepad::Pad>,
     pad_connected: bool,
-    // the camera over his shoulder (0..1, easing in as he flies and out as
-    // he stands on the path), if so chosen (else centred on him)
+    // the camera over his shoulder (0..1, easing between), if so chosen
+    // (else centred on him), in every mode
     shoulder: f32,
     over_shoulder: bool,
     // picture mode, if on (see Picture)
@@ -556,7 +556,7 @@ impl Game {
         // the drive record: the flight, casting (in his frame: along the
         // camera's view), and the fight
         let mut drive = self.flight.drive();
-        let goal = if self.flight.active && self.over_shoulder { 1.0 } else { 0.0 };
+        let goal = if self.over_shoulder && self.picture.is_none() { 1.0 } else { 0.0 };
         self.shoulder += (goal - self.shoulder) * (1.0 - (-dt / 0.35).exp());
         drive.shoulder = self.shoulder;
         // (picture mode: the camera's target moved, nothing keeping it above
@@ -671,7 +671,7 @@ impl Game {
     // over his shoulder as he flies, or centred on him.
     pub fn camera_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         for (name, over, tip) in [
-            ("Over the shoulder", true, "Flying, the camera looks past his right shoulder"),
+            ("Over the shoulder", true, "The camera looks past his right shoulder"),
             ("Centred", false, "The camera looks at him, centred"),
         ] {
             let r = hud::fill_toggle(ui, name, self.over_shoulder == over).on_hover_text(tip);
@@ -1006,7 +1006,7 @@ mod tests {
         let mut g = Game::new(None);
         let p = params(3.0);
         let o = frame(&ctx, &mut g, &p, vec![]);
-        assert_eq!(o.drive, Drive { staff: o.drive.staff, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 1.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
+        assert_eq!(o.drive, Drive { staff: o.drive.staff, shoulder: o.drive.shoulder, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 1.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
         assert!(o.probe.is_none());
         assert_eq!(o.overrides, vec![("enemies".to_string(), Value::Num(0.0))]);
         // F twice: fight
