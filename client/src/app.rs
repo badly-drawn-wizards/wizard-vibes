@@ -73,6 +73,12 @@ pub struct App {
     unsupported: Option<String>,
     game: Game,
     audio: Audio,
+    // natively, while he plays (not paused): the screen kept from dimming
+    // and the system from sleeping for idleness (see keep_awake)
+    #[cfg(not(target_arch = "wasm32"))]
+    awake: Option<keepawake::KeepAwake>,
+    #[cfg(not(target_arch = "wasm32"))]
+    awake_failed: bool,
     info: BuildInfo,
     // the sound effects made so far (one a frame, from the shader crate)
     sfx: Vec<Vec<f32>>,
@@ -187,6 +193,10 @@ impl App {
                 g
             },
             audio: Audio::new(storage),
+            #[cfg(not(target_arch = "wasm32"))]
+            awake: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            awake_failed: false,
             info,
             sfx: vec![],
             saved_params: storage.and_then(|s| eframe::get_value(s, crate::params::STORE)),
@@ -745,6 +755,8 @@ impl App {
         if !self.game.picture() {
             self.top_bar(&ctx);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.keep_awake();
         let rs = frame.wgpu_render_state().cloned();
         self.audio.frame(&ctx);
         self.make_sfx();
@@ -826,6 +838,26 @@ impl App {
             });
         }
         ctx.request_repaint();
+    }
+
+    // Natively: while he plays (a shader running, not paused), the screen
+    // is kept on and the system awake (an idle inhibitor: on Linux through
+    // logind or the screensaver's D-Bus service); paused, let go. (Tried
+    // once: without the services, it is not asked again.)
+    #[cfg(not(target_arch = "wasm32"))]
+    fn keep_awake(&mut self) {
+        let playing = self.shader.is_some() && !self.game.paused();
+        if playing && self.awake.is_none() && !self.awake_failed {
+            match keepawake::Builder::default().display(true).idle(true).reason("Playing").app_name("Wizard").app_reverse_domain("com.causalnexus.wizard").create() {
+                Ok(a) => self.awake = Some(a),
+                Err(e) => {
+                    log::warn!("could not keep the screen on: {e}");
+                    self.awake_failed = true;
+                }
+            }
+        } else if !playing {
+            self.awake = None;
+        }
     }
 
     fn save_state(&mut self, storage: &mut dyn eframe::Storage) {
