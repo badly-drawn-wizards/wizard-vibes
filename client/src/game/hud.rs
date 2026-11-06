@@ -38,14 +38,55 @@ pub fn panel(alpha: f32, radius: u8, margin: Margin) -> Frame {
 pub fn toggle_button(ui: &mut Ui, label: &str, pressed: bool, active: bool) -> Response {
     let colour = if pressed || active { FG } else { DIM };
     let border = if pressed { FG } else { BORDER };
-    padded(ui, Vec2::new(6.0, 2.0), |ui| {
+    let r = padded(ui, Vec2::new(6.0, 2.0), |ui| {
         ui.add(
             egui::Button::new(text(label, FONT, colour))
                 .fill(Color32::TRANSPARENT)
                 .stroke(Stroke::new(1.0, border))
                 .corner_radius(4),
         )
-    })
+    });
+    focus_ring(ui, &r);
+    r
+}
+
+// A ring round a widget that has the keyboard's (or controller's) focus,
+// for those drawn in their own colours, which egui's focus look does not
+// reach.
+pub fn focus_ring(ui: &Ui, r: &Response) {
+    if r.has_focus() {
+        ui.painter().rect_stroke(r.rect.expand(2.5), 5, Stroke::new(2.0, FOCUS), egui::StrokeKind::Outside);
+    }
+}
+
+// (the focus ring's colour)
+pub const FOCUS: Color32 = Color32::from_rgb(0xff, 0xc8, 0x57);
+
+// A switch whose state shows by its fill: filled when on, outlined when
+// off (its label the same either way).
+pub fn fill_toggle(ui: &mut Ui, label: &str, on: bool) -> Response {
+    let (fill, colour) = if on { (FG, Color32::from_rgb(0x10, 0x12, 0x1c)) } else { (Color32::TRANSPARENT, DIM) };
+    let r = padded(ui, Vec2::new(7.0, 2.0), |ui| {
+        ui.add(egui::Button::new(text(label, FONT, colour)).fill(fill).stroke(Stroke::new(1.0, if on { FG } else { BORDER })).corner_radius(4))
+    });
+    focus_ring(ui, &r);
+    r
+}
+
+// A small triangle button pointing right (closed) or left (open), as an
+// accordion's handle.
+pub fn triangle(ui: &mut Ui, open: bool) -> Response {
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(14.0, 16.0), egui::Sense::click());
+    let c = r.center();
+    let colour = if resp.hovered() || resp.has_focus() { FG } else { DIM };
+    let (dx, h) = (4.0, 5.0);
+    let pts = if open {
+        vec![c + Vec2::new(dx, -h), c + Vec2::new(dx, h), c + Vec2::new(-dx, 0.0)]
+    } else {
+        vec![c + Vec2::new(-dx, -h), c + Vec2::new(-dx, h), c + Vec2::new(dx, 0.0)]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(pts, colour, Stroke::NONE));
+    resp
 }
 
 fn padded<R>(ui: &mut Ui, padding: Vec2, add: impl FnOnce(&mut Ui) -> R) -> R {

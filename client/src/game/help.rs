@@ -23,12 +23,13 @@ const KEYBOARD: &[(&str, &[Chip])] = &[
     ("Shield", &[Key("R"), Text(" (hold)")]),
     ("Try again (defeated)", &[Key("Enter")]),
     ("Camera", &[Text("drag · wheel")]),
-    ("Pause", &[Key("P")]),
+    ("Pause / menu", &[Key("P"), Text(" / "), Key("Esc")]),
     ("Music", &[Key("M")]),
 ];
 
 const PAD: &[(&str, &[Chip])] = &[
-    ("Mode", &[Shoulder("≡")]),
+    ("Mode", &[ShoulderIcon(hud::Icon::View)]),
+    ("Pause / menu", &[Shoulder("≡")]),
     ("Fly", &[Stick('L')]),
     ("Camera", &[Stick('R')]),
     ("Zoom in / out", &[Text("D-pad ↑ / ↓")]),
@@ -37,7 +38,6 @@ const PAD: &[(&str, &[Chip])] = &[
     ("Spell", &[Face('X'), Face('A'), Face('B'), Face('Y')]),
     ("Cast", &[Shoulder("RB")]),
     ("Shield", &[Shoulder("LB"), Text(" (hold)")]),
-    ("Reset the fight", &[ShoulderIcon(hud::Icon::View)]),
 ];
 
 #[derive(Clone, Debug)]

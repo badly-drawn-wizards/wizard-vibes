@@ -32,8 +32,8 @@ edit the app and it is patched where it runs.
   waltz in the manner of RuneScape's), a glitch-hop whose stutters, tape
   stops and bitcrushing are edits of its own time, and a dubstep with
   wobble and talking basses. Synthesised sound effects.
-- A drawer with every parameter (uniforms apply at once; shader settings
-  rebuild it), quality levels, dynamic resolution scaling, FXAA or edge
+- A pause menu with the settings and every parameter (uniforms apply at
+  once; shader settings rebuild it), navigable by keyboard and controller; quality levels, dynamic resolution scaling, FXAA or edge
   supersampling, debug views, a game controller.
 
 ## Running

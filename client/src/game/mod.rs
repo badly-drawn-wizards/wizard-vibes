@@ -82,6 +82,9 @@ pub struct Game {
     // the scene's time (stopped while paused)
     time: f32,
     paused: bool,
+    // the controller's presses for the pause menu this frame (taken by the
+    // app: see menu_input)
+    menu: Option<gamepad::Pad>,
     pad_connected: bool,
     // the view's area, as of the last step (the HUD goes round it)
     view: Option<Rect>,
@@ -116,6 +119,7 @@ impl Game {
             rng: Rng::new(seed),
             time: 0.0,
             paused: false,
+            menu: None,
             pad_connected: false,
             view: None,
             defeat_since: None,
@@ -142,6 +146,22 @@ impl Game {
 
     pub fn paused(&self) -> bool {
         self.paused
+    }
+
+    // Pauses or resumes (the pause menu shows while paused).
+    pub fn set_paused(&mut self, on: bool) {
+        self.paused = on;
+    }
+
+    // The controller's presses this frame while paused (for the pause
+    // menu's navigation), taken once.
+    pub fn menu_input(&mut self) -> Option<gamepad::Pad> {
+        self.menu.take()
+    }
+
+    // Starts the fight again (from the pause menu).
+    pub fn reset_fight(&mut self) {
+        self.combat.reset(&mut self.spells);
     }
 
     // Whether a game controller is connected (for the status line).
@@ -250,12 +270,12 @@ impl Game {
             for (key, mods) in keys {
                 match key {
                     Key::F if !mods.ctrl && !mods.command && !mods.alt && !mods.mac_cmd => self.cycle_mode(),
-                    Key::P => self.paused = !self.paused,
+                    Key::P | Key::Escape => self.paused = !self.paused,
                     Key::Num1 => self.spells.select(0),
                     Key::Num2 => self.spells.select(1),
                     Key::Num3 => self.spells.select(2),
                     Key::Num4 => self.spells.select(3),
-                    Key::Enter if self.combat.enemies.down >= 0.0 => self.combat.reset(&mut self.spells),
+                    Key::Enter if self.combat.enemies.down >= 0.0 && !self.paused => self.combat.reset(&mut self.spells),
                     _ => {}
                 }
             }
@@ -270,18 +290,27 @@ impl Game {
         let pad = self.pads.read();
         self.pad_connected = pad.is_some();
         if let Some(p) = &pad {
-            if p.toggle {
+            // (View / Back cycles the mode; Start pauses, B resumes)
+            if p.mode {
                 self.cycle_mode();
             }
-            // (A tries again once he is defeated; View / Back resets the fight)
-            if p.reset || (p.confirm && self.combat.enemies.down >= 0.0) {
-                self.combat.reset(&mut self.spells);
+            if p.pause || (p.back && self.paused) {
+                self.paused = !self.paused;
             }
             if p.active {
                 self.help.device = Device::Pad;
             }
-            if let Some(s) = p.spell {
-                self.spells.select(s);
+            if self.paused {
+                // (in the pause menu, the rest is its navigation)
+                self.menu = Some(*p);
+            } else {
+                // (A tries again once he is defeated)
+                if p.confirm && self.combat.enemies.down >= 0.0 {
+                    self.combat.reset(&mut self.spells);
+                }
+                if let Some(s) = p.spell {
+                    self.spells.select(s);
+                }
             }
         }
         let n = self.enemy_count(params);
@@ -310,7 +339,9 @@ impl Game {
         // (and the D-pad zooms)
         if let Some(p) = &pad {
             self.orbit.nudge(-2.5 * p.look[0] * dt, -1.5 * p.look[1] * dt);
-            self.orbit.zoom(1.5 * p.zoom * dt);
+            if !self.paused {
+                self.orbit.zoom(1.5 * p.zoom * dt);
+            }
         }
         // The camera orbits in his frame, which turns with him; in free flight
         // keep it still in the world instead, so W (along the camera) does not

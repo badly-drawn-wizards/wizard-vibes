@@ -1,7 +1,9 @@
 // The app: the scene, drawn by the shader (render/), under egui's UI: the
-// top bar (status, render scale, music and sound, mode, platform, quality),
-// the parameter drawer (params.rs), the game's HUD (game/), and an overlay
-// for shader errors. Natively and in the browser alike.
+// top bar (the status, folding to the frame rate, and the music and sound
+// switches), the pause menu (its settings: mode, platform, song, quality,
+// render scale, target frame rate; and the parameters, params.rs), the
+// game's HUD (game/), and an overlay for shader errors. Natively and in the
+// browser alike.
 //
 // Hot reload: when a new shader build appears (source.rs), it is loaded
 // while the old one keeps drawing, then swapped in. The app's own code is
@@ -20,7 +22,8 @@ use web_time::Instant;
 const SFX_RATE: f32 = 48000.0;
 
 const SCALE: &str = "wizard-scale";
-const DRAWER: &str = "wizard-drawer";
+const BAR: &str = "wizard-bar-open";
+const TARGET_FPS: &str = "wizard-target-fps";
 const DYNAMIC: &str = "wizard-dynamic-scale";
 
 pub struct App {
@@ -46,7 +49,14 @@ pub struct App {
     beat_rate: f64,
     // the render scale (by hand, or dynamic: see scale.rs)
     scale: crate::scale::RenderScale,
-    drawer: bool,
+    // the top bar open (else just the frame rate), the pause menu's tab (0
+    // settings, 1 parameters), whether it was open last frame (to focus its
+    // first control as it opens), and the key events the controller's
+    // presses make for it (fed to egui before the next frame)
+    bar_open: bool,
+    menu_tab: usize,
+    menu_was_open: bool,
+    menu_events: Vec<egui::Event>,
     // the last error the device reported (validation of the shader, etc.)
     // the GPU's errors, the first first (the cause; what follows from it is
     // mostly "... is invalid"), and how many are shown
@@ -80,8 +90,11 @@ impl App {
         let fixed = url_param("scale").and_then(|v| v.parse::<f32>().ok()).filter(|&v| v > 0.0 && v <= 1.0);
         let manual = fixed.or_else(|| storage.and_then(|s| eframe::get_value(s, SCALE))).unwrap_or(1.0);
         let dynamic = fixed.is_none() && storage.and_then(|s| eframe::get_value(s, DYNAMIC)).unwrap_or(true);
-        let scale = crate::scale::RenderScale::new(dynamic, manual);
-        let drawer = storage.and_then(|s| eframe::get_value(s, DRAWER)).unwrap_or(false);
+        let mut scale = crate::scale::RenderScale::new(dynamic, manual);
+        if let Some(fps) = storage.and_then(|s| eframe::get_value::<f32>(s, TARGET_FPS)) {
+            scale.set_target(fps);
+        }
+        let bar_open = storage.and_then(|s| eframe::get_value(s, BAR)).unwrap_or(true);
         let now = Instant::now();
         let n = wizard_shader::sfx::sfx_count;
         let info = BuildInfo {
@@ -134,7 +147,10 @@ impl App {
             last: now,
             fps: 0.0,
             scale,
-            drawer,
+            bar_open,
+            menu_tab: 0,
+            menu_was_open: false,
+            menu_events: Vec::new(),
             device_error,
             device_errors_shown: 0,
             groove: 0.0,
@@ -323,56 +339,170 @@ impl App {
         self.params = Some(p);
     }
 
+    // The top bar: the status, which a triangle folds away (to just the
+    // frame rate), and the music and fx switches. (The settings and the
+    // parameters are in the pause menu.)
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("hud").show(ui, |ui| {
             ui.horizontal(|ui| {
+                if crate::game::hud::triangle(ui, self.bar_open).on_hover_text(if self.bar_open { "Fold the bar" } else { "Unfold the bar" }).clicked() {
+                    self.bar_open = !self.bar_open;
+                }
+                if !self.bar_open {
+                    ui.monospace(format!("{:.0} fps", self.fps));
+                    return;
+                }
                 let status = match (&self.shader, self.building || self.compiling()) {
                     (_, true) => "compiling…".to_string(),
                     (None, _) => "loading…".to_string(),
                     (Some(s), _) => format!("{} · {}", &s.version[..8], if s.spirv { "SPIR-V" } else { "WGSL" }),
                 };
                 let size = self.image.as_ref().map(|(t, _)| format!(" · {}×{}", t.width(), t.height())).unwrap_or_default();
+                let scale = format!(" · {:.0}%{}", 100.0 * self.scale.get(), if self.scale.dynamic { " dynamic" } else { "" });
                 let state = format!("{}{}", if self.game.paused() { " · paused" } else { "" }, if self.game.pad_connected() { " · controller" } else { "" });
-                ui.monospace(format!("{status}{size} · {:.1} fps{state}", self.fps));
+                ui.monospace(format!("{status}{size}{scale} · {:.1} fps{state}", self.fps));
                 ui.separator();
-                // the render scale: dynamic, or a slider by hand (which shows
-                // the dynamic scale too, and moved, takes over)
-                let dynamic = self.scale.dynamic;
-                if ui.selectable_label(dynamic, "dynamic").on_hover_text("Scale the resolution to keep 60 fps").clicked() {
-                    self.scale.set_dynamic(!dynamic);
+                self.audio.toggles(ui);
+            });
+        });
+    }
+
+    // The pause menu (while paused): tabs of settings and of parameters,
+    // navigable by keyboard (arrows, Enter) and controller (the D-pad, A;
+    // LB / RB the tabs; B or Start resumes).
+    fn pause_menu(&mut self, ctx: &egui::Context, secs: f64) {
+        let open = self.game.paused();
+        let opening = open && !self.menu_was_open;
+        self.menu_was_open = open;
+        if !open {
+            return;
+        }
+        let names = ["Settings", "Parameters"];
+        egui::Window::new("Paused")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .default_width(460.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    for (k, name) in names.iter().enumerate() {
+                        if crate::game::hud::fill_toggle(ui, name, self.menu_tab == k).clicked() {
+                            self.menu_tab = k;
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let r = ui.button("Resume");
+                        crate::game::hud::focus_ring(ui, &r);
+                        if opening {
+                            r.request_focus();
+                        }
+                        if r.clicked() {
+                            self.game.set_paused(false);
+                        }
+                    });
+                });
+                ui.separator();
+                if self.menu_tab == 0 {
+                    self.settings(ui);
+                } else if let Some(p) = self.params.as_mut() {
+                    egui::ScrollArea::vertical().max_height(ctx.content_rect().height() * 0.7).show(ui, |ui| p.ui(ui, secs));
+                } else {
+                    ui.label("(the parameters come with the shader)");
+                }
+            });
+    }
+
+    // The settings tab.
+    fn settings(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new("settings").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+            ui.label("Mode");
+            ui.horizontal(|ui| self.game.mode_ui(ui));
+            ui.end_row();
+
+            ui.label("Platform");
+            ui.horizontal(|ui| {
+                if let Some(p) = self.params.as_mut() {
+                    let platform = p.get("platform").map(|v| v.f32() as usize).unwrap_or(0);
+                    for (i, n) in ["Rock", "Ice", "Magic carpet"].iter().enumerate() {
+                        if crate::game::hud::fill_toggle(ui, n, platform == i).clicked() {
+                            p.set("platform", Value::Num(i as f64));
+                        }
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Song");
+            self.audio.songs(ui);
+            ui.end_row();
+
+            ui.label("Quality");
+            ui.horizontal(|ui| self.game.quality_ui(ui));
+            ui.end_row();
+
+            // the render scale: dynamic, or a slider by hand (which shows
+            // the dynamic scale too, and moved, takes over)
+            ui.label("Render scale");
+            ui.horizontal(|ui| {
+                if crate::game::hud::fill_toggle(ui, "dynamic", self.scale.dynamic).on_hover_text("Scale the resolution to keep the target frame rate").clicked() {
+                    let on = !self.scale.dynamic;
+                    self.scale.set_dynamic(on);
                 }
                 let mut s = self.scale.get();
-                let slider = egui::Slider::new(&mut s, crate::scale::MIN..=crate::scale::MAX).show_value(false);
-                let r = ui.add_sized([90.0, ui.spacing().interact_size.y], slider).on_hover_text("Render scale");
+                let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(&mut s, crate::scale::MIN..=crate::scale::MAX).show_value(false));
+                crate::game::hud::focus_ring(ui, &r);
                 ui.monospace(format!("{:>3.0}%", 100.0 * self.scale.get()));
                 if r.changed() {
                     self.scale.set_manual(s);
                 }
-                ui.separator();
-                self.audio.buttons(ui);
-                ui.separator();
-                self.game.mode_ui(ui);
-                ui.separator();
-                if let Some(p) = self.params.as_mut() {
-                    let mut platform = p.get("platform").map(|v| v.f32() as usize).unwrap_or(0);
-                    let names = ["Rock", "Ice", "Magic carpet"];
-                    egui::ComboBox::from_id_salt("platform").selected_text(names[platform.min(2)]).show_ui(ui, |ui| {
-                        for (i, n) in names.iter().enumerate() {
-                            ui.selectable_value(&mut platform, i, *n);
-                        }
-                    });
-                    if Some(platform as f32) != p.get("platform").map(|v| v.f32()) {
-                        p.set("platform", Value::Num(platform as f64));
-                    }
-                }
-                self.game.quality_ui(ui);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.selectable_label(self.drawer, "Parameters").on_hover_text("The parameter drawer").clicked() {
-                        self.drawer = !self.drawer;
-                    }
-                });
             });
+            ui.end_row();
+
+            ui.label("Target fps");
+            ui.horizontal(|ui| {
+                let mut fps = self.scale.target_fps;
+                let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(&mut fps, crate::scale::TARGET_MIN..=crate::scale::TARGET_MAX).step_by(1.0).show_value(false));
+                crate::game::hud::focus_ring(ui, &r);
+                ui.monospace(format!("{fps:>3.0}"));
+                if r.changed() {
+                    self.scale.set_target(fps);
+                }
+            });
+            ui.end_row();
+
+            ui.label("Fight");
+            let r = ui.button("Start it again");
+            crate::game::hud::focus_ring(ui, &r);
+            if r.clicked() {
+                self.game.reset_fight();
+                self.game.set_paused(false);
+            }
+            ui.end_row();
         });
+    }
+
+    // The controller's presses in the pause menu, as the keys egui moves
+    // focus and presses buttons with (sent before the next frame); its
+    // shoulders change tabs.
+    fn menu_from_pad(&mut self) {
+        let Some(p) = self.game.menu_input() else { return };
+        if p.tab != 0 {
+            self.menu_tab = (self.menu_tab as i32 + p.tab).rem_euclid(2) as usize;
+        }
+        let keys = [egui::Key::ArrowUp, egui::Key::ArrowDown, egui::Key::ArrowLeft, egui::Key::ArrowRight];
+        let mut press = |key: egui::Key| {
+            for pressed in [true, false] {
+                self.menu_events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE });
+            }
+        };
+        for (on, key) in p.nav.iter().zip(keys) {
+            if *on {
+                press(key);
+            }
+        }
+        if p.confirm {
+            press(egui::Key::Enter);
+        }
     }
 
     // Renders the scene for this frame into the image, at `vw` x `h`.
@@ -427,6 +557,12 @@ impl eframe::App for App {
     // (through Subsecond: under `dx serve --hotpatch` an edit to the app's
     // code patches the running app, which keeps its state; otherwise a
     // plain call)
+    // (the controller's presses in the pause menu, as key events: see
+    // menu_from_pad)
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        raw_input.events.append(&mut self.menu_events);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         subsecond::call(|| self.frame_ui(ui, frame));
     }
@@ -491,11 +627,6 @@ impl App {
             }
         }
         self.top_bar(ui);
-        if self.drawer {
-            if let Some(p) = self.params.as_mut() {
-                egui::Panel::right("drawer").resizable(true).default_size(340.0).show(ui, |ui| p.ui(ui, secs));
-            }
-        }
         let rs = frame.wgpu_render_state().cloned();
         self.audio.frame(&ctx);
         self.make_sfx();
@@ -556,6 +687,8 @@ impl App {
             }
         });
         self.game.ui(&ctx);
+        self.menu_from_pad();
+        self.pause_menu(&ctx, secs);
         if let Some(e) = &self.unsupported {
             egui::Window::new("No WebGPU").collapsible(false).default_width(420.0).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).show(&ctx, |ui| {
                 ui.label(e.as_str());
@@ -571,7 +704,8 @@ impl App {
     fn save_state(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, SCALE, &self.scale.manual);
         eframe::set_value(storage, DYNAMIC, &self.scale.dynamic);
-        eframe::set_value(storage, DRAWER, &self.drawer);
+        eframe::set_value(storage, BAR, &self.bar_open);
+        eframe::set_value(storage, TARGET_FPS, &self.scale.target_fps);
         if let Some(p) = &self.params {
             p.save(storage);
         }

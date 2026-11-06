@@ -160,11 +160,12 @@ impl Audio {
         self.music.cached()
     }
 
-    // The music and fx buttons, for the top bar.
-    pub fn buttons(&mut self, ui: &mut egui::Ui) {
+    // The music and fx switches, for the top bar: filled when on.
+    pub fn toggles(&mut self, ui: &mut egui::Ui) {
         let off = self.failed.as_ref().map(|e| format!("No sound: {e}"));
-        let on = self.music.on;
-        let r = ui.add_enabled(off.is_none(), egui::Button::new(if on { "music on" } else { "music off" }).selected(on));
+        let enabled = off.is_none();
+        let on = self.music.on && enabled;
+        let r = ui.add_enabled_ui(enabled, |ui| crate::game::hud::fill_toggle(ui, "music", on)).inner;
         let r = match &off {
             Some(e) => r.on_disabled_hover_text(e),
             None => r.on_hover_text(if on { "Music on (M)" } else { "Music off (M)" }),
@@ -172,17 +173,8 @@ impl Audio {
         if r.clicked() {
             self.toggle_music();
         }
-        // (the songs: a switch computes the new one from its start, unless
-        // its loop is kept from before)
-        let mut song = self.song;
-        egui::ComboBox::from_id_salt("song").selected_text(wizard_shader::music::song_names[song as usize]).show_ui(ui, |ui| {
-            for (k, name) in wizard_shader::music::song_names.iter().enumerate() {
-                ui.selectable_value(&mut song, k as u32, *name);
-            }
-        });
-        self.song = song;
-        let on = self.sfx_on && off.is_none();
-        let r = ui.add_enabled(off.is_none(), egui::Button::new(if on { "fx on" } else { "fx off" }).selected(on));
+        let on = self.sfx_on && enabled;
+        let r = ui.add_enabled_ui(enabled, |ui| crate::game::hud::fill_toggle(ui, "fx", on)).inner;
         let r = match &off {
             Some(e) => r.on_disabled_hover_text(e),
             None => r.on_hover_text(if on { "Sound effects on" } else { "Sound effects off" }),
@@ -191,6 +183,26 @@ impl Audio {
             self.start();
             self.sfx_on = !self.sfx_on;
         }
+    }
+
+    // The songs, for the pause menu: a button each, the chosen one filled
+    // (a switch computes the new one from its start, unless its loop is
+    // kept from before).
+    pub fn songs(&mut self, ui: &mut egui::Ui) {
+        let names = wizard_shader::music::song_names;
+        ui.vertical(|ui| {
+            // (three to a row)
+            for row in names.chunks(3).enumerate() {
+                ui.horizontal(|ui| {
+                    for (j, name) in row.1.iter().enumerate() {
+                        let k = (3 * row.0 + j) as u32;
+                        if crate::game::hud::fill_toggle(ui, name, self.song == k).clicked() {
+                            self.song = k;
+                        }
+                    }
+                });
+            }
+        });
     }
 
     // Opens the output if need be (or resumes it).

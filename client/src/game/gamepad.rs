@@ -11,13 +11,11 @@
 //   LB             raise the shield (held)
 //   D-pad up/down  zoom in / out
 //   A              (defeated) try again
-//   View / Back    start the fight again
-//   Start          cycle the mode
+//   View / Back    cycle the mode
+//   Start          pause (the pause menu: the D-pad moves, A chooses, B
+//                  goes back, LB / RB change tabs)
 //
-// Natively, through gilrs; with only the Linux driver's mapping (no SDL
-// mapping for the controller), its codes put X on BTN_NORTH and Y on
-// BTN_WEST, which gilrs reads as the top and left buttons: they are swapped
-// back. In the browser, straight from the Gamepad API: its "standard"
+// Natively, through gilrs, as its mapping has the buttons. In the browser, straight from the Gamepad API: its "standard"
 // layout where the browser gives one, else an Xbox controller's own order,
 // as Firefox on Linux reports one (which gilrs's web backend read as the
 // standard layout: Back as a trigger, LT as the right stick...).
@@ -28,13 +26,16 @@ pub struct Pad {
     pub look: [f32; 2], // x right, y up
     pub up: f32,        // -1..1
     pub boost: bool,
-    pub toggle: bool,         // Start pressed since the last read
+    pub mode: bool,           // View / Back pressed since the last read
+    pub pause: bool,          // Start pressed since the last read
+    pub back: bool,           // B pressed since the last read
+    pub nav: [bool; 4],       // the D-pad (up, down, left, right) pressed since the last read
+    pub tab: i32,             // LB (-1) or RB (1) pressed since the last read
     pub spell: Option<usize>, // a spell chosen since the last read
     pub cast: bool,           // held
     pub shield: bool,         // held
     pub zoom: f32,            // -1 in .. 1 out (held)
     pub confirm: bool,        // A pressed since the last read
-    pub reset: bool,          // View / Back pressed since the last read
     pub active: bool,         // anything pressed or pushed (for showing its glyphs)
 }
 
@@ -65,6 +66,8 @@ pub struct Raw {
     pub ls: bool,
     pub up: bool,
     pub down: bool,
+    pub dleft: bool,
+    pub dright: bool,
     pub left: [f32; 2],
     pub right: [f32; 2],
     pub lt: f32,
@@ -115,14 +118,17 @@ impl Pads {
             look: [lx, ly],
             up: (r.rt - r.lt).clamp(-1.0, 1.0),
             boost: r.ls,
-            toggle: r.start && !last.start,
+            mode: r.back && !last.back,
+            pause: r.start && !last.start,
+            back: r.b && !last.b,
+            nav: [r.up && !last.up, r.down && !last.down, r.dleft && !last.dleft, r.dright && !last.dright],
+            tab: (r.rb && !last.rb) as i32 - (r.lb && !last.lb) as i32,
             spell,
             cast: r.rb,
             shield: r.lb,
             zoom: (r.down as i32 - r.up as i32) as f32,
             confirm: r.a && !last.a,
-            reset: r.back && !last.back,
-            active: r.a || r.b || r.x || r.y || r.lb || r.rb || r.back || r.start || r.ls || r.up || r.down
+            active: r.a || r.b || r.x || r.y || r.lb || r.rb || r.back || r.start || r.ls || r.up || r.down || r.dleft || r.dright
                 || mx != 0.0
                 || my != 0.0
                 || lx != 0.0
@@ -141,7 +147,7 @@ impl Pads {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn raw(&mut self) -> Option<Raw> {
-        use gilrs::{Axis, Button, MappingSource};
+        use gilrs::{Axis, Button};
         if !self.started {
             self.started = true;
             self.gilrs = match gilrs::Gilrs::new() {
@@ -163,17 +169,15 @@ impl Pads {
         // (natively gilrs also offers keyboards' media and system-control
         // keys as gamepads: a controller has sticks)
         let (_, g) = gilrs.gamepads().find(|(_, g)| g.is_connected() && g.axis_code(Axis::LeftStickX).is_some())?;
-        let driver = g.mapping_source() == MappingSource::Driver;
+        let source = g.mapping_source();
         let name = g.name().to_string();
         let pressed = |b: Button| g.is_pressed(b);
         let value = |b: Button| g.button_data(b).map_or(0.0, |d| d.value());
-        // (the Linux driver's X and Y, read by gilrs as the top and left)
-        let (x, y) = if driver { (pressed(Button::North), pressed(Button::West)) } else { (pressed(Button::West), pressed(Button::North)) };
         let raw = Raw {
             a: pressed(Button::South),
             b: pressed(Button::East),
-            x,
-            y,
+            x: pressed(Button::West),
+            y: pressed(Button::North),
             lb: pressed(Button::LeftTrigger),
             rb: pressed(Button::RightTrigger),
             back: pressed(Button::Select),
@@ -182,6 +186,8 @@ impl Pads {
             // (the D-pad as buttons, or as a hat's axis)
             up: pressed(Button::DPadUp) || g.value(Axis::DPadY) > 0.5,
             down: pressed(Button::DPadDown) || g.value(Axis::DPadY) < -0.5,
+            dleft: pressed(Button::DPadLeft) || g.value(Axis::DPadX) < -0.5,
+            dright: pressed(Button::DPadRight) || g.value(Axis::DPadX) > 0.5,
             // (gilrs has the sticks' y up already)
             left: [g.value(Axis::LeftStickX), g.value(Axis::LeftStickY)],
             right: [g.value(Axis::RightStickX), g.value(Axis::RightStickY)],
@@ -189,7 +195,7 @@ impl Pads {
             lt: value(Button::LeftTrigger2).max(g.value(Axis::LeftZ).max(0.0)),
             rt: value(Button::RightTrigger2).max(g.value(Axis::RightZ).max(0.0)),
         };
-        self.note(&name, if driver { "the driver's mapping, X and Y swapped back" } else { "an SDL mapping" });
+        self.note(&name, &format!("{source:?} mapping"));
         Some(raw)
     }
 
@@ -219,6 +225,8 @@ impl Pads {
                 ls: button(10),
                 up: button(12),
                 down: button(13),
+                dleft: button(14),
+                dright: button(15),
                 left: [axis(0), -axis(1)],
                 right: [axis(2), -axis(3)],
                 lt: trigger(6),
@@ -248,6 +256,8 @@ impl Pads {
                 ls: button(9),
                 up: axis(7) < -0.5,
                 down: axis(7) > 0.5,
+                dleft: axis(6) < -0.5,
+                dright: axis(6) > 0.5,
                 left: [axis(0), -axis(1)],
                 right: [axis(3), -axis(4)],
                 lt: pull(lt, self.triggers_live[0]),
@@ -275,14 +285,18 @@ mod tests {
     #[test]
     fn presses_and_holds() {
         let mut p = Pads::default();
-        let pad = p.pad(Raw { y: true, start: true, up: true, ..Default::default() });
+        let pad = p.pad(Raw { y: true, start: true, back: true, up: true, rb: true, ..Default::default() });
         assert_eq!(pad.spell, Some(3));
-        assert!(pad.toggle);
+        assert!(pad.pause && pad.mode);
         assert_eq!(pad.zoom, -1.0);
+        assert_eq!(pad.nav, [true, false, false, false]);
+        assert_eq!(pad.tab, 1);
         // (held: not again)
-        let pad = p.pad(Raw { y: true, start: true, ..Default::default() });
+        let pad = p.pad(Raw { y: true, start: true, back: true, up: true, rb: true, ..Default::default() });
         assert_eq!(pad.spell, None);
-        assert!(!pad.toggle);
+        assert!(!pad.pause && !pad.mode);
+        assert_eq!(pad.nav, [false; 4]);
+        assert_eq!(pad.tab, 0);
         let pad = p.pad(Raw { x: true, rb: true, ..Default::default() });
         assert_eq!(pad.spell, Some(0));
         assert!(pad.cast);
