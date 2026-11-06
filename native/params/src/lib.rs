@@ -72,7 +72,7 @@ pub fn preset(s: &Schema, level: Option<&str>) -> Result<Map<String, Value>, Str
 // which are booleans.
 pub const DRIVE: &[&str] = &[
     "arena_x", "arena_y", "arena_z", "ax", "ay", "az", "beat", "climb", "flash", "foe0", "foe1", "foe2", "foe3", "foe4", "foe5", "free", "groove", "heading", "kill0", "kill1", "kill2", "kill3", "kill4", "kill5", "shield",
-    "shield_hit", "spell", "staff", "sx", "sy", "sz", "thumb", "turn", "x", "y", "z",
+    "shield_hit", "shoulder", "spell", "staff", "sx", "sy", "sz", "thumb", "turn", "x", "y", "z",
 ];
 const DRIVE_BOOL: &[&str] = &["free"];
 

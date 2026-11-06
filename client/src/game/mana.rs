@@ -9,6 +9,7 @@ const PAUSE: f32 = 0.6; // seconds after spending before it refills
 // costs by the second instead: HEAL_DRAIN).
 pub const SPELL_COST: [f32; 4] = [12.0, 25.0, 8.0, 0.0];
 pub const HEAL_DRAIN: f32 = 16.0; // a second, while channelling healing
+pub const CHARGE_DRAIN: f32 = 22.0; // a second, while charging a fire bolt (on top of its cost)
 
 #[derive(Clone, Debug)]
 pub struct Mana {

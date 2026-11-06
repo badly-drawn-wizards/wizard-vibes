@@ -69,6 +69,19 @@ impl Orbit {
         }
     }
 
+    // Where the camera is, in his frame, `shoulder` (0..1) over his right
+    // shoulder (as camera_ray in the shader's wizard.rs).
+    pub fn eye(&self, shoulder: f32) -> V3 {
+        use wizard_shader::wizard::{shoulder_right, shoulder_up};
+        let [fx, fy, fz] = self.view_dir();
+        // (right: the view crossed with up)
+        let (rx, rz) = (-fz, fx);
+        let rl = rx.hypot(rz).max(1e-6);
+        let d = self.cam.dist;
+        let s = shoulder_right * shoulder / rl;
+        [-d * fx + s * rx, (1.15 - d * fy + shoulder_up * shoulder).max(0.1), -d * fz + s * rz]
+    }
+
     // The way the camera looks, in his frame (as camera_ray in fut/wizard.fut).
     pub fn view_dir(&self) -> V3 {
         let (sp, cp) = self.cam.pitch.sin_cos();

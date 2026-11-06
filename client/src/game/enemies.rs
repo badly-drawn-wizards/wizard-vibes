@@ -213,12 +213,16 @@ impl Enemies {
 
     // A spell of `kind` hit `side`.
     pub fn hit(&mut self, side: i32, kind: u32) {
-        self.hit_with(side, kind, None);
+        self.hit_with(side, kind, None, 1.0);
     }
 
-    // The same, a wind blade's cut with it (a point and normal, world).
-    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<(V3, V3)>) {
-        let damage = damage(kind);
+    // The same, a wind blade's cut with it (a point and normal, world), its
+    // damage scaled by `scale` (rounded; at least 1, if it does any).
+    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<(V3, V3)>, scale: f32) {
+        let damage = match damage(kind) {
+            0 => 0,
+            d => ((d as f32 * scale).round() as i32).max(1),
+        };
         if side == HIS {
             if self.down >= 0.0 {
                 return;

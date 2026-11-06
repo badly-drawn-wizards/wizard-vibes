@@ -8,10 +8,10 @@
 // until he tries again (its button, Enter, or the reset button).
 
 use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
-use super::mana::{Mana, HEAL_DRAIN, MANA, SPELL_COST};
+use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, FIRE, HEALING, LOCK_TIME, MARK, STRIKE};
+use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, CHARGE_TIME, FIRE, HEALING, LOCK_TIME, MARK, STRIKE};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
@@ -137,34 +137,56 @@ impl Combat {
             spells.channel = -1.0;
         }
         spells.here = m.him;
-        // the lightning strike: held, it locks on to the enemy in his aim
-        // (the ring closing in round it, following it), and lands on it
-        // once locked; let go before, and it is not cast
+        // the fire bolt: held, it charges at the orb (its cost as it
+        // starts, then mana drained while it grows: short of it, it stops
+        // growing; none comes back while it is held), and flies when let
+        // go, as charged
+        let firing = spells.selected == FIRE as usize;
+        if firing && able && !self.shield.raised_now() {
+            if m.casting {
+                if spells.charge < 0.0 {
+                    if spells.ready() {
+                        if self.mana.spend(SPELL_COST[FIRE as usize]) {
+                            spells.charge = 0.0;
+                        } else {
+                            self.fizzle(m.time);
+                        }
+                    }
+                } else if spells.charge < CHARGE_TIME && self.mana.drain(CHARGE_DRAIN * m.dt) {
+                    spells.charge = (spells.charge + m.dt).min(CHARGE_TIME);
+                } else {
+                    // (held charged: no refill meanwhile)
+                    self.mana.drain(0.0);
+                }
+                if spells.charge >= 0.0 {
+                    spells.since_cast = 0.0;
+                }
+            } else if spells.charge >= 0.0 {
+                spells.cast_fire(m.origin, m.dir, spells.charge / CHARGE_TIME, rng);
+                spells.charge = -1.0;
+                self.sfx.push(sfx::here(CAST_SOUND[FIRE as usize]));
+            }
+        } else {
+            spells.charge = -1.0;
+        }
+        spells.orb = m.origin;
+        // the lightning strike: held, it locks on to what is in his aim as
+        // it starts, an enemy (the ring closing in round it, following it)
+        // or the ground there (staying put, however he turns), and lands
+        // there once locked; let go before, and it is not cast
         let striking = spells.selected == STRIKE as usize;
         if striking && able && !self.shield.raised_now() && m.casting && (spells.lock.is_some() || spells.ready()) {
-            let aimed = spells.lock_target(m.origin, m.dir);
-            let mut lock = spells.lock.unwrap_or(Lock { age: 0.0, target: None, side: -1, ground: None });
-            // (keep to the target locked, while it is still there; else the
-            // one in his aim)
-            let kept = lock.target.and_then(|_| spells.targets.iter().filter(|t| t.side == lock.side).map(|t| t.c).min_by(|a, b| {
-                let p = lock.target.unwrap();
-                super::vec::dist(*a, p).total_cmp(&super::vec::dist(*b, p))
-            }));
-            match (kept, aimed) {
-                (Some(c), _) => lock.target = Some(c),
-                (None, Some((c, side))) => {
-                    lock.target = Some(c);
-                    lock.side = side;
-                    lock.ground = None;
-                    lock.age = 0.0;
-                }
-                (None, None) => {
-                    // the ground where he aims, following his aim (its height
-                    // kept until the probe answers for the new place)
-                    lock.target = None;
-                    let g = aim_ground(m.origin, m.dir);
-                    lock.ground = Some((g, lock.ground.and_then(|(_, y)| y)));
-                }
+            let mut lock = spells.lock.unwrap_or_else(|| match spells.lock_target(m.origin, m.dir) {
+                Some((c, side)) => Lock { age: 0.0, target: Some(c), side, ground: None },
+                None => Lock { age: 0.0, target: None, side: -1, ground: Some((aim_ground(m.origin, m.dir), None)) },
+            });
+            // (an enemy locked: followed while it is there; gone, the
+            // place it was)
+            if let Some(p) = lock.target {
+                let near = spells.targets.iter().filter(|t| t.side == lock.side).map(|t| t.c).min_by(|a, b| {
+                    super::vec::dist(*a, p).total_cmp(&super::vec::dist(*b, p))
+                });
+                lock.target = near.or(Some(p));
             }
             if spells.lock.is_none() {
                 self.sfx.push(sfx::here(sfx::MARK));
@@ -177,9 +199,8 @@ impl Combat {
                     let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
                     spells.cast_at(m.origin, m.dir, at, rng);
                     self.sfx.push(sfx::here(CAST_SOUND[STRIKE as usize]));
-                } else if m.time - self.fizzled > 0.5 || m.time < self.fizzled {
-                    self.fizzled = m.time;
-                    self.sfx.push(sfx::here(sfx::FIZZLE));
+                } else {
+                    self.fizzle(m.time);
                 }
             }
         } else if striking {
@@ -188,13 +209,12 @@ impl Combat {
         if !striking {
             spells.lock = None;
         }
-        if spells.selected != HEALING && !striking && able && !self.shield.raised_now() && m.casting && spells.ready() {
+        if spells.selected != HEALING && !striking && !firing && able && !self.shield.raised_now() && m.casting && spells.ready() {
             if self.mana.spend(SPELL_COST[spells.selected]) {
                 spells.cast(m.origin, m.dir, rng);
                 self.sfx.push(sfx::here(CAST_SOUND[spells.selected]));
-            } else if m.time - self.fizzled > 0.5 || m.time < self.fizzled {
-                self.fizzled = m.time;
-                self.sfx.push(sfx::here(sfx::FIZZLE));
+            } else {
+                self.fizzle(m.time);
             }
         }
         self.mana.update(m.dt);
@@ -214,8 +234,8 @@ impl Combat {
     pub fn handle(&mut self, spells: &mut Spells) {
         for e in std::mem::take(&mut spells.events) {
             match e {
-                SpellEvent::Hit { side, kind, cut, .. } => {
-                    self.enemies.hit_with(side, kind, cut);
+                SpellEvent::Hit { side, kind, cut, scale, .. } => {
+                    self.enemies.hit_with(side, kind, cut, scale);
                     self.enemy_events();
                 }
                 SpellEvent::Sound { what, pos } => {
@@ -232,6 +252,15 @@ impl Combat {
         self.hud.health = self.enemies.hp as f32 / PLAYER_HP as f32;
         self.hud.mana = self.mana.value / MANA;
         self.hud.defeated = self.enemies.defeated;
+    }
+
+    // The fizzle of a cast short of mana (not more than every half second,
+    // so holding the button does not drone).
+    fn fizzle(&mut self, time: f32) {
+        if time - self.fizzled > 0.5 || time < self.fizzled {
+            self.fizzled = time;
+            self.sfx.push(sfx::here(sfx::FIZZLE));
+        }
     }
 
     fn enemy_events(&mut self) {
@@ -289,7 +318,7 @@ impl Combat {
             });
         }
         h.hurt = if lost { 0.6 } else { 0.7 * (-4.0 * e.hurt).exp() };
-        h.locked = spells.selected == STRIKE as usize && spells.lock_on(m.origin, m.dir).is_some();
+        h.locked = spells.selected == STRIKE as usize && spells.lock.map_or_else(|| spells.lock_on(m.origin, m.dir).is_some(), |l| l.target.is_some());
         h.shielded = self.shield.raised_now();
     }
 }
@@ -297,6 +326,7 @@ impl Combat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::mana::CHARGE_DRAIN;
 
     fn moment() -> Moment {
         Moment {
@@ -377,18 +407,57 @@ mod tests {
     fn casting_costs_mana() {
         let mut c = Combat::default();
         let mut s = Spells::default();
-        s.selected = 0;
+        s.selected = 2;
         let mut rng = Rng::new(1);
         let m = Moment { casting: true, n: 0, ..moment() };
         c.update(&m, &mut s, &mut rng);
         assert_eq!(s.count(), 1);
-        assert_eq!(c.mana.value, MANA - SPELL_COST[0]);
-        assert_eq!(c.sfx.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![sfx::CAST_FIRE]);
+        assert_eq!(c.mana.value, MANA - SPELL_COST[2]);
+        assert_eq!(c.sfx.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![sfx::CAST_WIND]);
         // not from behind the shield
         let m = Moment { casting: true, shielding: true, n: 0, dt: 1.0, ..moment() };
         c.update(&m, &mut s, &mut rng);
         assert_eq!(s.count(), 1);
         assert!(c.hud.shielded);
+    }
+
+    #[test]
+    fn the_fire_bolt_charges_while_held() {
+        let mut c = Combat::default();
+        let mut s = Spells::default();
+        s.selected = FIRE as usize;
+        let mut rng = Rng::new(1);
+        // two seconds held: charged fully (no further), its cost and the
+        // drain while it grew spent, nothing cast yet
+        let held = Moment { casting: true, n: 0, ..moment() };
+        for _ in 0..120 {
+            c.update(&held, &mut s, &mut rng);
+        }
+        assert_eq!(s.charge, CHARGE_TIME);
+        assert_eq!(s.count(), 0);
+        let spent = MANA - c.mana.value;
+        let want = SPELL_COST[FIRE as usize] + CHARGE_DRAIN * CHARGE_TIME;
+        assert!((spent - want).abs() < 0.5, "{spent} {want}");
+        // let go: it flies, faster for its charge
+        c.update(&Moment { casting: false, n: 0, ..moment() }, &mut s, &mut rng);
+        assert_eq!(s.charge, -1.0);
+        assert_eq!(s.count(), 1);
+        let bolt = s.pack();
+        assert!((bolt[6] - 30.0 * 1.6).abs() < 1e-3, "{}", bolt[6]);
+    }
+
+    #[test]
+    fn the_strike_stays_on_the_ground_it_locked() {
+        let mut c = Combat::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(1);
+        spells.select(STRIKE as usize);
+        let held = Moment { casting: true, n: 0, ..moment() };
+        c.update(&held, &mut spells, &mut rng);
+        let at = spells.lock.unwrap().ground.unwrap().0;
+        // he turns: the lock stays where it was
+        c.update(&Moment { dir: [1.0, -0.3, 0.0], ..held }, &mut spells, &mut rng);
+        assert_eq!(spells.lock.unwrap().ground.unwrap().0, at);
     }
 
     #[test]

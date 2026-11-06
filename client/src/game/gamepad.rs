@@ -4,8 +4,9 @@
 // climb / descend, by how far they are pulled, L3 boosts, X A B Y choose a
 // spell, RB casts it, LB raises the shield, the D-pad's up / down zoom,
 // View cycles the mode, Start pauses). Fixed: A tries again once he is
-// defeated; in the pause menu the D-pad moves, A chooses, B goes back, the
-// shoulders or the triggers change tabs.
+// defeated; in the pause menu the D-pad or the left stick moves (held, it
+// repeats), A chooses, B goes back, the shoulders or the triggers change
+// tabs.
 //
 // Natively, through gilrs, as its mapping has the buttons. In the browser, straight from the Gamepad API: its "standard"
 // layout where the browser gives one, else an Xbox controller's own order,
@@ -23,7 +24,7 @@ pub struct Pad {
     pub mode: bool,           // the mode's button pressed since the last read
     pub pause: bool,          // pause's button pressed since the last read
     pub back: bool,           // B pressed since the last read
-    pub nav: [bool; 4],       // the D-pad (up, down, left, right) pressed since the last read
+    pub nav: [bool; 4],       // the D-pad, or the left stick, (up, down, left, right) pressed since the last read (or repeating)
     pub tab: i32,             // LB / LT (-1) or RB / RT (1) pressed since the last read
     pub spell: Option<usize>, // a spell chosen since the last read
     pub cast: bool,           // held
@@ -111,6 +112,10 @@ pub struct Pads {
     started: bool,
     // the last read's buttons (for "pressed since")
     last: Raw,
+    // the left stick's direction (up, down, left, right) as a menu's
+    // cursor reads it, and when it next repeats
+    stick_dir: Option<usize>,
+    stick_next: Option<web_time::Instant>,
     seen: Vec<String>,
     // (in the browser, the trigger axes rest at -1 once used, but read 0
     // until then: each is counted once it has moved)
@@ -137,6 +142,10 @@ impl Pads {
         let pressed = |a: Action| binds.pad(a).is_some_and(hit);
         // (a spell's button, as it goes down)
         let spell = (0..4).find(|&i| pressed(Action::Spell(i)));
+        let mut nav = [hit(PadButton::Up), hit(PadButton::Down), hit(PadButton::DLeft), hit(PadButton::DRight)];
+        if let Some(d) = self.stick_nav(r.left) {
+            nav[d] = true;
+        }
         Pad {
             mov: [mx, my],
             look: [lx, ly],
@@ -145,7 +154,7 @@ impl Pads {
             mode: pressed(Action::Mode),
             pause: pressed(Action::Pause),
             back: hit(PadButton::B),
-            nav: [hit(PadButton::Up), hit(PadButton::Down), hit(PadButton::DLeft), hit(PadButton::DRight)],
+            nav,
             tab: (hit(PadButton::RB) || hit(PadButton::RT)) as i32 - (hit(PadButton::LB) || hit(PadButton::LT)) as i32,
             spell,
             cast: held(Action::Cast),
@@ -160,6 +169,34 @@ impl Pads {
                 || ly != 0.0
                 || r.rt > 0.1
                 || r.lt > 0.1,
+        }
+    }
+
+    // The left stick as a menu's cursor reads it: a direction once it is
+    // pushed well over (the way it is pushed most), again after 0.4 s held
+    // and then every 0.13 s; let back nearly to the middle, none.
+    fn stick_nav(&mut self, [x, y]: [f32; 2]) -> Option<usize> {
+        let m = x.abs().max(y.abs());
+        let dir = if m < if self.stick_dir.is_some() { 0.35 } else { 0.6 } {
+            None
+        } else if y.abs() >= x.abs() {
+            Some(if y > 0.0 { 0 } else { 1 })
+        } else {
+            Some(if x < 0.0 { 2 } else { 3 })
+        };
+        let now = web_time::Instant::now();
+        let ms = |t: u64| now + std::time::Duration::from_millis(t);
+        if dir != self.stick_dir {
+            self.stick_dir = dir;
+            self.stick_next = dir.map(|_| ms(400));
+            return dir;
+        }
+        match (dir, self.stick_next) {
+            (Some(d), Some(t)) if now >= t => {
+                self.stick_next = Some(ms(130));
+                Some(d)
+            }
+            _ => None,
         }
     }
 
@@ -326,6 +363,11 @@ mod tests {
         assert!(!pad.pause && !pad.mode);
         assert_eq!(pad.nav, [false; 4]);
         assert_eq!(pad.tab, 0);
+        // the left stick moves a menu's cursor, once as it is pushed over
+        let pad = p.pad(Raw { left: [0.0, -0.9], ..Default::default() }, &b);
+        assert_eq!(pad.nav, [false, true, false, false]);
+        let pad = p.pad(Raw { left: [0.0, -0.5], ..Default::default() }, &b);
+        assert_eq!(pad.nav, [false; 4]);
         let pad = p.pad(Raw { x: true, rb: true, ..Default::default() }, &b);
         assert_eq!(pad.spell, Some(0));
         assert!(pad.cast);

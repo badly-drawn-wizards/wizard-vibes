@@ -46,6 +46,8 @@ pub struct Drive {
     // dancing to the music: how much (0 .. 1), and the beat (beats into
     // the song's loop)
     pub groove: f32,
+    // the camera over his shoulder: 0 .. 1 (see camera_ray)
+    pub shoulder: f32,
     pub beat: f32,
     // the enemies' states, and the point they circle
     pub arena_x: f32,
@@ -78,6 +80,7 @@ pub const ON_PATH: Drive = Drive {
     shield_hit: 10.0,
     thumb: 0.0,
     groove: 0.0,
+    shoulder: 0.0,
     beat: 0.0,
     arena_x: 0.0,
     arena_y: 12.0,
@@ -111,6 +114,7 @@ impl Drive {
             "shield_hit" => self.shield_hit,
             "thumb" => self.thumb,
             "groove" => self.groove,
+            "shoulder" => self.shoulder,
             "beat" => self.beat,
             "arena_x" => self.arena_x,
             "arena_y" => self.arena_y,
@@ -147,6 +151,7 @@ impl Drive {
             "shield_hit" => &mut self.shield_hit,
             "thumb" => &mut self.thumb,
             "groove" => &mut self.groove,
+            "shoulder" => &mut self.shoulder,
             "beat" => &mut self.beat,
             "arena_x" => &mut self.arena_x,
             "arena_y" => &mut self.arena_y,

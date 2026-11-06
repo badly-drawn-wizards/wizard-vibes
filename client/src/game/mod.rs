@@ -99,6 +99,9 @@ pub struct Game {
     // app: see menu_input)
     menu: Option<gamepad::Pad>,
     pad_connected: bool,
+    // the camera over his shoulder (0..1, easing in as he flies and out as
+    // he stands on the path)
+    shoulder: f32,
     // the view's area, as of the last step (the HUD goes round it)
     view: Option<Rect>,
     // when the defeat panel appeared (it fades in)
@@ -151,6 +154,7 @@ impl Game {
             paused: false,
             menu: None,
             pad_connected: false,
+            shoulder: 0.0,
             view: None,
             defeat_since: None,
         };
@@ -245,7 +249,8 @@ impl Game {
     fn follow_mode(&mut self) {
         if self.flight.set_active(self.mode.free()) && self.flight.active {
             self.orbit.cam.yaw = PI;
-            self.orbit.cam.pitch = 0.3;
+            self.orbit.cam.pitch = 0.2;
+            self.orbit.cam.dist = 3.2;
             self.orbit.interacted = true;
         }
         if self.mode.fight() {
@@ -270,11 +275,16 @@ impl Game {
         if self.mode.fight() { params.f32("enemies").clamp(0.0, 6.0) as usize } else { 0 }
     }
 
-    // The orb, and the camera's view, in the world (for casting).
+    // The orb, and the way to cast from it, in the world: towards the point
+    // AIM_AT along the camera's view (from over his shoulder, the view's
+    // centre, where the crosshair is, is not in line with the orb).
     fn cast_from(&self) -> (V3, V3) {
+        const AIM_AT: f32 = 25.0;
         let (pos, heading) = self.flight.place(self.time);
-        let o = turn(heading, [0.55, 2.1, 0.5]); // the orb, in his frame (orb_pos in fut/rig.fut)
-        (vec::add(pos, o), turn(heading, self.orbit.view_dir()))
+        let orb = [0.55, 2.1, 0.5]; // the orb, in his frame (orb_pos in fut/rig.fut)
+        let aim = vec::add(self.orbit.eye(self.shoulder), vec::scale(AIM_AT, self.orbit.view_dir()));
+        let dir = vec::normalise(vec::sub(aim, orb));
+        (vec::add(pos, turn(heading, orb)), turn(heading, dir))
     }
 
     // Advances everything by dt (input, camera, flight, spells, the fight).
@@ -459,6 +469,9 @@ impl Game {
         // the drive record: the flight, casting (in his frame: along the
         // camera's view), and the fight
         let mut drive = self.flight.drive();
+        let goal = if self.flight.active { 1.0 } else { 0.0 };
+        self.shoulder += (goal - self.shoulder) * (1.0 - (-dt / 0.35).exp());
+        drive.shoulder = self.shoulder;
         let [sx, sy, sz] = self.orbit.view_dir();
         drive.staff = self.spells.staff;
         drive.sx = sx;

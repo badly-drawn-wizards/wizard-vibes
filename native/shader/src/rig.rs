@@ -135,6 +135,7 @@ pub const on_path: Drive = Drive {
     shield_hit: 10.0,
     thumb: 0.0,
     groove: 0.0,
+    shoulder: 0.0,
     beat: 0.0,
     arena_x: 0.0,
     arena_y: 12.0,

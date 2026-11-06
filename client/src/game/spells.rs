@@ -4,7 +4,10 @@
 // it goes to the renderer as a flat array (see fut/spells.fut), and the
 // collision probe (fut/collide.fut) reports the land at each one: a fire
 // bolt bursts where it hits, a wind blade breaks up, and a lightning strike
-// finds the ground it hits. At most `limit` (a compile-time parameter) are
+// finds the ground it hits. His fire bolt is charged first, while the cast
+// is held (see combat.rs): the longer, up to CHARGE_TIME, the faster and
+// bigger the bolt and the wider and harder its burst, which hurts every
+// enemy within its reach, most at its heart. At most `limit` (a compile-time parameter) are
 // out at once, and casting has a short cooldown on top.
 //
 // The enemies cast them too (see enemies.rs). Each spell has a side: his
@@ -30,6 +33,7 @@ pub const GUST: u32 = 4; // a wind blade's burst into small blades
 pub const MARK: u32 = 5; // where a strike is about to land
 pub const HEAL: u32 = 6; // healing being channelled, round him
 pub const LOCK: u32 = 7; // his strike locking on to a target (held)
+pub const CHARGE: u32 = 8; // his fire bolt being charged at the orb (held)
 pub const STRIDE: usize = 10;
 
 const LIFE: [f32; 8] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME]; // seconds, by kind
@@ -39,7 +43,8 @@ const COOLDOWN: [f32; 4] = [0.25, 0.5, 0.3, 0.0]; // seconds before the next cas
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
 const STRIKE_HEIGHT: f32 = 25.0; // it comes down from this far above the orb
 const PROBE_HEIGHT: f32 = 60.0; // a strike's ground is probed from up here
-const BLAST: f32 = 2.6; // a burst's reach
+const BLAST: f32 = 2.6; // a burst's reach (uncharged; twice it, charged fully)
+pub const CHARGE_TIME: f32 = 1.2; // seconds a fire bolt takes to charge fully
 const STRIKE_REACH: f32 = 1.6; // a strike's
 const LOCK_ON: f32 = 0.12; // radians off his aim a strike still finds a target
 
@@ -97,8 +102,10 @@ const LOCK_PROBE: u32 = u32::MAX;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SpellEvent {
     // a spell of `kind` cast by `owner` hit `side` (a wind blade: cutting
-    // along a plane, through a point with a normal, in the world)
-    Hit { side: i32, kind: u32, owner: i32, cut: Option<(V3, V3)> },
+    // along a plane, through a point with a normal, in the world), its
+    // damage scaled by `scale` (a burst's, by its charge and how near its
+    // heart)
+    Hit { side: i32, kind: u32, owner: i32, cut: Option<(V3, V3)>, scale: f32 },
     // (for the sound: a bolt bursting, a blade breaking up, a strike landing)
     Sound { what: Sound, pos: V3 },
 }
@@ -122,6 +129,7 @@ struct Spell {
     top: f32,  // a strike's top height
     owner: i32,
     done: bool, // its blast (a burst's or a strike's) has been dealt
+    power: f32, // a fire bolt's (and its burst's) charge, 0..1
 }
 
 #[derive(Clone, Debug)]
@@ -137,6 +145,10 @@ pub struct Spells {
     pub here: V3,
     // his strike locking on, while the cast is held
     pub lock: Option<Lock>,
+    // seconds his fire bolt has been charging (or -1), and the orb, where
+    // it charges
+    pub charge: f32,
+    pub orb: V3,
     items: Vec<Spell>,
     cooldown: f32,
     next_id: u32,
@@ -154,6 +166,8 @@ impl Default for Spells {
             channel: -1.0,
             here: [0.0; 3],
             lock: None,
+            charge: -1.0,
+            orb: [0.0; 3],
             items: Vec::new(),
             cooldown: 0.0,
             next_id: 1,
@@ -193,6 +207,21 @@ impl Spells {
         true
     }
 
+    // Casts his fire bolt, charged by `power` (0..1: faster, and its burst
+    // bigger and harder), with its cooldown.
+    pub fn cast_fire(&mut self, origin: V3, dir: V3, power: f32, rng: &mut Rng) -> bool {
+        if !self.launch(FIRE, origin, dir, HIS, None, rng) {
+            return false;
+        }
+        let s = self.items.last_mut().unwrap();
+        s.power = power.clamp(0.0, 1.0);
+        let k = 1.0 + 0.6 * s.power;
+        s.vel = s.vel.map(|v| v * k);
+        self.cooldown = COOLDOWN[FIRE as usize];
+        self.since_cast = 0.0;
+        true
+    }
+
     // Casts his strike at `at` (a locked target), or where he aims if none,
     // unless at the limit; with its cooldown.
     pub fn cast_at(&mut self, origin: V3, dir: V3, at: Option<V3>, rng: &mut Rng) -> bool {
@@ -222,6 +251,7 @@ impl Spells {
             top: 0.0,
             owner,
             done: false,
+            power: 0.0,
         };
         self.next_id += 1;
         if kind == STRIKE || kind == MARK {
@@ -305,24 +335,32 @@ impl Spells {
                     continue;
                 };
                 let cut = if s.kind == WIND { Some((s.pos, blade_normal(s))) } else { None };
-                events.push(SpellEvent::Hit { side: t.side, kind: s.kind, owner: s.owner, cut });
+                events.push(SpellEvent::Hit { side: t.side, kind: s.kind, owner: s.owner, cut, scale: 1.0 });
                 if s.kind == FIRE {
                     Self::burst(s, events);
                 } else {
                     Self::gust(s, events);
                 }
             } else if (s.kind == BURST || (s.kind == STRIKE && s.pos[1] != 0.0)) && !s.done {
-                // (once per target: the nearest sphere of each)
+                // (once per target: by its sphere nearest the heart; a burst's
+                // damage by its charge, and down to half at the edge of its
+                // reach)
                 s.done = true;
-                let reach = if s.kind == BURST { BLAST } else { STRIKE_REACH };
-                let mut sides: Vec<i32> = Vec::new();
+                let reach = if s.kind == BURST { BLAST * (1.0 + s.power) } else { STRIKE_REACH };
+                let mut hits: Vec<(i32, f32)> = Vec::new();
                 for t in targets {
-                    if Self::opposed(s.owner, t) && dist(s.pos, t.c) < t.r + reach && !sides.contains(&t.side) {
-                        sides.push(t.side);
+                    let d = (dist(s.pos, t.c) - t.r).max(0.0);
+                    if !Self::opposed(s.owner, t) || d >= reach {
+                        continue;
+                    }
+                    let scale = if s.kind == BURST { (1.0 + 2.0 * s.power) * (1.0 - 0.5 * d / reach) } else { 1.0 };
+                    match hits.iter_mut().find(|(side, _)| *side == t.side) {
+                        Some(h) => h.1 = h.1.max(scale),
+                        None => hits.push((t.side, scale)),
                     }
                 }
-                for side in sides {
-                    events.push(SpellEvent::Hit { side, kind: s.kind, owner: s.owner, cut: None });
+                for (side, scale) in hits {
+                    events.push(SpellEvent::Hit { side, kind: s.kind, owner: s.owner, cut: None, scale });
                 }
             }
         }
@@ -421,7 +459,13 @@ impl Spells {
     pub fn pack(&self) -> Vec<f32> {
         let mut out = vec![-1.0; self.limit * STRIDE];
         for (i, s) in self.items.iter().take(self.limit).enumerate() {
-            let extra = if s.kind == STRIKE || s.kind == MARK { [0.0, s.top, 0.0] } else { s.vel };
+            let extra = if s.kind == STRIKE || s.kind == MARK {
+                [0.0, s.top, 0.0]
+            } else if s.kind == BURST {
+                [s.power, 0.0, 0.0]
+            } else {
+                s.vel
+            };
             let slot = [
                 s.kind as f32, s.pos[0], s.pos[1], s.pos[2], extra[0], extra[1], extra[2], s.age, s.life, s.seed,
             ];
@@ -435,6 +479,13 @@ impl Spells {
                 let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, LOCK_TIME, 11.0];
                 out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
             }
+        }
+        // (charging, the fire bolt at the orb: likewise)
+        if self.charge >= 0.0 && self.limit > 0 {
+            let i = self.items.len().min(self.limit - 1);
+            let [x, y, z] = self.orb;
+            let slot = [CHARGE as f32, x, y, z, 0.0, 0.0, 0.0, self.charge, CHARGE_TIME, 5.0];
+            out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
         // (channelling, the healing round him: in the first free slot, or
         // the last)
@@ -478,6 +529,33 @@ mod tests {
         assert_eq!(p[0], BURST as f32);
         assert_eq!(p[STRIDE], -1.0);
         assert_eq!(p.len(), 6 * STRIDE);
+    }
+
+    #[test]
+    fn a_charged_burst_reaches_further_and_harder() {
+        // a target 4 beyond a burst's heart: out of an uncharged one's
+        // reach, in a fully charged one's (and harder near its heart)
+        for (power, far, near) in [(0.0, None, 1.0), (1.0, Some(2.0), 3.0)] {
+            let mut s = Spells::default();
+            s.targets = vec![Target { c: [4.5, 0.0, 0.0], r: 0.5, side: 0 }, Target { c: [0.0, 0.5, 0.0], r: 0.5, side: 1 }];
+            let mut rng = Rng::new(1);
+            s.cast_fire([0.0; 3], [0.0, 0.0, 1.0], power, &mut rng);
+            Spells::burst(&mut s.items[0], &mut Vec::new());
+            s.items[0].pos = [0.0; 3];
+            s.update(0.01, false);
+            let scale = |side: i32| {
+                s.events.iter().find_map(|e| match e {
+                    SpellEvent::Hit { side: k, scale, .. } if *k == side => Some(*scale),
+                    _ => None,
+                })
+            };
+            assert_eq!(scale(1), Some(near), "{power}");
+            match (far, scale(0)) {
+                (None, got) => assert_eq!(got, None),
+                (Some(want), Some(got)) => assert!((got - want).abs() < 0.3, "{got}"),
+                (Some(_), None) => panic!("missed"),
+            }
+        }
     }
 
     #[test]

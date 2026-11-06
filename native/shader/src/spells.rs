@@ -5,14 +5,18 @@
 //
 //   kind, x, y, z, a, b, c, age, life (seconds), seed (an integer)
 //
-//   spell_fire    a bolt at (x, y, z) moving at velocity (a, b, c)
+//   spell_fire    a bolt at (x, y, z) moving at velocity (a, b, c) (a
+//                 charged one faster, and bigger: by its speed over 30)
 //   spell_strike  lightning striking the ground at (x, y, z) from height b
 //   spell_wind    a blade at (x, y, z) moving at (a, b, c)
-//   spell_burst   a fire bolt's explosion at (x, y, z)
+//   spell_burst   a fire bolt's explosion at (x, y, z), a the bolt's
+//                 charge (0..1: up to twice the size)
 //   spell_gust    a wind blade's burst into small blades at (x, y, z); it
 //                 was moving at (a, b, c)
 //   spell_mark    where an enemy's strike will land, (x, y, z), when its
 //                 life is up (it then becomes the strike, from height b)
+//   spell_charge  a fire bolt being charged at the orb, (x, y, z): its
+//                 charge so far age / life
 //
 // Every spell fades out over the last part of its life; the seed makes each
 // one a little different. Any other kind is an empty slot. Positions are in
@@ -29,6 +33,7 @@ pub const spell_gust: i32 = 4;
 pub const spell_mark: i32 = 5;
 pub const spell_heal: i32 = 6;
 pub const spell_lock: i32 = 7; // his strike locking on: a mark, green
+pub const spell_charge: i32 = 8;
 
 // Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 // (distance, t, and how far beyond tmax the nearest point of the segment
@@ -113,21 +118,47 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
     // nothing shines through the rock)
     let seen = move |t: f32, behind: f32, size: f32| (1.0 - fog_amount(fog, view_distance, t)) * (-behind / size).exp();
     if kind == spell_fire {
-        // a ball with a short trail behind it, flickering
+        // a ball with a short trail behind it, flickering (bigger, charged)
+        let k = clamp(1.0, 1.7, length(q) / 30.0);
+        let k = k * k;
         let tail = p - scale(0.06, q);
         let (dist, t, behind) = ray_segment(o, d, tmax, tail, p);
-        let (core, halo) = glow_line(0.12, 0.8, dist);
+        let (core, halo) = glow_line(0.12 * k, 0.8 * k, dist);
         let flick = 0.85 + 0.15 * (secs * 43.0 + i as f32 * 1.7).sin();
-        let hot = (-(dist * dist) / 0.0016).exp();
+        let hot = (-(dist * dist) / (0.0016 * k * k)).exp();
         scale(
-            fade * flick * seen(t, behind, 0.3),
+            fade * flick * seen(t, behind, 0.3 * k),
             scale(5.0 * core, mix(vec(1.0, 0.42, 0.08), vec(1.0, 0.9, 0.6), hot)) + scale(0.5 * halo, vec(1.0, 0.35, 0.05)),
+        )
+    } else if kind == spell_charge {
+        // a fireball swelling at the orb as it charges, flickering faster
+        // the fuller it is, embers circling in to it
+        let f = saturate(age / life);
+        let rad = 0.05 + 0.2 * f;
+        let (dist, t, behind) = ray_segment(o, d, tmax, p, p);
+        let (core, halo) = glow_line(rad, 2.0 * rad, dist);
+        let flick = 0.8 + 0.2 * (secs * (30.0 + 40.0 * f)).sin();
+        let hot = (-(dist * dist) / (0.15 * rad * rad)).exp();
+        let mut embers = 0.0f32;
+        let mut j = 0;
+        while j < 5 {
+            let a = secs * (5.0 + j as f32) + 1.257 * j as f32;
+            let rr = rad * (1.6 + 1.2 * (1.0 - (secs * 2.0 + j as f32 * 0.37).fract()));
+            let e = p + vec(rr * a.cos(), 0.6 * rr * (1.3 * a).sin(), rr * a.sin());
+            let (ed, _, _) = ray_segment(o, d, tmax, e, e);
+            embers = embers + (-(ed * ed) / 0.0004).exp();
+            j += 1;
+        }
+        scale(
+            flick * seen(t, behind, 0.3),
+            scale(4.0 * core, mix(vec(1.0, 0.42, 0.08), vec(1.0, 0.92, 0.65), hot)) + scale(0.2 * halo, vec(1.0, 0.35, 0.05)) + scale(2.5 * f * embers, vec(1.0, 0.6, 0.2)),
         )
     } else if kind == spell_burst {
         // An explosion: a billowing fireball that swells fast and cools
         // from yellow-white through orange to a dull red, a shockwave ring
         // racing out from it, and sparks thrown out and falling.
-        let r = 3.2 * (1.0 - (-5.0 * age).exp()) + 0.2;
+        let size = 1.0 + saturate(q.x);
+        let r = size * (3.2 * (1.0 - (-5.0 * age).exp()) + 0.2);
         let (dist, t, behind) = ray_segment(o, d, tmax, p, p);
         let x = o + scale(t, d); // where the ray passes closest
         let turb = vnoise2((x.x - p.x) * 1.4 + (x.z - p.z) * 0.7 + 7.0 * i as f32, (x.y - p.y) * 1.4 - 3.0 * age);
@@ -139,7 +170,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             saturate(1.5 * heat * (1.0 - dist / r)),
         );
         let halo = (1.6 * r) * (1.6 * r) / (dist * dist + (1.6 * r) * (1.6 * r));
-        let ring_r = 9.0 * age;
+        let ring_r = 9.0 * size * age;
         // (squared by hand: WGSL's pow is undefined for negative bases)
         let ring = {
             let u = (dist - ring_r) / (0.25 + 0.4 * age);
@@ -152,7 +183,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         while j < 8 {
             let h = move |n: i32| hash2(i.wrapping_mul(31).wrapping_add(j * 7).wrapping_add(n), 91);
             let dir = normalise(vec(h(1) - 0.5, 0.4 + h(2), h(3) - 0.5));
-            let speed = 7.0 + 6.0 * h(4);
+            let speed = (7.0 + 6.0 * h(4)) * size;
             let at_t = move |a: f32| p + scale(speed * a, dir) - vec(0.0, 4.9 * a * a, 0.0);
             let (sd, _, _) = ray_segment(o, d, tmax, at_t((0.0f32).maximum(age - 0.05)), at_t(age));
             sparks = sparks + (-(sd * sd) / 0.0025).exp();

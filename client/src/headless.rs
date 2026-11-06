@@ -22,7 +22,8 @@ pub struct Options {
     pub drive: Vec<(String, f32)>,
     // --camera YAW,PITCH,DIST: the shot's camera, for the page's
     pub camera: Option<crate::types::Camera>,
-    // --spell KIND,X,Y,Z,AGE: spells in the shot (world space; see spells.rs)
+    // --spell KIND,X,Y,Z,AGE[,A[,LIFE]]: spells in the shot (world space; see
+    // spells.rs)
     pub spells: Vec<f32>,
     pub wgsl: bool,
     // --music N: N frames of music from t0 on the GPU, checked against the
