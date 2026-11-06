@@ -146,6 +146,9 @@ pub struct Game {
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
+    // how far he banks into his turn (as the shader's Flight: his frame,
+    // and the camera with it, rolled by it; see to_world)
+    bank: f32,
     // his orb as the renderer last posed it (his frame, before his heading:
     // see set_orb), and where he was last step and how fast he went
     orb: V3,
@@ -308,6 +311,7 @@ impl Game {
             }),
             loadout_open: None,
             cross: None,
+            bank: 0.0,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -453,26 +457,52 @@ impl Game {
         self.orb = orb;
     }
 
+    // A direction in his frame, in the world: banked, then turned to his
+    // heading (as to_world_dir in the shader's world.rs).
+    fn to_world_dir(&self, d: V3) -> V3 {
+        let heading = self.flight.place(self.time).1;
+        let (s, c) = (-self.bank).sin_cos();
+        turn(heading, [d[0] * c - d[1] * s, d[0] * s + d[1] * c, d[2]])
+    }
+
+    // A point in his frame, in the world.
+    fn to_world(&self, p: V3) -> V3 {
+        vec::add(self.flight.place(self.time).0, self.to_world_dir(p))
+    }
+
+    // A point in the world, in his frame (to_world undone).
+    fn to_local(&self, p: V3) -> V3 {
+        let (pos, heading) = self.flight.place(self.time);
+        let [x, y, z] = turn(-heading, vec::sub(p, pos));
+        let (s, c) = self.bank.sin_cos();
+        [x * c - y * s, x * s + y * c, z]
+    }
+
+    // The camera's eye and the way it looks, in the world.
+    fn eye_and_view(&self) -> (V3, V3) {
+        (self.to_world(self.orbit.eye(self.shoulder)), self.to_world_dir(self.orbit.view_dir()))
+    }
+
     // Aim assist: with an enemy near his aim (within ASSIST_CONE of the
-    // view), a fire bolt or wind blade is turned part of the way (the more,
-    // the nearer the aim) towards where it will be when the spell gets
-    // there (its motion against his, for a bolt he carries along). Where
-    // the spell then goes shows as the crosshair's cross (see cross).
+    // view), a fire bolt, wind blade or frost lance is turned towards where
+    // the enemy will be when the spell gets there (its motion against his,
+    // for a bolt he carries along): all the way within the cone's inner
+    // half, less and less beyond. Where the spell then goes shows as the
+    // crosshair's cross (see cross).
     fn assist(&mut self, origin: V3, dir: V3) -> V3 {
-        const ASSIST_CONE: f32 = 0.14;
-        const ASSIST: f32 = 0.6;
+        const ASSIST_CONE: f32 = 0.12;
         self.cross = None;
         let sel = self.spells.selected as u32;
         let speed = if sel == spells::FIRE {
             30.0 * (1.0 + 0.6 * (self.spells.charge.max(0.0) / spells::CHARGE_TIME))
         } else if sel == spells::WIND {
             24.0
+        } else if self.spells.selected == spells::FROST_LANCE {
+            spells::FROST_SPEED
         } else {
             return dir;
         };
-        let (pos, heading) = self.flight.place(self.time);
-        let eye = vec::add(pos, turn(heading, self.orbit.eye(self.shoulder)));
-        let view = turn(heading, self.orbit.view_dir());
+        let (eye, view) = self.eye_and_view();
         let best = self
             .spells
             .targets
@@ -492,7 +522,7 @@ impl Game {
             let time = vec::dist(at, origin) / speed;
             at = vec::add(t.c, vec::scale(time, rel));
         }
-        let k = ASSIST * (1.0 - angle / ASSIST_CONE).clamp(0.0, 1.0);
+        let k = (2.0 - 2.0 * angle / ASSIST_CONE).clamp(0.0, 1.0);
         let to = vec::normalise(vec::sub(at, origin));
         let d = vec::normalise(vec::add(vec::scale(1.0 - k, dir), vec::scale(k, to)));
         self.cross = Some(vec::add(origin, vec::scale(vec::dist(at, origin), d)));
@@ -500,10 +530,9 @@ impl Game {
     }
 
     // Where world point `p` is in the view (points), if in front of the
-    // camera (as camera_ray has it; his bank aside).
+    // camera (as camera_ray has it, in his banked frame).
     fn on_screen(&self, p: V3, rect: Rect) -> Option<egui::Pos2> {
-        let (pos, heading) = self.flight.place(self.time);
-        let v = vec::sub(turn(-heading, vec::sub(p, pos)), self.orbit.eye(self.shoulder));
+        let v = vec::sub(self.to_local(p), self.orbit.eye(self.shoulder));
         let f = self.orbit.view_dir();
         let r = vec::normalise([-f[2], 0.0, f[0]]);
         let u = vec::cross(r, f);
@@ -517,16 +546,29 @@ impl Game {
         Some(rect.center() + Vec2::new(x * 0.5 * h, -y * 0.5 * h))
     }
 
-    // The orb, and the way to cast from it, in the world: towards the point
-    // AIM_AT along the camera's view (from over his shoulder, the view's
-    // centre, where the crosshair is, is not in line with the orb).
+    // The orb, and the way to cast from it, in the world: towards what the
+    // crosshair is on (the nearest enemy the view's centre passes through),
+    // else the point AIM_FAR along the view (the orb is not on the view's
+    // line, so a spell crosses it where it aims).
     fn cast_from(&self) -> (V3, V3) {
-        const AIM_AT: f32 = 25.0;
-        let (pos, heading) = self.flight.place(self.time);
-        let orb = self.orb;
-        let aim = vec::add(self.orbit.eye(self.shoulder), vec::scale(AIM_AT, self.orbit.view_dir()));
-        let dir = vec::normalise(vec::sub(aim, orb));
-        (vec::add(pos, turn(heading, orb)), turn(heading, dir))
+        const AIM_FAR: f32 = 60.0;
+        let (eye, view) = self.eye_and_view();
+        let t = self
+            .spells
+            .targets
+            .iter()
+            .filter(|t| t.side >= 0)
+            .filter_map(|t| {
+                // (the ray against its sphere: the nearer crossing, ahead)
+                let v = vec::sub(t.c, eye);
+                let along = vec::dot(v, view);
+                let off = vec::dot(v, v) - along * along;
+                (along > 0.0 && off < t.r * t.r).then(|| along - (t.r * t.r - off).sqrt())
+            })
+            .fold(AIM_FAR, f32::min);
+        let orb = self.to_world(self.orb);
+        let aim = vec::add(eye, vec::scale(t.max(2.0), view));
+        (orb, vec::normalise(vec::sub(aim, orb)))
     }
 
     // Advances everything by dt (input, camera, flight, spells, the fight).
@@ -793,6 +835,9 @@ impl Game {
         }
         let pad_cast = pad.is_some_and(|p| p.cast);
         let game_dt = if self.paused { 0.0 } else { dt * self.time_scale() };
+        // (his bank, as the shader works it out: the camera rolls with it)
+        let gain = params.f32("bank");
+        self.bank = if self.flight.active { (gain * self.flight.turn).clamp(-0.35, 0.35) } else { wizard_shader::world::flight_at(gain, self.time).bank };
         let (origin, dir) = self.cast_from();
         // (how fast he goes: from where he was last step; a jump, as the
         // mode changes, not counted)
@@ -1810,6 +1855,25 @@ mod tests {
         [true, false]
             .map(|pressed| egui::Event::Key { key: k, physical_key: None, pressed, repeat: false, modifiers: Default::default() })
             .to_vec()
+    }
+
+    #[test]
+    fn the_view_s_centre_is_the_crosshair_s_banked_or_not() {
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 720.0));
+        let mut g = Game::new(None);
+        for bank in [0.0, 0.3, -0.35] {
+            g.bank = bank;
+            let (eye, view) = g.eye_and_view();
+            // (a point down the view's middle: at the centre)
+            let c = g.on_screen(vec::add(eye, vec::scale(30.0, view)), rect).unwrap();
+            assert!((c - rect.center()).length() < 0.5, "{bank}: {c:?}");
+            // (and a spell cast meets it there)
+            let (orb, dir) = g.cast_from();
+            let at = vec::add(eye, vec::scale(60.0, view));
+            let to = vec::normalise(vec::sub(at, orb));
+            assert!(vec::dot(to, dir) > 0.9999, "{bank}");
+            assert!(vec::dist(g.to_local(g.to_world([1.0, 2.0, 3.0])), [1.0, 2.0, 3.0]) < 1e-4);
+        }
     }
 
     #[test]

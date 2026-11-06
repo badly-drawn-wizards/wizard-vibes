@@ -72,7 +72,7 @@ const NO_TARGET: i32 = -100;
 // a meteor's fall, seconds, from how high; a gravity well's reach, its
 // pull on enemy spells; his familiar's circle round him, its turn a
 // second, and its casting's reach and pace)
-const FROST_SPEED: f32 = 40.0;
+pub const FROST_SPEED: f32 = 40.0;
 const MISSILE_SPEED: f32 = 22.0;
 const MISSILE_TURN: f32 = 6.0;
 const METEOR_FALL: f32 = 0.9;
