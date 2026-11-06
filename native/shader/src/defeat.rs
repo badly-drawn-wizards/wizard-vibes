@@ -41,12 +41,12 @@ pub fn defeat_overlay(kind: i32, t: f32, vw: i32, h: i32, x: f32, y: f32) -> Vec
     let edge = smoothstep(0.55, 1.6, vec2(p.x * 0.75, p.y).length());
     let mut cover = 0.55 * fade * edge;
     let mut light = scale(0.12 * fade * edge, tint);
-    // the arcane circle round the title: two rings, runes between them
+    // the arcane circle behind the title (round: screen space is square), two rings, runes between them
     // turning one way, and ticks outside turning the other, growing in
     let c = p - vec2(0.0, -0.5);
     let grow = smoothstep(0.3, 2.0, t);
-    let r = vec2(c.x * 0.55, c.y).length() / (0.35 + 0.05 * grow);
-    let a = c.y.atan2(c.x * 0.55);
+    let r = c.length() / (0.42 + 0.05 * grow);
+    let a = c.y.atan2(c.x);
     let ring = glow(r - 1.0, 0.012) + 0.7 * glow(r - 0.82, 0.008) + 0.4 * glow(r - 1.18, 0.006);
     let runes = {
         let s = fract((a + 0.25 * t) * 24.0 / (2.0 * PI));
