@@ -658,7 +658,7 @@ pub fn enemy_orb_at(prm: Params, fs: Foes, i: i32, secs: f32, fl: Flight) -> Opt
 }
 
 // (how much brighter the haze in their orbs is than in his)
-pub const ENEMY_HAZE: f32 = 20.0;
+pub const ENEMY_HAZE: f32 = 2.5;
 
 // What fills enemy i's orb, at p in his space (inside it: the same flames,
 // whirlwind or lightning as his, by its spell, and the haze), as his own

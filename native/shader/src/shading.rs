@@ -830,10 +830,11 @@ pub fn orbs_hit(pose: Pose, ro: Vec3, rd: Vec3, within: i32) -> (f32, f32, Vec3,
         if a > b || b < 0.0 {
             (INF, -INF, vec(0.0, 1.0, 0.0))
         } else if inside {
-            let (hit, t, n) = glass_hit(sdf, 24, ro, rd, 1e-3, b);
+            let (hit, t, n) = glass_hit(sdf, 24, ro, rd, 1e-3, b, true);
             (-INF, if hit { t } else { b }, n)
         } else {
-            let (hit, t, n) = glass_hit(sdf, 24, ro, rd, a.maximum(1e-3), b);
+            // (starting on its glass, just out of it: getting away first)
+            let (hit, t, n) = glass_hit(sdf, 24, ro, rd, a.maximum(1e-3), b, sdf(ro).abs() < 2e-3);
             if hit { (t, b, n) } else { (INF, -INF, n) }
         }
     };
@@ -879,7 +880,7 @@ pub fn glass(pose: Pose, g: Glow, ro: Vec3, rd: Vec3, t_end: f32) -> (Vec3, Vec3
     if enter > exit {
         return (splat(0.0), splat(1.0));
     }
-    let (hit, t, n) = glass_hit(move |q| potion_glass(pose, q), 64, ro, rd, 0.02f32.maximum(enter), t_end.minimum(exit));
+    let (hit, t, n) = glass_hit(move |q| potion_glass(pose, q), 64, ro, rd, 0.02f32.maximum(enter), t_end.minimum(exit), false);
     if !hit {
         return (splat(0.0), splat(1.0));
     }
@@ -944,12 +945,12 @@ pub fn shield_layer(pose: Pose, g: Glow, ro: Vec3, rd: Vec3, t_end: f32) -> (Vec
     };
     // the near face, then the far one seen through it (a thin skin: each
     // face reflects, neither bends the ray)
-    let (front, tf, nf) = glass_hit(sdf, 32, ro, rd, 0.02f32.maximum(enter), t1);
+    let (front, tf, nf) = glass_hit(sdf, 32, ro, rd, 0.02f32.maximum(enter), t1, false);
     if !front {
         return (splat(0.0), splat(1.0));
     }
     let (a1, k1) = face(tf, nf);
-    let (back, tb, nb) = glass_hit(sdf, 32, ro, rd, tf + 0.02, t1);
+    let (back, tb, nb) = glass_hit(sdf, 32, ro, rd, tf + 0.02, t1, false);
     let (a2, k2) = if back { face(tb, nb) } else { (splat(0.0), 1.0) };
     (a1 + scale(k1, a2), splat(k1 * k2))
 }

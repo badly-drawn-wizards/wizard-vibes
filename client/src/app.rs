@@ -369,11 +369,12 @@ impl App {
                         let size = self.image.as_ref().map(|(t, _)| format!(" · {}×{}", t.width(), t.height())).unwrap_or_default();
                         let scale = format!(" · {:.0}%{}", 100.0 * self.scale.get(), if self.scale.dynamic { tr(" dynamic") } else { "" });
                         let state = format!("{}{}", if self.game.paused() { tr(" · paused") } else { "" }, if self.game.pad_connected() { tr(" · controller") } else { "" });
-                        ui.monospace(format!("{status}{size}{scale} · {:.1} fps{state}", self.fps));
+                        ui.monospace(format!("{status}{size}{scale} · {:>5.1} fps{state}", self.fps));
                         ui.separator();
                         self.audio.toggles(ui);
                     } else {
-                        ui.monospace(format!("{:.0} fps", self.fps));
+                        // (room for three digits, so it stays put)
+                        ui.monospace(format!("{:>3.0} fps", self.fps));
                     }
                     if crate::game::hud::triangle(ui, self.bar_open).on_hover_text(tr(if self.bar_open { "Fold the bar" } else { "Unfold the bar" })).clicked() {
                         self.bar_open = !self.bar_open;
