@@ -208,15 +208,18 @@ impl Spells {
     }
 
     // Casts his fire bolt, charged by `power` (0..1: faster, and its burst
-    // bigger and harder), with its cooldown.
-    pub fn cast_fire(&mut self, origin: V3, dir: V3, power: f32, rng: &mut Rng) -> bool {
+    // bigger and harder), carried along by his own velocity `carry` too,
+    // with its cooldown.
+    pub fn cast_fire(&mut self, origin: V3, dir: V3, power: f32, carry: V3, rng: &mut Rng) -> bool {
         if !self.launch(FIRE, origin, dir, HIS, None, rng) {
             return false;
         }
         let s = self.items.last_mut().unwrap();
         s.power = power.clamp(0.0, 1.0);
         let k = 1.0 + 0.6 * s.power;
-        s.vel = s.vel.map(|v| v * k);
+        s.vel = super::vec::add(s.vel.map(|v| v * k), carry);
+        // (the renderer reads its charge from its seed: see pack)
+        s.seed += 100000.0 * (100.0 * s.power).round();
         self.cooldown = COOLDOWN[FIRE as usize];
         self.since_cast = 0.0;
         true
@@ -455,7 +458,10 @@ impl Spells {
     }
 
     // The renderer's array: `limit` slots of
-    // [kind, x, y, z, a, b, c, age, life, seed] (see fut/spells.fut).
+    // [kind, x, y, z, a, b, c, age, life, seed] (see the shader's
+    // spells.rs: a fire bolt's seed carries its charge, in hundredths, in
+    // its hundred-thousands; a charge is drawn at the orb as the renderer
+    // poses it, not at its x, y, z).
     pub fn pack(&self) -> Vec<f32> {
         let mut out = vec![-1.0; self.limit * STRIDE];
         for (i, s) in self.items.iter().take(self.limit).enumerate() {
@@ -539,7 +545,7 @@ mod tests {
             let mut s = Spells::default();
             s.targets = vec![Target { c: [4.5, 0.0, 0.0], r: 0.5, side: 0 }, Target { c: [0.0, 0.5, 0.0], r: 0.5, side: 1 }];
             let mut rng = Rng::new(1);
-            s.cast_fire([0.0; 3], [0.0, 0.0, 1.0], power, &mut rng);
+            s.cast_fire([0.0; 3], [0.0, 0.0, 1.0], power, [0.0; 3], &mut rng);
             Spells::burst(&mut s.items[0], &mut Vec::new());
             s.items[0].pos = [0.0; 3];
             s.update(0.01, false);

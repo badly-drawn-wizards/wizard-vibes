@@ -179,6 +179,66 @@ pub fn staff_rest(pose: Pose, p: Vec3) -> Vec3 {
     vec(dot(v, pose.staff_x), dot(v, pose.staff_y), dot(v, pose.staff_z))
 }
 
+// How the staff is held: leaning with him, turned to lead with the orb as
+// he casts, brought across, tapping as he dances. (pose_at's; and on its
+// own, for where the orb is: see held_orb.)
+#[derive(Clone, Copy)]
+pub struct StaffHold {
+    tilt_c: f32,
+    tilt_s: f32,
+    pivot: Vec3,
+    pub axis: Vec3,
+    pub c: f32,
+    pub s: f32,
+    shift: Vec3,
+    pub leaned_dir: Vec3,
+}
+
+impl StaffHold {
+    // A point of the staff at rest (his frame), as held.
+    #[inline]
+    pub fn at(self, q: Vec3) -> Vec3 {
+        let leaned = staff_foot + rotate_about(vec(0.0, 0.0, 1.0), self.tilt_c, self.tilt_s, q - staff_foot);
+        self.pivot + rotate_about(self.axis, self.c, self.s, leaned - self.pivot) + self.shift
+    }
+}
+
+#[inline]
+pub fn staff_hold(prm: Params, dr: Drive, fl: Flight) -> StaffHold {
+    let groove = saturate(dr.groove);
+    let on_beat = 0.5 + 0.5 * (2.0 * PI * dr.beat).cos();
+    let sway = 0.05 * groove * (PI * dr.beat).sin();
+    let lean = clamp(-0.15, 0.15, prm.lean * fl.turn) + sway;
+    // The staff leans with him, half as far, tilting about its foot (a shear
+    // of lean per unit height is a tilt of atan lean).
+    let tilt = -((0.5 * lean).atan());
+    let leaned = move |q: Vec3| staff_foot + rotate_about(vec(0.0, 0.0, 1.0), tilt.cos(), tilt.sin(), q - staff_foot);
+    let leaned_dir = rotate_about(vec(0.0, 0.0, 1.0), tilt.cos(), tilt.sin(), staff_dir());
+    // Casting: the staff turns about his grip to lead with the orb (raised a
+    // little above the aim) and is pushed forward, with a thrust on each cast.
+    let aim = normalise(vec(dr.sx, dr.sy, dr.sz) + vec(0.0, 0.0, 1e-4));
+    let want = normalise(aim + vec(0.0, 0.9, 0.0));
+    let k = cross(leaned_dir, want);
+    let staff_axis = if length(k) > 1e-4 { normalise(k) } else { vec(1.0, 0.0, 0.0) };
+    let angle = 0.85 * dr.staff * clamp(-1.0, 1.0, dot(leaned_dir, want)).acos();
+    let kick = dr.staff * (-12.0 * dr.flash).exp();
+    let staff_pivot = leaned(staff_at(grip_height));
+    // Aiming to his right (local -x), he brings the staff across in front of
+    // his chest, the further the more he aims that way.
+    let across = dr.staff * smoothstep(0.0, 0.7, -aim.x);
+    // (dancing, the staff lifts between beats and taps down on them)
+    let staff_shift = scale(0.16 * dr.staff + 0.07 * kick, normalise(vec(aim.x, 0.0, aim.z) + vec(0.0, 0.0, 1e-4)))
+        + vec(-0.6 * across, 0.08 * dr.staff + 0.05 * across + 0.035 * groove * (1.0 - on_beat) * (1.0 - dr.staff), 0.22 * across);
+    let (staff_cos, staff_sin) = (angle.cos(), angle.sin());
+    StaffHold { tilt_c: tilt.cos(), tilt_s: tilt.sin(), pivot: staff_pivot, axis: staff_axis, c: staff_cos, s: staff_sin, shift: staff_shift, leaned_dir }
+}
+
+// The orb as he holds the staff (his frame), at `secs`.
+#[inline]
+pub fn held_orb(prm: Params, dr: Drive, secs: f32) -> Vec3 {
+    staff_hold(prm, dr, flight_of(prm, dr, secs)).at(orb_pos())
+}
+
 pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let tm = loop_angle(secs);
     let fl = flight_of(prm, dr, secs);
@@ -207,28 +267,9 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let head = vec(0.0, 0.012 * bd - 0.04 * dip, 0.007 * bd + 0.025 * dip) + shift(1.6);
     let l_shoulder = vec(0.2, 1.33, 0.0) + lift;
     let r_shoulder = vec(-0.2, 1.33, 0.0) + lift;
-    // The staff leans with him, half as far, tilting about its foot (a shear
-    // of lean per unit height is a tilt of atan lean).
-    let tilt = -((0.5 * lean).atan());
-    let leaned = move |q: Vec3| staff_foot + rotate_about(vec(0.0, 0.0, 1.0), tilt.cos(), tilt.sin(), q - staff_foot);
-    let leaned_dir = rotate_about(vec(0.0, 0.0, 1.0), tilt.cos(), tilt.sin(), staff_dir());
-    // Casting: the staff turns about his grip to lead with the orb (raised a
-    // little above the aim) and is pushed forward, with a thrust on each cast.
-    let aim = normalise(vec(dr.sx, dr.sy, dr.sz) + vec(0.0, 0.0, 1e-4));
-    let want = normalise(aim + vec(0.0, 0.9, 0.0));
-    let k = cross(leaned_dir, want);
-    let staff_axis = if length(k) > 1e-4 { normalise(k) } else { vec(1.0, 0.0, 0.0) };
-    let angle = 0.85 * dr.staff * clamp(-1.0, 1.0, dot(leaned_dir, want)).acos();
-    let kick = dr.staff * (-12.0 * dr.flash).exp();
-    let staff_pivot = leaned(staff_at(grip_height));
-    // Aiming to his right (local -x), he brings the staff across in front of
-    // his chest, the further the more he aims that way.
-    let across = dr.staff * smoothstep(0.0, 0.7, -aim.x);
-    // (dancing, the staff lifts between beats and taps down on them)
-    let staff_shift = scale(0.16 * dr.staff + 0.07 * kick, normalise(vec(aim.x, 0.0, aim.z) + vec(0.0, 0.0, 1e-4)))
-        + vec(-0.6 * across, 0.08 * dr.staff + 0.05 * across + 0.035 * groove * (1.0 - on_beat) * (1.0 - dr.staff), 0.22 * across);
-    let (staff_cos, staff_sin) = (angle.cos(), angle.sin());
-    let held = move |q: Vec3| staff_pivot + rotate_about(staff_axis, staff_cos, staff_sin, leaned(q) - staff_pivot) + staff_shift;
+    let hold = staff_hold(prm, dr, fl);
+    let held = move |q: Vec3| hold.at(q);
+    let (staff_axis, staff_cos, staff_sin, leaned_dir) = (hold.axis, hold.c, hold.s, hold.leaned_dir);
     // (that, as a rotation and offset)
     let staff_t = held(splat(0.0));
     let column = move |e: Vec3| held(e) - staff_t;

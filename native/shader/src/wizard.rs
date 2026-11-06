@@ -61,7 +61,8 @@ pub fn sample(prm: Params, dr: Drive, spells: &[f32], n_spells: i32, target: Vec
     // the spells shine in front of whatever the ray sees
     let (ro, rd) = camera_ray(target, vw, h, yaw, pitch, dst, dr.shoulder, x, y);
     let fl = flight_of(prm, dr, tm);
-    let c = c + spell_glow(prm, spells, n_spells, tm, to_world(fl, ro), to_world_dir(fl, rd), seen);
+    let orb = to_world(fl, held_orb(prm, dr, tm));
+    let c = c + spell_glow(prm, spells, n_spells, tm, to_world(fl, ro), to_world_dir(fl, rd), seen, orb);
     (finish_pixel(prm, vw, h, x, y, c), seen)
 }
 

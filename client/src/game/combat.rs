@@ -25,6 +25,7 @@ pub struct Moment {
     pub dt: f32, // 0 while paused
     pub time: f32,
     pub him: V3,    // where he is
+    pub vel: V3,    // and how fast he goes (a fire bolt is carried along by it)
     pub origin: V3, // his orb
     pub dir: V3,    // where he aims
     pub drawn: bool, // spells can be drawn (always, here)
@@ -162,7 +163,7 @@ impl Combat {
                     spells.since_cast = 0.0;
                 }
             } else if spells.charge >= 0.0 {
-                spells.cast_fire(m.origin, m.dir, spells.charge / CHARGE_TIME, rng);
+                spells.cast_fire(m.origin, m.dir, spells.charge / CHARGE_TIME, m.vel, rng);
                 spells.charge = -1.0;
                 self.sfx.push(sfx::here(CAST_SOUND[FIRE as usize]));
             }
@@ -333,6 +334,7 @@ mod tests {
             dt: 1.0 / 60.0,
             time: 0.0,
             him: [0.0, 12.0, 0.0],
+            vel: [0.0; 3],
             origin: [0.5, 14.0, 0.5],
             dir: [0.0, 0.0, 1.0],
             drawn: true,
@@ -438,12 +440,14 @@ mod tests {
         let spent = MANA - c.mana.value;
         let want = SPELL_COST[FIRE as usize] + CHARGE_DRAIN * CHARGE_TIME;
         assert!((spent - want).abs() < 0.5, "{spent} {want}");
-        // let go: it flies, faster for its charge
-        c.update(&Moment { casting: false, n: 0, ..moment() }, &mut s, &mut rng);
+        // let go: it flies, faster for its charge, and carried along by
+        // his own velocity; its charge, for the renderer, in its seed
+        c.update(&Moment { casting: false, n: 0, vel: [5.0, 0.0, 0.0], ..moment() }, &mut s, &mut rng);
         assert_eq!(s.charge, -1.0);
         assert_eq!(s.count(), 1);
         let bolt = s.pack();
-        assert!((bolt[6] - 30.0 * 1.6).abs() < 1e-3, "{}", bolt[6]);
+        assert!((bolt[4] - 5.0).abs() < 1e-3 && (bolt[6] - 30.0 * 1.6).abs() < 1e-3, "{:?}", &bolt[4..7]);
+        assert_eq!((bolt[9] as i32) / 100000, 100);
     }
 
     #[test]

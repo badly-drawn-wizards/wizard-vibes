@@ -752,6 +752,15 @@ impl App {
             for (k, v) in &out.overrides {
                 values.0.insert(k.clone(), v.clone());
             }
+            // his orb as the renderer poses it (banked: see Game::set_orb),
+            // for spells to leave from
+            if let Some(sh) = &self.shader {
+                if let Some((prm, dr)) = host_records(sh, &values, &out.drive) {
+                    let fl = wizard_shader::rig::flight_of(prm, dr, out.time);
+                    let o = wizard_shader::world::roll(-fl.bank, wizard_shader::rig::held_orb(prm, dr, out.time));
+                    self.game.set_orb([o.x, o.y, o.z]);
+                }
+            }
             // the collision probe, on the CPU (the shader crate's code)
             if let (Some(req), Some(sh)) = (&out.probe, &self.shader) {
                 if let Some((prm, dr)) = host_records(sh, &values, &out.drive) {

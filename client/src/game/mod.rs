@@ -102,6 +102,11 @@ pub struct Game {
     // the camera over his shoulder (0..1, easing in as he flies and out as
     // he stands on the path)
     shoulder: f32,
+    // his orb as the renderer last posed it (his frame, before his heading:
+    // see set_orb), and where he was last step and how fast he went
+    orb: V3,
+    last_pos: Option<V3>,
+    vel: V3,
     // the view's area, as of the last step (the HUD goes round it)
     view: Option<Rect>,
     // when the defeat panel appeared (it fades in)
@@ -155,6 +160,9 @@ impl Game {
             menu: None,
             pad_connected: false,
             shoulder: 0.0,
+            orb: [0.55, 2.1, 0.5],
+            last_pos: None,
+            vel: [0.0; 3],
             view: None,
             defeat_since: None,
         };
@@ -275,13 +283,20 @@ impl Game {
         if self.mode.fight() { params.f32("enemies").clamp(0.0, 6.0) as usize } else { 0 }
     }
 
+    // Where the renderer has his orb (posed as he holds the staff, and
+    // banked, but not yet turned to his heading nor moved to where he is),
+    // so spells leave from it: from the app, each frame.
+    pub fn set_orb(&mut self, orb: V3) {
+        self.orb = orb;
+    }
+
     // The orb, and the way to cast from it, in the world: towards the point
     // AIM_AT along the camera's view (from over his shoulder, the view's
     // centre, where the crosshair is, is not in line with the orb).
     fn cast_from(&self) -> (V3, V3) {
         const AIM_AT: f32 = 25.0;
         let (pos, heading) = self.flight.place(self.time);
-        let orb = [0.55, 2.1, 0.5]; // the orb, in his frame (orb_pos in fut/rig.fut)
+        let orb = self.orb;
         let aim = vec::add(self.orbit.eye(self.shoulder), vec::scale(AIM_AT, self.orbit.view_dir()));
         let dir = vec::normalise(vec::sub(aim, orb));
         (vec::add(pos, turn(heading, orb)), turn(heading, dir))
@@ -422,10 +437,19 @@ impl Game {
         let pad_cast = pad.is_some_and(|p| p.cast);
         let game_dt = if self.paused { 0.0 } else { dt };
         let (origin, dir) = self.cast_from();
+        // (how fast he goes: from where he was last step; a jump, as the
+        // mode changes, not counted)
+        let him = self.flight.place(self.time).0;
+        if game_dt > 0.0 {
+            let v = self.last_pos.map_or([0.0; 3], |p| vec::scale(1.0 / game_dt, vec::sub(him, p)));
+            self.vel = if vec::len(v) < 60.0 { v } else { [0.0; 3] };
+            self.last_pos = Some(him);
+        }
         let moment = Moment {
             dt: game_dt,
             time: self.time,
-            him: self.flight.place(self.time).0,
+            him,
+            vel: self.vel,
             origin,
             dir,
             drawn: true,

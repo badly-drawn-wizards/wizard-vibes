@@ -5,8 +5,9 @@
 //
 //   kind, x, y, z, a, b, c, age, life (seconds), seed (an integer)
 //
-//   spell_fire    a bolt at (x, y, z) moving at velocity (a, b, c) (a
-//                 charged one faster, and bigger: by its speed over 30)
+//   spell_fire    a bolt at (x, y, z) moving at velocity (a, b, c); its
+//                 charge (0..1, bigger) in hundredths, as its seed's
+//                 hundred-thousands
 //   spell_strike  lightning striking the ground at (x, y, z) from height b
 //   spell_wind    a blade at (x, y, z) moving at (a, b, c)
 //   spell_burst   a fire bolt's explosion at (x, y, z), a the bolt's
@@ -15,8 +16,9 @@
 //                 was moving at (a, b, c)
 //   spell_mark    where an enemy's strike will land, (x, y, z), when its
 //                 life is up (it then becomes the strike, from height b)
-//   spell_charge  a fire bolt being charged at the orb, (x, y, z): its
-//                 charge so far age / life
+//   spell_charge  a fire bolt being charged at the orb (where he holds it
+//                 this frame: the slot's position unused), its charge so
+//                 far age / life
 //
 // Every spell fades out over the last part of its life; the seed makes each
 // one a little different. Any other kind is an empty slot. Positions are in
@@ -110,7 +112,7 @@ pub fn glow_line(r: f32, h: f32, dist: f32) -> (f32, f32) {
 // The light one spell (in slot i) adds along the ray, taking the slot's
 // values as scalars: spell_glow sums it over the slots.
 #[inline(never)]
-pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tmax: f32, i: i32, kind: i32, p: Vec3, q: Vec3, age: f32, life: f32, seed: i32) -> Vec3 {
+pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tmax: f32, orb: Vec3, i: i32, kind: i32, p: Vec3, q: Vec3, age: f32, life: f32, seed: i32) -> Vec3 {
     let fade = smoothstep(life, 0.6 * life, age);
     let rnd = move |n: i32| hash2(seed.wrapping_add(n.wrapping_mul(7919)), 23);
     // (glows fade with the fog, and with depth behind what the ray hits,
@@ -119,8 +121,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
     let seen = move |t: f32, behind: f32, size: f32| (1.0 - fog_amount(fog, view_distance, t)) * (-behind / size).exp();
     if kind == spell_fire {
         // a ball with a short trail behind it, flickering (bigger, charged)
-        let k = clamp(1.0, 1.7, length(q) / 30.0);
-        let k = k * k;
+        let k = 1.0 + 1.9 * saturate((seed / 100000) as f32 / 100.0);
         let tail = p - scale(0.06, q);
         let (dist, t, behind) = ray_segment(o, d, tmax, tail, p);
         let (core, halo) = glow_line(0.12 * k, 0.8 * k, dist);
@@ -135,6 +136,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         // the fuller it is, embers circling in to it
         let f = saturate(age / life);
         let rad = 0.05 + 0.2 * f;
+        let p = orb;
         let (dist, t, behind) = ray_segment(o, d, tmax, p, p);
         let (core, halo) = glow_line(rad, 2.0 * rad, dist);
         let flick = 0.8 + 0.2 * (secs * (30.0 + 40.0 * f)).sin();
@@ -333,9 +335,10 @@ fn at(spells: &[f32], i: i32, j: i32) -> f32 {
 
 // The light the spells add along the world-space ray o + t d, t in
 // [0, tmax] (nearer than whatever the ray hits), dimmed by the fog: the
-// first n slots of spells (n at most spells.len() / spell_stride).
+// first n slots of spells (n at most spells.len() / spell_stride); `orb`
+// where his orb is (world), for a charge.
 #[inline]
-pub fn spell_glow(prm: Params, spells: &[f32], n: i32, secs: f32, o: Vec3, d: Vec3, tmax: f32) -> Vec3 {
+pub fn spell_glow(prm: Params, spells: &[f32], n: i32, secs: f32, o: Vec3, d: Vec3, tmax: f32, orb: Vec3) -> Vec3 {
     let tmax = tmax.minimum(prm.view_distance);
     let mut c = splat(0.0);
     let mut i = 0;
@@ -347,6 +350,7 @@ pub fn spell_glow(prm: Params, spells: &[f32], n: i32, secs: f32, o: Vec3, d: Ve
             o,
             d,
             tmax,
+            orb,
             i,
             ftoi(at(spells, i, 0)),
             vec(at(spells, i, 1), at(spells, i, 2), at(spells, i, 3)),
