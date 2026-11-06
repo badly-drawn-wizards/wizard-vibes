@@ -9,7 +9,7 @@
 // while the old one keeps drawing, then swapped in. The app's own code is
 // hot-patched by Subsecond under `dx serve --hotpatch` (see README.md).
 
-use crate::i18n::tr;
+use crate::i18n::text;
 use crate::audio::Audio;
 use crate::game::{Game, LEVELS, Level};
 use crate::params::{Params, Schema};
@@ -382,13 +382,13 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.bar_open {
                         let status = match (&self.shader, self.building || self.compiling()) {
-                            (_, true) => tr("compiling…").to_string(),
-                            (None, _) => tr("loading…").to_string(),
+                            (_, true) => text().bar_compiling().to_string(),
+                            (None, _) => text().bar_loading().to_string(),
                             (Some(s), _) => format!("{} · {}", &s.version[..8], if s.spirv { "SPIR-V" } else { "WGSL" }),
                         };
                         let size = self.image.as_ref().map(|(t, _)| format!(" · {}×{}", t.width(), t.height())).unwrap_or_default();
-                        let scale = format!(" · {:.0}%{}", 100.0 * self.scale.get(), if self.scale.dynamic { tr(" dynamic") } else { "" });
-                        let state = format!("{}{}", if self.game.paused() { tr(" · paused") } else { "" }, if self.game.pad_connected() { tr(" · controller") } else { "" });
+                        let scale = format!(" · {:.0}%{}", 100.0 * self.scale.get(), if self.scale.dynamic { text().bar_dynamic() } else { "" });
+                        let state = format!("{}{}", if self.game.paused() { text().bar_paused() } else { "" }, if self.game.pad_connected() { text().bar_controller() } else { "" });
                         ui.monospace(format!("{status}{size}{scale} · {:>5.1} fps{state}", self.fps));
                         ui.separator();
                         self.audio.toggles(ui);
@@ -396,7 +396,7 @@ impl App {
                         // (room for three digits, so it stays put)
                         ui.monospace(format!("{:>3.0} fps", self.fps));
                     }
-                    if crate::game::hud::triangle(ui, self.bar_open).on_hover_text(tr(if self.bar_open { "Fold the bar" } else { "Unfold the bar" })).clicked() {
+                    if crate::game::hud::triangle(ui, self.bar_open).on_hover_text(if self.bar_open { text().bar_fold() } else { text().bar_unfold() }).clicked() {
                         self.bar_open = !self.bar_open;
                     }
                 });
@@ -422,9 +422,9 @@ impl App {
         }
         self.nav.begin();
         let nav = &mut self.nav;
-        let names = ["Settings", "Controls", "Parameters"].map(tr);
+        let names = [text().pause_settings(), text().pause_controls(), text().pause_parameters()];
         let pad = self.game.device() == crate::game::spellbar::Device::Pad;
-        egui::Window::new(tr("Paused"))
+        egui::Window::new(text().pause_title())
             .id(egui::Id::unique("pause-menu"))
             .order(egui::Order::Foreground)
             .collapsible(false)
@@ -467,7 +467,7 @@ impl App {
                             egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| p.ui(ui, secs, nav));
                         }
                         None => {
-                            ui.label(tr("(the parameters come with the shader)"));
+                            ui.label(text().pause_parameters_with_shader());
                         }
                     },
                 }
@@ -479,10 +479,10 @@ impl App {
     // The settings tab: a row of the navigation for each setting.
     fn settings(game: &mut Game, params: &mut Option<Params>, audio: &mut Audio, scale: &mut crate::scale::RenderScale, nav: &mut crate::nav::Nav, ui: &mut egui::Ui) {
         egui::Grid::new("settings").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
-            ui.label(tr("Language"));
+            ui.label(text().settings_language());
             nav.row();
             ui.horizontal(|ui| {
-                for l in crate::i18n::LANGS {
+                for l in crate::i18n::Lang::ALL {
                     let r = crate::game::hud::fill_toggle(ui, l.name(), crate::i18n::lang() == l);
                     nav.item(ui, &r);
                     if r.clicked() {
@@ -492,27 +492,27 @@ impl App {
             });
             ui.end_row();
 
-            ui.label(tr("Mode"));
+            ui.label(text().settings_mode());
             nav.row();
             ui.horizontal(|ui| game.mode_ui(ui, nav));
             ui.end_row();
 
-            ui.label(tr("Enemies"));
+            ui.label(text().settings_enemies());
             nav.row();
             ui.horizontal(|ui| game.sides_ui(ui, nav));
             ui.end_row();
 
-            ui.label(tr("Camera"));
+            ui.label(text().settings_camera());
             nav.row();
             ui.horizontal(|ui| game.camera_ui(ui, nav));
             ui.end_row();
 
-            ui.label(tr("Platform"));
+            ui.label(text().settings_platform());
             nav.row();
             ui.horizontal(|ui| {
                 if let Some(p) = params.as_mut() {
                     let platform = p.get("platform").map(|v| v.f32() as usize).unwrap_or(0);
-                    for (i, n) in ["Rock", "Ice", "Magic carpet"].map(tr).iter().enumerate() {
+                    for (i, n) in [text().platform_rock(), text().platform_ice(), text().platform_magic_carpet()].iter().enumerate() {
                         let r = crate::game::hud::fill_toggle(ui, n, platform == i);
                         nav.item(ui, &r);
                         if r.clicked() {
@@ -523,24 +523,24 @@ impl App {
             });
             ui.end_row();
 
-            ui.label(tr("Song"));
+            ui.label(text().settings_song());
             nav.row();
             audio.songs(ui, nav);
             ui.end_row();
 
             audio.settings(ui, nav);
 
-            ui.label(tr("Quality"));
+            ui.label(text().settings_quality());
             nav.row();
             ui.horizontal(|ui| game.quality_ui(ui, nav));
             ui.end_row();
 
             // the render scale: dynamic, or a slider by hand (which shows
             // the dynamic scale too, and moved, takes over)
-            ui.label(tr("Render scale"));
+            ui.label(text().settings_render_scale());
             nav.row();
             ui.horizontal(|ui| {
-                let r = crate::game::hud::fill_toggle(ui, tr("dynamic"), scale.dynamic).on_hover_text(tr("Scale the resolution to keep the target frame rate"));
+                let r = crate::game::hud::fill_toggle(ui, text().settings_dynamic(), scale.dynamic).on_hover_text(text().settings_dynamic_tip());
                 nav.item(ui, &r);
                 if r.clicked() {
                     let on = !scale.dynamic;
@@ -556,7 +556,7 @@ impl App {
             });
             ui.end_row();
 
-            ui.label(tr("Target fps"));
+            ui.label(text().settings_target_fps());
             nav.row();
             ui.horizontal(|ui| {
                 let mut fps = scale.target_fps;

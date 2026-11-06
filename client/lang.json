@@ -1,0 +1,846 @@
+{
+  "en": {
+    "lang_name": "English",
+    "pause": {
+      "title": "Paused",
+      "settings": "Settings",
+      "controls": "Controls",
+      "parameters": "Parameters",
+      "parameters_with_shader": "(the parameters come with the shader)"
+    },
+    "tree": {
+      "title": "Skill tree",
+      "next_level": "Next level: {souls} souls",
+      "learnt": "Learnt in full",
+      "needs": "Needs {skill}",
+      "learn": "Learn",
+      "back": "Back"
+    },
+    "settings": {
+      "language": "Language",
+      "mode": "Mode",
+      "camera": "Camera",
+      "enemies": "Enemies",
+      "platform": "Platform",
+      "song": "Song",
+      "volume": "Volume",
+      "music": "Music",
+      "effects": "Effects",
+      "on": "on",
+      "off": "off",
+      "quality": "Quality",
+      "render_scale": "Render scale",
+      "dynamic": "dynamic",
+      "target_fps": "Target fps",
+      "dynamic_tip": "Scale the resolution to keep the target frame rate"
+    },
+    "sides": {
+      "one_vs_all": "1 vs all",
+      "one_vs_all_tip": "The enemies all fight him",
+      "free_for_all": "Free for all",
+      "free_for_all_tip": "The enemies fight each other too"
+    },
+    "platform": {
+      "rock": "Rock",
+      "ice": "Ice",
+      "magic_carpet": "Magic carpet"
+    },
+    "camera": {
+      "over_shoulder": "Over the shoulder",
+      "over_shoulder_tip": "The camera looks past his right shoulder",
+      "centred": "Centred",
+      "centred_tip": "The camera looks at him, centred",
+      "picture": "Picture",
+      "picture_tip": "Hold the scene still and fly the camera freely to frame a picture (Escape to come back)"
+    },
+    "picture": {
+      "title": "Picture mode"
+    },
+    "audio": {
+      "music_on_or_off": "Music on or off (M)",
+      "effects_on_or_off": "Sound effects on or off",
+      "no_sound": "No sound: {error}",
+      "music": "music",
+      "fx": "fx",
+      "music_on": "Music on (M)",
+      "music_off": "Music off (M)",
+      "effects_on": "Sound effects on",
+      "effects_off": "Sound effects off"
+    },
+    "mode": {
+      "fixed": "Fixed",
+      "flight": "Flight",
+      "fight": "Fight",
+      "fixed_tip": "Fixed: on the flight path",
+      "flight_tip": "Flight: free flight",
+      "fight_tip": "Fight: enemies about",
+      "cycles": "{mode} (F cycles)"
+    },
+    "bar": {
+      "mode_tip": "Mode (F)",
+      "compiling": "compiling…",
+      "loading": "loading…",
+      "paused": " · paused",
+      "controller": " · controller",
+      "dynamic": " dynamic",
+      "fold": "Fold the bar",
+      "unfold": "Unfold the bar"
+    },
+    "quality": {
+      "low": "Low",
+      "med": "Med",
+      "high": "High",
+      "tip": "Quality: {level}{loading}",
+      "loading": " (loading…)"
+    },
+    "controls": {
+      "keyboard": "Keyboard",
+      "controller": "Controller",
+      "fly": "Fly (controller)",
+      "camera": "Camera (click to take the mouse)",
+      "mouse_wheel": "mouse · wheel",
+      "try_again": "Try again (defeated)",
+      "swap_xy": "Swap X and Y",
+      "swap_xy_tip": "For controllers that report X and Y the other way round",
+      "reset": "Reset to defaults",
+      "press": "press…",
+      "waiting_tip": "Press a key, or a button (Escape gives up)",
+      "choose_tip": "Choose, then press the key or button to bind"
+    },
+    "action": {
+      "forward": "Forward",
+      "back": "Back",
+      "left": "Left",
+      "right": "Right",
+      "climb": "Climb",
+      "descend": "Descend",
+      "dash": "Dash",
+      "cast": "Cast",
+      "shield": "Shield (hold)",
+      "zoom_in": "Zoom in",
+      "zoom_out": "Zoom out",
+      "pause": "Pause / menu",
+      "spell_slot": "Spell slot {n}"
+    },
+    "mouse": {
+      "left": "Left click",
+      "right": "Right click",
+      "middle": "Middle click",
+      "mouse4": "Mouse 4",
+      "mouse5": "Mouse 5"
+    },
+    "spell": {
+      "fire_bolt": "Fire bolt",
+      "lightning_strike": "Lightning strike",
+      "wind_blade": "Wind blade",
+      "healing": "Healing",
+      "frost_lance": "Frost lance",
+      "arcane_missiles": "Arcane missiles",
+      "meteor": "Meteor",
+      "gravity_well": "Gravity well",
+      "spirit_familiar": "Spirit familiar"
+    },
+    "hud": {
+      "health": "Health",
+      "mana": "Mana"
+    },
+    "defeat": {
+      "title": "Defeated",
+      "try_again": "Try again",
+      "by_fire": "Burnt to cinders",
+      "by_lightning": "Struck down",
+      "by_wind": "Torn apart by the wind",
+      "undone": "Undone",
+      "none_defeated": "No enemies defeated",
+      "one_defeated": "1 enemy defeated",
+      "many_defeated": "{n} enemies defeated"
+    },
+    "params": {
+      "copy_changes": "Copy changes",
+      "copy_changes_tip": "Every value that differs from its default, as JSON",
+      "reset_all": "Reset all",
+      "copied": "copied",
+      "reset": "Reset",
+      "reset_group": "Reset {group}",
+      "compile_time": "Compile-time: changing it rebuilds the shader",
+      "compile_time_fixed": "Compile-time: fixed without the dev server",
+      "recompile": "Recompile",
+      "recompile_n": "Recompile ({n})",
+      "recompile_tip": "Rebuild the shader with the compile-time parameters changed (marked ●)",
+      "nothing_to_recompile": "Nothing changed to recompile",
+      "changed_tip": "Changed: Recompile to rebuild the shader with it"
+    },
+    "loadout": {
+      "title": "Loadout",
+      "empty": "(empty)",
+      "back": "Back"
+    },
+    "skill": {
+      "soul": {
+        "name": "Soul bond",
+        "what": "Souls restore 5 more mana"
+      },
+      "vitality": {
+        "name": "Vitality",
+        "what": "2 more health"
+      },
+      "healing": {
+        "what": "Unlocks healing (channelled)"
+      },
+      "mending": {
+        "name": "Mending",
+        "what": "Healing 30% faster"
+      },
+      "well": {
+        "name": "Mana well",
+        "what": "20 more mana"
+      },
+      "flow": {
+        "name": "Mana flow",
+        "what": "Mana refills 25% faster"
+      },
+      "kindling": {
+        "name": "Kindling",
+        "what": "Fire bolts charge 25% faster"
+      },
+      "inferno": {
+        "name": "Inferno",
+        "what": "Fire bursts reach 20% further"
+      },
+      "wind": {
+        "what": "Unlocks the wind blades"
+      },
+      "cool": {
+        "name": "Cool winds",
+        "what": "Wind blades heat 15% less"
+      },
+      "lightning": {
+        "what": "Unlocks the lightning strike"
+      },
+      "static": {
+        "name": "Static",
+        "what": "Lightning locks on 20% sooner"
+      },
+      "slot": {
+        "name": "Spell slot"
+      },
+      "slot2": {
+        "what": "A second spell slot"
+      },
+      "slot3": {
+        "what": "A third spell slot"
+      },
+      "slot4": {
+        "what": "A fourth spell slot"
+      },
+      "frost": {
+        "what": "Unlocks the frost lance"
+      },
+      "arcane": {
+        "what": "Unlocks the arcane missiles"
+      },
+      "meteor": {
+        "what": "Unlocks the meteor"
+      },
+      "gravity": {
+        "what": "Unlocks the gravity well"
+      },
+      "familiar": {
+        "what": "Unlocks the spirit familiar"
+      },
+      "reaper": {
+        "name": "Reaper",
+        "what": "One more soul from each defeat"
+      }
+    },
+    "group": {
+      "output": "Output",
+      "wizard": "Wizard",
+      "robe_body": "Robe & body",
+      "face": "Face",
+      "hat": "Hat",
+      "gear": "Gear",
+      "orb": "Orb",
+      "potions": "Potions",
+      "platform": "Platform",
+      "rock_ice_carpet": "Rock, ice & carpet",
+      "runes": "Runes",
+      "sky": "Sky",
+      "sky_stars": "Sky & stars",
+      "moon": "Moon",
+      "atmosphere": "Atmosphere",
+      "land": "Land",
+      "terrain": "Terrain",
+      "water": "Water",
+      "trees": "Trees",
+      "buildings": "Buildings",
+      "enemies": "Enemies",
+      "lighting": "Lighting",
+      "flight": "Flight",
+      "shader_recompiles": "Shader (recompiles)"
+    },
+    "param": {
+      "exposure": "Exposure",
+      "vignette": "Vignette",
+      "aa": "Anti-aliasing",
+      "aa_threshold": "AA edge contrast",
+      "view": "View",
+      "layers": "Layers",
+      "robe_colour": "Robe",
+      "robe_hem": "Robe hem radius",
+      "belt_height": "Belt height",
+      "breath": "Breathing",
+      "lean": "Lean into turns",
+      "skin_colour": "Skin",
+      "iris_colour": "Eyes",
+      "beard_tint": "Beard tint",
+      "brow_colour": "Eyebrows",
+      "hat_colour": "Hat",
+      "hat_droop": "Hat droop",
+      "band_height": "Hat band height",
+      "band_colour": "Hat band",
+      "star_colour": "Hat stars",
+      "star_glow": "Hat star glow",
+      "gold_colour": "Gold (cradle, buckle)",
+      "leather_colour": "Leather",
+      "tome_colour": "Tome",
+      "wood_colour": "Staff wood",
+      "orb_light": "Light",
+      "orb_glow": "Glow",
+      "orb_glow_extent": "Glow extent",
+      "orb_ior": "Index of refraction",
+      "orb_reflections": "Reflections",
+      "orb_glow_colour": "Glow colour",
+      "lightning": "Lightning brightness",
+      "shield_colour": "Shield",
+      "potion_light": "Light",
+      "potion_glow": "Glow",
+      "potion_colour_1": "Left",
+      "potion_colour_2": "Middle",
+      "potion_colour_3": "Right",
+      "platform": "Platform",
+      "rock_dark": "Dark bands",
+      "rock_light": "Light bands",
+      "rock_top": "Top",
+      "ice_colour": "Ice",
+      "carpet_colour": "Carpet",
+      "carpet_trim": "Carpet border",
+      "rune_glow": "Glow",
+      "rune_pulse": "Pulse",
+      "rune_colour": "Colour",
+      "sky_horizon": "Horizon",
+      "sky_zenith": "Zenith",
+      "star_density": "Star density",
+      "star_brightness": "Star brightness",
+      "twinkle": "Twinkle",
+      "moon_colour": "Colour",
+      "moon_strength": "Strength",
+      "moon_azimuth": "Azimuth",
+      "moon_elevation": "Elevation",
+      "moon_size": "Size",
+      "moon_brightness": "Disc brightness",
+      "moon_halo": "Halo",
+      "fog": "Fog",
+      "view_distance": "View distance",
+      "cloud_cover": "Cloud cover",
+      "cloud_density": "Cloud density",
+      "cloud_colour": "Cloud colour",
+      "moss_colour": "Moss",
+      "sand_colour": "Desert sand",
+      "stone_colour": "Stone",
+      "snow_colour": "Snow",
+      "snow_line": "Snow line",
+      "sea_level": "Sea level",
+      "river_width": "River width",
+      "water_colour": "Water",
+      "tree_density": "Trees",
+      "leaf_colour": "Leaves",
+      "needle_colour": "Pine needles",
+      "trunk_colour": "Bark",
+      "structure_density": "Buildings",
+      "brick_size": "Brick size",
+      "wall_colour": "Cottage walls",
+      "thatch_colour": "Cottage roofs",
+      "tower_colour": "Tower stone",
+      "slate_colour": "Tower roofs",
+      "sandstone_colour": "Pyramids",
+      "window_colour": "Window light",
+      "window_glow": "Window glow",
+      "enemies": "Enemies",
+      "enemy_seed": "Appearance seed",
+      "fill": "Sky fill",
+      "rim": "Rim",
+      "sheen": "Cloth sheen",
+      "bank": "Bank into turns",
+      "march_steps": "March steps",
+      "terrain_steps": "Terrain steps",
+      "shadow_steps": "Shadow steps",
+      "cloud_samples": "Cloud samples",
+      "draw_trees": "Trees (2-6 ms at 1080p)",
+      "full_enemies": "Enemies as detailed as him (slow)",
+      "orb_tendrils": "Lightning inside the orb",
+      "orb_arcs": "Lightning arcs",
+      "bolts_per_kind": "Bolts",
+      "max_spells": "Spells at once"
+    },
+    "option": {
+      "aa": {
+        "off": "Off",
+        "fxaa": "FXAA",
+        "edge_supersampling": "Edge supersampling"
+      },
+      "view": {
+        "shaded": "Shaded",
+        "normals": "Normals",
+        "albedo": "Albedo",
+        "ambient_occlusion": "Ambient occlusion"
+      },
+      "layers": {
+        "figure": "Figure",
+        "staff": "Staff",
+        "gear": "Gear",
+        "rock": "Rock",
+        "terrain": "Terrain",
+        "orb": "Orb",
+        "glow": "Glow",
+        "clouds": "Clouds",
+        "structures": "Structures",
+        "water": "Water",
+        "trees": "Trees",
+        "enemies": "Enemies"
+      },
+      "platform": {
+        "rock": "Rock",
+        "ice": "Ice",
+        "magic_carpet": "Magic carpet"
+      }
+    },
+    "doc": {
+      "platform": "What the wizard flies on (also in the top bar).",
+      "enemies": "Other wizards flying round him.",
+      "enemy_seed": "Picks each enemy's looks, platform and circle colour."
+    }
+  },
+  "es": {
+    "lang_name": "Español",
+    "pause": {
+      "title": "En pausa",
+      "settings": "Ajustes",
+      "controls": "Controles",
+      "parameters": "Parámetros",
+      "parameters_with_shader": "(los parámetros llegan con el shader)"
+    },
+    "tree": {
+      "title": "Árbol de habilidades",
+      "next_level": "Siguiente nivel: {souls} almas",
+      "learnt": "Aprendida del todo",
+      "needs": "Requiere {skill}",
+      "learn": "Aprender",
+      "back": "Volver"
+    },
+    "settings": {
+      "language": "Idioma",
+      "mode": "Modo",
+      "camera": "Cámara",
+      "enemies": "Enemigos",
+      "platform": "Plataforma",
+      "song": "Canción",
+      "volume": "Volumen",
+      "music": "Música",
+      "effects": "Efectos",
+      "on": "sí",
+      "off": "no",
+      "quality": "Calidad",
+      "render_scale": "Escala de render",
+      "dynamic": "dinámica",
+      "target_fps": "Fps objetivo",
+      "dynamic_tip": "Ajusta la resolución para mantener los fps objetivo"
+    },
+    "sides": {
+      "one_vs_all": "1 contra todos",
+      "one_vs_all_tip": "Todos los enemigos luchan contra él",
+      "free_for_all": "Todos contra todos",
+      "free_for_all_tip": "Los enemigos también luchan entre sí"
+    },
+    "platform": {
+      "rock": "Roca",
+      "ice": "Hielo",
+      "magic_carpet": "Alfombra mágica"
+    },
+    "camera": {
+      "over_shoulder": "Sobre el hombro",
+      "over_shoulder_tip": "La cámara mira por encima de su hombro derecho",
+      "centred": "Centrada",
+      "centred_tip": "La cámara lo mira, centrada",
+      "picture": "Foto",
+      "picture_tip": "Detiene la escena y deja volar la cámara para encuadrar una foto (Escape para volver)"
+    },
+    "picture": {
+      "title": "Modo foto"
+    },
+    "audio": {
+      "music_on_or_off": "Música sí o no (M)",
+      "effects_on_or_off": "Efectos de sonido sí o no",
+      "no_sound": "Sin sonido: {error}",
+      "music": "música",
+      "fx": "efectos",
+      "music_on": "Música activada (M)",
+      "music_off": "Música desactivada (M)",
+      "effects_on": "Efectos de sonido activados",
+      "effects_off": "Efectos de sonido desactivados"
+    },
+    "mode": {
+      "fixed": "Fijo",
+      "flight": "Vuelo",
+      "fight": "Combate",
+      "fixed_tip": "Fijo: en la ruta de vuelo",
+      "flight_tip": "Vuelo: vuelo libre",
+      "fight_tip": "Combate: hay enemigos",
+      "cycles": "{mode} (F cambia)"
+    },
+    "bar": {
+      "mode_tip": "Modo (F)",
+      "compiling": "compilando…",
+      "loading": "cargando…",
+      "paused": " · en pausa",
+      "controller": " · mando",
+      "dynamic": " dinámica",
+      "fold": "Plegar la barra",
+      "unfold": "Desplegar la barra"
+    },
+    "quality": {
+      "low": "Baja",
+      "med": "Media",
+      "high": "Alta",
+      "tip": "Calidad: {level}{loading}",
+      "loading": " (cargando…)"
+    },
+    "controls": {
+      "keyboard": "Teclado",
+      "controller": "Mando",
+      "fly": "Volar (mando)",
+      "camera": "Cámara (clic para tomar el ratón)",
+      "mouse_wheel": "ratón · rueda",
+      "try_again": "Reintentar (derrotado)",
+      "swap_xy": "Intercambiar X e Y",
+      "swap_xy_tip": "Para mandos que informan X e Y al revés",
+      "reset": "Restablecer",
+      "press": "pulsa…",
+      "waiting_tip": "Pulsa una tecla o un botón (Escape cancela)",
+      "choose_tip": "Elige y luego pulsa la tecla o el botón que asignar"
+    },
+    "action": {
+      "forward": "Adelante",
+      "back": "Atrás",
+      "left": "Izquierda",
+      "right": "Derecha",
+      "climb": "Subir",
+      "descend": "Bajar",
+      "dash": "Embestida",
+      "cast": "Lanzar",
+      "shield": "Escudo (mantener)",
+      "zoom_in": "Acercar",
+      "zoom_out": "Alejar",
+      "pause": "Pausa / menú",
+      "spell_slot": "Ranura {n}"
+    },
+    "mouse": {
+      "left": "Clic izquierdo",
+      "right": "Clic derecho",
+      "middle": "Clic central",
+      "mouse4": "Ratón 4",
+      "mouse5": "Ratón 5"
+    },
+    "spell": {
+      "fire_bolt": "Bola de fuego",
+      "lightning_strike": "Rayo",
+      "wind_blade": "Cuchilla de viento",
+      "healing": "Curación",
+      "frost_lance": "Lanza de escarcha",
+      "arcane_missiles": "Misiles arcanos",
+      "meteor": "Meteoro",
+      "gravity_well": "Pozo de gravedad",
+      "spirit_familiar": "Familiar espiritual"
+    },
+    "hud": {
+      "health": "Salud",
+      "mana": "Maná"
+    },
+    "defeat": {
+      "title": "Derrotado",
+      "try_again": "Reintentar",
+      "by_fire": "Reducido a cenizas",
+      "by_lightning": "Fulminado",
+      "by_wind": "Despedazado por el viento",
+      "undone": "Deshecho",
+      "none_defeated": "Ningún enemigo derrotado",
+      "one_defeated": "1 enemigo derrotado",
+      "many_defeated": "{n} enemigos derrotados"
+    },
+    "params": {
+      "copy_changes": "Copiar cambios",
+      "copy_changes_tip": "Cada valor distinto del predeterminado, en JSON",
+      "reset_all": "Restablecer todo",
+      "copied": "copiado",
+      "reset": "Restablecer",
+      "reset_group": "Restablecer {group}",
+      "compile_time": "De compilación: cambiarlo recompila el shader",
+      "compile_time_fixed": "De compilación: fijo sin el servidor de desarrollo",
+      "recompile": "Recompilar",
+      "recompile_n": "Recompilar ({n})",
+      "recompile_tip": "Recompila el shader con los parámetros de compilación cambiados (marcados con ●)",
+      "nothing_to_recompile": "Nada que recompilar",
+      "changed_tip": "Cambiado: Recompilar para recompilar el shader con él"
+    },
+    "loadout": {
+      "title": "Equipo de hechizos",
+      "empty": "(vacío)",
+      "back": "Volver"
+    },
+    "skill": {
+      "soul": {
+        "name": "Vínculo de almas",
+        "what": "Las almas restauran 5 más de maná"
+      },
+      "vitality": {
+        "name": "Vitalidad",
+        "what": "2 más de salud"
+      },
+      "healing": {
+        "what": "Desbloquea la curación (canalizada)"
+      },
+      "mending": {
+        "name": "Sanación",
+        "what": "Curación un 30% más rápida"
+      },
+      "well": {
+        "name": "Pozo de maná",
+        "what": "20 más de maná"
+      },
+      "flow": {
+        "name": "Flujo de maná",
+        "what": "El maná se recarga un 25% más rápido"
+      },
+      "kindling": {
+        "name": "Yesca",
+        "what": "Las bolas de fuego se cargan un 25% más rápido"
+      },
+      "inferno": {
+        "name": "Infierno",
+        "what": "Las explosiones de fuego llegan un 20% más lejos"
+      },
+      "wind": {
+        "what": "Desbloquea las cuchillas de viento"
+      },
+      "cool": {
+        "name": "Vientos frescos",
+        "what": "Las cuchillas de viento se calientan un 15% menos"
+      },
+      "lightning": {
+        "what": "Desbloquea el rayo"
+      },
+      "static": {
+        "name": "Estática",
+        "what": "El rayo fija el blanco un 20% antes"
+      },
+      "slot": {
+        "name": "Ranura de hechizo"
+      },
+      "slot2": {
+        "what": "Una segunda ranura de hechizo"
+      },
+      "slot3": {
+        "what": "Una tercera ranura de hechizo"
+      },
+      "slot4": {
+        "what": "Una cuarta ranura de hechizo"
+      },
+      "frost": {
+        "what": "Desbloquea la lanza de escarcha"
+      },
+      "arcane": {
+        "what": "Desbloquea los misiles arcanos"
+      },
+      "meteor": {
+        "what": "Desbloquea el meteoro"
+      },
+      "gravity": {
+        "what": "Desbloquea el pozo de gravedad"
+      },
+      "familiar": {
+        "what": "Desbloquea el familiar espiritual"
+      },
+      "reaper": {
+        "name": "Segador",
+        "what": "Un alma más por cada derrota"
+      }
+    },
+    "group": {
+      "output": "Salida",
+      "wizard": "Mago",
+      "robe_body": "Túnica y cuerpo",
+      "face": "Cara",
+      "hat": "Sombrero",
+      "gear": "Equipo",
+      "orb": "Orbe",
+      "potions": "Pociones",
+      "platform": "Plataforma",
+      "rock_ice_carpet": "Roca, hielo y alfombra",
+      "runes": "Runas",
+      "sky": "Cielo",
+      "sky_stars": "Cielo y estrellas",
+      "moon": "Luna",
+      "atmosphere": "Atmósfera",
+      "land": "Tierra",
+      "terrain": "Terreno",
+      "water": "Agua",
+      "trees": "Árboles",
+      "buildings": "Edificios",
+      "enemies": "Enemigos",
+      "lighting": "Iluminación",
+      "flight": "Vuelo",
+      "shader_recompiles": "Shader (recompila)"
+    },
+    "param": {
+      "exposure": "Exposición",
+      "vignette": "Viñeta",
+      "aa": "Antialiasing",
+      "aa_threshold": "Contraste de borde (AA)",
+      "view": "Vista",
+      "layers": "Capas",
+      "robe_colour": "Túnica",
+      "robe_hem": "Radio del bajo de la túnica",
+      "belt_height": "Altura del cinturón",
+      "breath": "Respiración",
+      "lean": "Inclinación en los giros",
+      "skin_colour": "Piel",
+      "iris_colour": "Ojos",
+      "beard_tint": "Tono de la barba",
+      "brow_colour": "Cejas",
+      "hat_colour": "Sombrero",
+      "hat_droop": "Caída del sombrero",
+      "band_height": "Altura de la cinta",
+      "band_colour": "Cinta del sombrero",
+      "star_colour": "Estrellas del sombrero",
+      "star_glow": "Brillo de las estrellas del sombrero",
+      "gold_colour": "Oro (soporte, hebilla)",
+      "leather_colour": "Cuero",
+      "tome_colour": "Libro",
+      "wood_colour": "Madera del bastón",
+      "orb_light": "Luz",
+      "orb_glow": "Brillo",
+      "orb_glow_extent": "Alcance del brillo",
+      "orb_ior": "Índice de refracción",
+      "orb_reflections": "Reflejos",
+      "orb_glow_colour": "Color del brillo",
+      "lightning": "Brillo del rayo",
+      "shield_colour": "Escudo",
+      "potion_light": "Luz",
+      "potion_glow": "Brillo",
+      "potion_colour_1": "Izquierda",
+      "potion_colour_2": "Centro",
+      "potion_colour_3": "Derecha",
+      "platform": "Plataforma",
+      "rock_dark": "Franjas oscuras",
+      "rock_light": "Franjas claras",
+      "rock_top": "Superficie",
+      "ice_colour": "Hielo",
+      "carpet_colour": "Alfombra",
+      "carpet_trim": "Borde de la alfombra",
+      "rune_glow": "Brillo",
+      "rune_pulse": "Pulso",
+      "rune_colour": "Color",
+      "sky_horizon": "Horizonte",
+      "sky_zenith": "Cénit",
+      "star_density": "Densidad de estrellas",
+      "star_brightness": "Brillo de las estrellas",
+      "twinkle": "Centelleo",
+      "moon_colour": "Color",
+      "moon_strength": "Intensidad",
+      "moon_azimuth": "Azimut",
+      "moon_elevation": "Elevación",
+      "moon_size": "Tamaño",
+      "moon_brightness": "Brillo del disco",
+      "moon_halo": "Halo",
+      "fog": "Niebla",
+      "view_distance": "Distancia de visión",
+      "cloud_cover": "Nubosidad",
+      "cloud_density": "Densidad de las nubes",
+      "cloud_colour": "Color de las nubes",
+      "moss_colour": "Musgo",
+      "sand_colour": "Arena del desierto",
+      "stone_colour": "Piedra",
+      "snow_colour": "Nieve",
+      "snow_line": "Cota de nieve",
+      "sea_level": "Nivel del mar",
+      "river_width": "Anchura de los ríos",
+      "water_colour": "Agua",
+      "tree_density": "Árboles",
+      "leaf_colour": "Hojas",
+      "needle_colour": "Agujas de pino",
+      "trunk_colour": "Corteza",
+      "structure_density": "Edificios",
+      "brick_size": "Tamaño del ladrillo",
+      "wall_colour": "Paredes de las casitas",
+      "thatch_colour": "Tejados de las casitas",
+      "tower_colour": "Piedra de las torres",
+      "slate_colour": "Tejados de las torres",
+      "sandstone_colour": "Pirámides",
+      "window_colour": "Luz de las ventanas",
+      "window_glow": "Brillo de las ventanas",
+      "enemies": "Enemigos",
+      "enemy_seed": "Semilla de apariencia",
+      "fill": "Luz del cielo",
+      "rim": "Contraluz",
+      "sheen": "Brillo de la tela",
+      "bank": "Alabeo en los giros",
+      "march_steps": "Pasos de marcha",
+      "terrain_steps": "Pasos del terreno",
+      "shadow_steps": "Pasos de sombra",
+      "cloud_samples": "Muestras de nubes",
+      "draw_trees": "Árboles (2-6 ms a 1080p)",
+      "full_enemies": "Enemigos tan detallados como él (lento)",
+      "orb_tendrils": "Rayos dentro del orbe",
+      "orb_arcs": "Arcos de rayos",
+      "bolts_per_kind": "Rayos",
+      "max_spells": "Hechizos a la vez"
+    },
+    "option": {
+      "aa": {
+        "off": "No",
+        "fxaa": "FXAA",
+        "edge_supersampling": "Supermuestreo de bordes"
+      },
+      "view": {
+        "shaded": "Sombreado",
+        "normals": "Normales",
+        "albedo": "Albedo",
+        "ambient_occlusion": "Oclusión ambiental"
+      },
+      "layers": {
+        "figure": "Figura",
+        "staff": "Bastón",
+        "gear": "Equipo",
+        "rock": "Roca",
+        "terrain": "Terreno",
+        "orb": "Orbe",
+        "glow": "Brillo",
+        "clouds": "Nubes",
+        "structures": "Estructuras",
+        "water": "Agua",
+        "trees": "Árboles",
+        "enemies": "Enemigos"
+      },
+      "platform": {
+        "rock": "Roca",
+        "ice": "Hielo",
+        "magic_carpet": "Alfombra mágica"
+      }
+    },
+    "doc": {
+      "platform": "En qué vuela el mago (también en la barra superior).",
+      "enemies": "Otros magos que vuelan a su alrededor.",
+      "enemy_seed": "Elige el aspecto, la plataforma y el color del círculo de cada enemigo."
+    }
+  }
+}

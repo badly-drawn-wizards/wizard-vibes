@@ -19,7 +19,7 @@ mod mixer;
 mod music;
 mod output;
 
-use crate::i18n::{tr, trf};
+use crate::i18n::text;
 use std::sync::Arc;
 
 use crate::types::{BuildInfo, MusicRequest, SfxEvent};
@@ -172,22 +172,22 @@ impl Audio {
 
     // The music and fx switches, for the top bar: filled when on.
     pub fn toggles(&mut self, ui: &mut egui::Ui) {
-        let off = self.failed.as_ref().map(|e| trf("No sound: {}", &[e]));
+        let off = self.failed.as_ref().map(|e| text().audio_no_sound(e));
         let enabled = off.is_none();
         let on = self.music.on && enabled;
-        let r = ui.add_enabled_ui(enabled, |ui| crate::game::hud::fill_toggle(ui, tr("music"), on)).inner;
+        let r = ui.add_enabled_ui(enabled, |ui| crate::game::hud::fill_toggle(ui, text().audio_music(), on)).inner;
         let r = match &off {
             Some(e) => r.on_disabled_hover_text(e),
-            None => r.on_hover_text(tr(if on { "Music on (M)" } else { "Music off (M)" })),
+            None => r.on_hover_text(if on { text().audio_music_on() } else { text().audio_music_off() }),
         };
         if r.clicked() {
             self.toggle_music();
         }
         let on = self.sfx_on && enabled;
-        let r = ui.add_enabled_ui(enabled, |ui| crate::game::hud::fill_toggle(ui, tr("fx"), on)).inner;
+        let r = ui.add_enabled_ui(enabled, |ui| crate::game::hud::fill_toggle(ui, text().audio_fx(), on)).inner;
         let r = match &off {
             Some(e) => r.on_disabled_hover_text(e),
-            None => r.on_hover_text(tr(if on { "Sound effects on" } else { "Sound effects off" })),
+            None => r.on_hover_text(if on { text().audio_effects_on() } else { text().audio_effects_off() }),
         };
         if r.clicked() {
             self.start();
@@ -199,22 +199,22 @@ impl Audio {
     // each): the master volume; the music, and the effects, each a switch
     // and a volume.
     pub fn settings(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
-        let off = self.failed.as_ref().map(|e| trf("No sound: {}", &[e]));
+        let off = self.failed.as_ref().map(|e| text().audio_no_sound(e));
         let enabled = off.is_none();
-        ui.label(tr("Volume"));
+        ui.label(text().settings_volume());
         nav.row();
         ui.add_enabled_ui(enabled, |ui| ui.horizontal(|ui| volume(ui, nav, &mut self.volumes.master)));
         ui.end_row();
         for music in [true, false] {
-            ui.label(tr(if music { "Music" } else { "Effects" }));
+            ui.label(if music { text().settings_music() } else { text().settings_effects() });
             nav.row();
             ui.add_enabled_ui(enabled, |ui| {
                 ui.horizontal(|ui| {
                     let on = enabled && if music { self.music.on } else { self.sfx_on };
-                    let r = crate::game::hud::fill_toggle(ui, tr(if on { "on" } else { "off" }), on);
+                    let r = crate::game::hud::fill_toggle(ui, if on { text().settings_on() } else { text().settings_off() }, on);
                     let r = match &off {
                         Some(e) => r.on_disabled_hover_text(e),
-                        None => r.on_hover_text(tr(if music { "Music on or off (M)" } else { "Sound effects on or off" })),
+                        None => r.on_hover_text(if music { text().audio_music_on_or_off() } else { text().audio_effects_on_or_off() }),
                     };
                     nav.item(ui, &r);
                     if r.clicked() {

@@ -9,7 +9,7 @@
 //
 // Colours are linear RGB.
 
-use crate::i18n::{tr, tr_key, trf};
+use crate::i18n::text;
 use crate::nav::Nav;
 use crate::types::{ParamValues, Value};
 use serde::Deserialize;
@@ -153,24 +153,24 @@ impl Params {
     pub fn ui(&mut self, ui: &mut egui::Ui, now: f64, nav: &mut Nav) {
         nav.row();
         ui.horizontal(|ui| {
-            let r = ui.button(tr("Copy changes")).on_hover_text(tr("Every value that differs from its default, as JSON"));
+            let r = ui.button(text().params_copy_changes()).on_hover_text(text().params_copy_changes_tip());
             nav.item(ui, &r);
             if r.clicked() {
                 let text = serde_json::to_string_pretty(&self.changes()).unwrap();
                 ui.ctx().copy_text(text);
-                self.copied = Some((tr("copied").into(), now));
+                self.copied = Some((crate::i18n::text().params_copied().into(), now));
             }
             // (rebuilds the shader with the dirty compile-time parameters)
             let dirty = self.pending.len();
             let r = ui
-                .add_enabled(dirty > 0 && self.can_rebuild, egui::Button::new(if dirty > 0 { trf("Recompile ({})", &[&dirty]) } else { tr("Recompile").to_string() }))
-                .on_hover_text(tr("Rebuild the shader with the compile-time parameters changed (marked ●)"))
-                .on_disabled_hover_text(tr(if self.can_rebuild { "Nothing changed to recompile" } else { "Compile-time: fixed without the dev server" }));
+                .add_enabled(dirty > 0 && self.can_rebuild, egui::Button::new(if dirty > 0 { text().params_recompile_n(dirty) } else { text().params_recompile().to_string() }))
+                .on_hover_text(text().params_recompile_tip())
+                .on_disabled_hover_text(if self.can_rebuild { text().params_nothing_to_recompile() } else { text().params_compile_time_fixed() });
             nav.item(ui, &r);
             if r.clicked() {
                 self.recompile = true;
             }
-            let r = ui.button(tr("Reset all"));
+            let r = ui.button(text().params_reset_all());
             nav.item(ui, &r);
             if r.clicked() {
                 let all: Vec<Param> = self.schema.params().into_iter().cloned().collect();
@@ -206,9 +206,9 @@ impl Params {
         let header = ui.horizontal(|ui| {
             let toggle = state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
             nav.item(ui, &toggle);
-            ui.strong(tr_key(&g.name));
+            ui.strong(crate::i18n::key(&g.name));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let r = ui.small_button("↺").on_hover_text(trf("Reset {}", &[&tr_key(&g.name)]));
+                let r = ui.small_button("↺").on_hover_text(text().params_reset_group(crate::i18n::key(&g.name)));
                 nav.item(ui, &r);
                 if r.clicked() {
                     let mut ps = vec![];
@@ -262,21 +262,21 @@ impl Params {
                 // (compile-time: starred; changed and not yet rebuilt, marked)
                 let dirty = self.dirty(&p.id);
                 let label = if dirty {
-                    egui::RichText::new(format!("● {} *", tr_key(&p.label))).color(crate::game::hud::FOCUS)
+                    egui::RichText::new(format!("● {} *", crate::i18n::key(&p.label))).color(crate::game::hud::FOCUS)
                 } else if p.compile {
-                    egui::RichText::new(format!("{} *", tr_key(&p.label)))
+                    egui::RichText::new(format!("{} *", crate::i18n::key(&p.label)))
                 } else {
-                    egui::RichText::new(tr_key(&p.label))
+                    egui::RichText::new(crate::i18n::key(&p.label))
                 };
                 let tip = if p.compile {
-                    tr(if enabled { "Compile-time: changing it rebuilds the shader" } else { "Compile-time: fixed without the dev server" })
+                    if enabled { text().params_compile_time() } else { text().params_compile_time_fixed() }
                 } else {
                     ""
                 };
                 let l = ui.label(label);
-                let l = if dirty { l.on_hover_text(tr("Changed: Recompile to rebuild the shader with it")) } else { l };
+                let l = if dirty { l.on_hover_text(text().params_changed_tip()) } else { l };
                 let l = match &p.doc {
-                    Some(d) => l.on_hover_text(tr_key(d)),
+                    Some(d) => l.on_hover_text(crate::i18n::key(d)),
                     None => l,
                 };
                 if !tip.is_empty() {
@@ -355,7 +355,7 @@ impl Params {
                     }
                 }
                 if v != p.default {
-                    let r = ui.small_button("↺").on_hover_text(tr("Reset"));
+                    let r = ui.small_button("↺").on_hover_text(text().params_reset());
                     nav.item(ui, &r);
                     if r.clicked() {
                         v = p.default.clone();
@@ -415,5 +415,5 @@ fn round(v: &Value) -> Value {
 // A parameter's options as shown (option.<id>.<option> in the language's
 // table; the options themselves are names in the shader's code).
 fn shown_options(p: &Param) -> Vec<String> {
-    p.options.clone().unwrap_or_default().iter().map(|o| tr_key(&format!("option.{}.{o}", p.id)).to_string()).collect()
+    p.options.clone().unwrap_or_default().iter().map(|o| crate::i18n::key(&format!("option.{}.{}", p.id, crate::i18n::snake(o))).to_string()).collect()
 }

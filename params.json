@@ -540,7 +540,7 @@
             "Magic carpet"
           ],
           "default": 0,
-          "doc": "param.platform.doc"
+          "doc": "doc.platform"
         }
       ]
     },
@@ -967,7 +967,7 @@
           "min": 0,
           "max": 6,
           "default": 5,
-          "doc": "param.enemies.doc"
+          "doc": "doc.enemies"
         },
         {
           "id": "enemy_seed",
@@ -976,7 +976,7 @@
           "min": 0,
           "max": 999,
           "default": 1,
-          "doc": "param.enemy_seed.doc"
+          "doc": "doc.enemy_seed"
         }
       ]
     },

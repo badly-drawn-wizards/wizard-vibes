@@ -3,13 +3,13 @@
 // before it from the root (the start of the game's incremental side). Kept
 // between runs, as "id:level" pairs. What the levels add up to: Boosts.
 
-use crate::i18n::tr;
+use crate::i18n::{text, Text};
 use std::collections::BTreeMap;
 
 pub struct Skill {
     pub id: &'static str,
-    pub name: &'static str, // (English: the i18n key)
-    pub what: &'static str, // a level's effect, likewise
+    pub name: fn(&dyn Text) -> &'static str,
+    pub what: fn(&dyn Text) -> &'static str, // a level's effect
     pub levels: u8,
     pub cost: u64, // the first level's; each after costs twice the one before
     pub needs: Option<&'static str>,
@@ -17,27 +17,27 @@ pub struct Skill {
 }
 
 pub const SKILLS: &[Skill] = &[
-    Skill { id: "soul", name: "Soul bond", what: "Souls restore 5 more mana", levels: 1, cost: 1, needs: None, at: (0.0, 0.0) },
-    Skill { id: "vitality", name: "Vitality", what: "2 more health", levels: 3, cost: 3, needs: Some("soul"), at: (-1.0, -1.0) },
-    Skill { id: "healing", name: "Healing", what: "Unlocks healing (channelled)", levels: 1, cost: 6, needs: Some("vitality"), at: (-1.0, -2.0) },
-    Skill { id: "mending", name: "Mending", what: "Healing 30% faster", levels: 3, cost: 5, needs: Some("healing"), at: (-1.0, -3.0) },
-    Skill { id: "well", name: "Mana well", what: "20 more mana", levels: 3, cost: 3, needs: Some("soul"), at: (1.0, -1.0) },
-    Skill { id: "flow", name: "Mana flow", what: "Mana refills 25% faster", levels: 3, cost: 5, needs: Some("well"), at: (1.0, -2.0) },
-    Skill { id: "kindling", name: "Kindling", what: "Fire bolts charge 25% faster", levels: 3, cost: 4, needs: Some("soul"), at: (-2.0, 0.0) },
-    Skill { id: "inferno", name: "Inferno", what: "Fire bursts reach 20% further", levels: 2, cost: 8, needs: Some("kindling"), at: (-3.0, 0.0) },
-    Skill { id: "wind", name: "Wind blade", what: "Unlocks the wind blades", levels: 1, cost: 5, needs: Some("soul"), at: (2.0, 0.0) },
-    Skill { id: "cool", name: "Cool winds", what: "Wind blades heat 15% less", levels: 3, cost: 4, needs: Some("wind"), at: (3.0, 0.0) },
-    Skill { id: "lightning", name: "Lightning strike", what: "Unlocks the lightning strike", levels: 1, cost: 5, needs: Some("soul"), at: (1.0, 1.0) },
-    Skill { id: "static", name: "Static", what: "Lightning locks on 20% sooner", levels: 2, cost: 6, needs: Some("lightning"), at: (1.0, 2.0) },
-    Skill { id: "slot2", name: "Spell slot", what: "A second spell slot", levels: 1, cost: 4, needs: Some("soul"), at: (0.0, -1.0) },
-    Skill { id: "slot3", name: "Spell slot", what: "A third spell slot", levels: 1, cost: 10, needs: Some("slot2"), at: (0.0, -2.0) },
-    Skill { id: "slot4", name: "Spell slot", what: "A fourth spell slot", levels: 1, cost: 20, needs: Some("slot3"), at: (0.0, -3.0) },
-    Skill { id: "frost", name: "Frost lance", what: "Unlocks the frost lance", levels: 1, cost: 6, needs: Some("wind"), at: (2.0, 1.0) },
-    Skill { id: "gravity", name: "Gravity well", what: "Unlocks the gravity well", levels: 1, cost: 10, needs: Some("frost"), at: (3.0, 1.0) },
-    Skill { id: "arcane", name: "Arcane missiles", what: "Unlocks the arcane missiles", levels: 1, cost: 6, needs: Some("soul"), at: (0.0, 1.0) },
-    Skill { id: "familiar", name: "Spirit familiar", what: "Unlocks the spirit familiar", levels: 1, cost: 12, needs: Some("arcane"), at: (0.0, 2.0) },
-    Skill { id: "meteor", name: "Meteor", what: "Unlocks the meteor", levels: 1, cost: 12, needs: Some("inferno"), at: (-3.0, -1.0) },
-    Skill { id: "reaper", name: "Reaper", what: "One more soul from each defeat", levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
+    Skill { id: "soul", name: |t| t.skill_soul_name(), what: |t| t.skill_soul_what(), levels: 1, cost: 1, needs: None, at: (0.0, 0.0) },
+    Skill { id: "vitality", name: |t| t.skill_vitality_name(), what: |t| t.skill_vitality_what(), levels: 3, cost: 3, needs: Some("soul"), at: (-1.0, -1.0) },
+    Skill { id: "healing", name: |t| t.spell_healing(), what: |t| t.skill_healing_what(), levels: 1, cost: 6, needs: Some("vitality"), at: (-1.0, -2.0) },
+    Skill { id: "mending", name: |t| t.skill_mending_name(), what: |t| t.skill_mending_what(), levels: 3, cost: 5, needs: Some("healing"), at: (-1.0, -3.0) },
+    Skill { id: "well", name: |t| t.skill_well_name(), what: |t| t.skill_well_what(), levels: 3, cost: 3, needs: Some("soul"), at: (1.0, -1.0) },
+    Skill { id: "flow", name: |t| t.skill_flow_name(), what: |t| t.skill_flow_what(), levels: 3, cost: 5, needs: Some("well"), at: (1.0, -2.0) },
+    Skill { id: "kindling", name: |t| t.skill_kindling_name(), what: |t| t.skill_kindling_what(), levels: 3, cost: 4, needs: Some("soul"), at: (-2.0, 0.0) },
+    Skill { id: "inferno", name: |t| t.skill_inferno_name(), what: |t| t.skill_inferno_what(), levels: 2, cost: 8, needs: Some("kindling"), at: (-3.0, 0.0) },
+    Skill { id: "wind", name: |t| t.spell_wind_blade(), what: |t| t.skill_wind_what(), levels: 1, cost: 5, needs: Some("soul"), at: (2.0, 0.0) },
+    Skill { id: "cool", name: |t| t.skill_cool_name(), what: |t| t.skill_cool_what(), levels: 3, cost: 4, needs: Some("wind"), at: (3.0, 0.0) },
+    Skill { id: "lightning", name: |t| t.spell_lightning_strike(), what: |t| t.skill_lightning_what(), levels: 1, cost: 5, needs: Some("soul"), at: (1.0, 1.0) },
+    Skill { id: "static", name: |t| t.skill_static_name(), what: |t| t.skill_static_what(), levels: 2, cost: 6, needs: Some("lightning"), at: (1.0, 2.0) },
+    Skill { id: "slot2", name: |t| t.skill_slot_name(), what: |t| t.skill_slot2_what(), levels: 1, cost: 4, needs: Some("soul"), at: (0.0, -1.0) },
+    Skill { id: "slot3", name: |t| t.skill_slot_name(), what: |t| t.skill_slot3_what(), levels: 1, cost: 10, needs: Some("slot2"), at: (0.0, -2.0) },
+    Skill { id: "slot4", name: |t| t.skill_slot_name(), what: |t| t.skill_slot4_what(), levels: 1, cost: 20, needs: Some("slot3"), at: (0.0, -3.0) },
+    Skill { id: "frost", name: |t| t.spell_frost_lance(), what: |t| t.skill_frost_what(), levels: 1, cost: 6, needs: Some("wind"), at: (2.0, 1.0) },
+    Skill { id: "gravity", name: |t| t.spell_gravity_well(), what: |t| t.skill_gravity_what(), levels: 1, cost: 10, needs: Some("frost"), at: (3.0, 1.0) },
+    Skill { id: "arcane", name: |t| t.spell_arcane_missiles(), what: |t| t.skill_arcane_what(), levels: 1, cost: 6, needs: Some("soul"), at: (0.0, 1.0) },
+    Skill { id: "familiar", name: |t| t.spell_spirit_familiar(), what: |t| t.skill_familiar_what(), levels: 1, cost: 12, needs: Some("arcane"), at: (0.0, 2.0) },
+    Skill { id: "meteor", name: |t| t.spell_meteor(), what: |t| t.skill_meteor_what(), levels: 1, cost: 12, needs: Some("inferno"), at: (-3.0, -1.0) },
+    Skill { id: "reaper", name: |t| t.skill_reaper_name(), what: |t| t.skill_reaper_what(), levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
 ];
 
 // Whether a skill unlocks something new (a spell, or a spell slot), rather
@@ -150,7 +150,7 @@ impl Default for Boosts {
 
 // A skill's name and effect, as shown.
 pub fn shown(s: &Skill) -> (&'static str, &'static str) {
-    (tr(s.name), tr(s.what))
+    ((s.name)(text()), (s.what)(text()))
 }
 
 #[cfg(test)]

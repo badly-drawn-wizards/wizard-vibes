@@ -17,16 +17,16 @@ pub const ORDER: [ModeName; 3] = [ModeName::Fixed, ModeName::Flight, ModeName::F
 impl ModeName {
     pub fn label(self) -> &'static str {
         match self {
-            ModeName::Fixed => crate::i18n::tr("Fixed: on the flight path"),
-            ModeName::Flight => crate::i18n::tr("Flight: free flight"),
-            ModeName::Fight => crate::i18n::tr("Fight: enemies about"),
+            ModeName::Fixed => crate::i18n::text().mode_fixed_tip(),
+            ModeName::Flight => crate::i18n::text().mode_flight_tip(),
+            ModeName::Fight => crate::i18n::text().mode_fight_tip(),
         }
     }
     pub fn title(self) -> &'static str {
         match self {
-            ModeName::Fixed => crate::i18n::tr("Fixed"),
-            ModeName::Flight => crate::i18n::tr("Flight"),
-            ModeName::Fight => crate::i18n::tr("Fight"),
+            ModeName::Fixed => crate::i18n::text().mode_fixed(),
+            ModeName::Flight => crate::i18n::text().mode_flight(),
+            ModeName::Fight => crate::i18n::text().mode_fight(),
         }
     }
     // As stored (the TS's names).
@@ -77,7 +77,7 @@ impl Mode {
 
     // A button's tooltip.
     pub fn tooltip(&self, m: ModeName) -> String {
-        self.reasons[index(m)].clone().unwrap_or_else(|| crate::i18n::trf("{} (F cycles)", &[&m.label()]))
+        self.reasons[index(m)].clone().unwrap_or_else(|| crate::i18n::text().mode_cycles(m.label()))
     }
 
     pub fn free(&self) -> bool {

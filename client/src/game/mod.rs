@@ -30,7 +30,7 @@ pub mod spellbar;
 pub mod spells;
 pub mod vec;
 
-use crate::i18n::tr;
+use crate::i18n::text;
 use crate::types::{BuildInfo, Camera, FrameOut, ParamValues, ProbeRequest, Value, PROBE_SPHERES};
 use camera::Orbit;
 use combat::{Combat, Moment};
@@ -983,7 +983,7 @@ impl Game {
             }
         })
         .response
-        .on_hover_text(tr("Mode (F)"));
+        .on_hover_text(text().bar_mode_tip());
         if let Some(m) = chosen {
             self.set_mode(m);
         }
@@ -1181,10 +1181,10 @@ impl Game {
     // him alone, or each other too.
     pub fn sides_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         for (name, ffa, tip) in [
-            ("1 vs all", false, "The enemies all fight him"),
-            ("Free for all", true, "The enemies fight each other too"),
+            (text().sides_one_vs_all(), false, text().sides_one_vs_all_tip()),
+            (text().sides_free_for_all(), true, text().sides_free_for_all_tip()),
         ] {
-            let r = hud::fill_toggle(ui, tr(name), self.ffa == ffa).on_hover_text(tr(tip));
+            let r = hud::fill_toggle(ui, name, self.ffa == ffa).on_hover_text(tip);
             nav.item(ui, &r);
             if r.clicked() {
                 self.ffa = ffa;
@@ -1196,16 +1196,16 @@ impl Game {
     // over his shoulder as he flies, or centred on him.
     pub fn camera_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         for (name, over, tip) in [
-            ("Over the shoulder", true, "The camera looks past his right shoulder"),
-            ("Centred", false, "The camera looks at him, centred"),
+            (text().camera_over_shoulder(), true, text().camera_over_shoulder_tip()),
+            (text().camera_centred(), false, text().camera_centred_tip()),
         ] {
-            let r = hud::fill_toggle(ui, tr(name), self.over_shoulder == over).on_hover_text(tr(tip));
+            let r = hud::fill_toggle(ui, name, self.over_shoulder == over).on_hover_text(tip);
             nav.item(ui, &r);
             if r.clicked() {
                 self.over_shoulder = over;
             }
         }
-        let r = hud::fill_toggle(ui, tr("Picture"), false).on_hover_text(tr("Hold the scene still and fly the camera freely to frame a picture (Escape to come back)"));
+        let r = hud::fill_toggle(ui, text().camera_picture(), false).on_hover_text(text().camera_picture_tip());
         nav.item(ui, &r);
         if r.clicked() {
             self.enter_picture();
@@ -1268,7 +1268,7 @@ impl Game {
                     .show(ctx, |ui| {
                         ui.set_opacity(alpha);
                         hud::panel(0.6, 6, Margin::symmetric(14, 6)).show(ui, |ui| {
-                            ui.label(hud::text(tr("Picture mode"), hud::FONT, hud::FG));
+                            ui.label(hud::text(text().picture_title(), hud::FONT, hud::FG));
                         });
                     });
             }
@@ -1329,7 +1329,7 @@ impl Game {
                             hud::bar(ui, width, health, egui::Color32::from_rgb(0xc0, 0x28, 0x3c), egui::Color32::from_rgb(0xff, 0x6a, 0x5a), hud::BORDER);
                         })
                         .response
-                        .on_hover_text(tr("Health"));
+                        .on_hover_text(text().hud_health());
                     }
                     ui.horizontal(|ui| {
                         hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
@@ -1343,7 +1343,7 @@ impl Game {
                         );
                     })
                     .response
-                    .on_hover_text(tr("Mana"));
+                    .on_hover_text(text().hud_mana());
                 });
             // the tally, top right: enemies he has defeated (in a fight),
             // and the souls he has gathered, all told
@@ -1387,13 +1387,13 @@ impl Game {
             // did)
             let kind = self.defeat_overlay().map_or(0, |(_, k)| k);
             let (glow, line) = match kind {
-                0 => (egui::Color32::from_rgb(0xff, 0x8a, 0x3a), "Burnt to cinders"),
-                1 => (egui::Color32::from_rgb(0x9c, 0xc0, 0xff), "Struck down"),
-                2 => (egui::Color32::from_rgb(0x7a, 0xf0, 0xff), "Torn apart by the wind"),
-                _ => (egui::Color32::from_rgb(0xd0, 0x9c, 0xff), "Undone"),
+                0 => (egui::Color32::from_rgb(0xff, 0x8a, 0x3a), text().defeat_by_fire()),
+                1 => (egui::Color32::from_rgb(0x9c, 0xc0, 0xff), text().defeat_by_lightning()),
+                2 => (egui::Color32::from_rgb(0x7a, 0xf0, 0xff), text().defeat_by_wind()),
+                _ => (egui::Color32::from_rgb(0xd0, 0x9c, 0xff), text().defeat_undone()),
             };
             let size = 54.0 * (1.0 + 0.04 * alpha);
-            let word: String = tr("Defeated").to_uppercase().chars().map(|c| format!("{c} ")).collect::<String>().trim_end().to_string();
+            let word: String = text().defeat_title().to_uppercase().chars().map(|c| format!("{c} ")).collect::<String>().trim_end().to_string();
             let font = egui::FontId::proportional(size);
             let centre = egui::pos2(rect.center().x, y);
             // (a glow: the word faint in its colour, about it)
@@ -1407,7 +1407,7 @@ impl Game {
             let ink = egui::Color32::from_rgb(0xff, 0xf6, 0xe8).gamma_multiply(alpha);
             let g = painter.layout_no_wrap(word, font, ink);
             painter.galley(Align2::CENTER_CENTER.anchor_size(centre, g.size()).min, g, ink);
-            let g = painter.layout_no_wrap(tr(line).to_string(), egui::FontId::proportional(20.0), glow.gamma_multiply(alpha));
+            let g = painter.layout_no_wrap(line.to_string(), egui::FontId::proportional(20.0), glow.gamma_multiply(alpha));
             painter.galley(Align2::CENTER_TOP.anchor_size(centre + Vec2::new(0.0, 0.6 * size), g.size()).min, g, glow);
             let g = painter.layout_no_wrap(stats.clone(), hud::mono(hud::FONT), hud::DIM.gamma_multiply(alpha));
             painter.galley(Align2::CENTER_TOP.anchor_size(centre + Vec2::new(0.0, 0.6 * size + 32.0), g.size()).min, g, hud::DIM);
@@ -1422,15 +1422,15 @@ impl Game {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 18.0;
                         let skill_glyph = if pad { hud::Chip::Face('X') } else { hud::Chip::Mouse(false) };
-                        if hud::glyph_button(ui, skill_glyph, tr("Skill tree"), 1.05 * hud::FONT).clicked() {
+                        if hud::glyph_button(ui, skill_glyph, text().tree_title(), 1.05 * hud::FONT).clicked() {
                             skills = true;
                         }
                         let loadout_glyph = if pad { hud::Chip::Face('Y') } else { hud::Chip::MouseMiddle };
-                        if hud::glyph_button(ui, loadout_glyph, tr("Loadout"), 1.05 * hud::FONT).clicked() {
+                        if hud::glyph_button(ui, loadout_glyph, text().loadout_title(), 1.05 * hud::FONT).clicked() {
                             loadout = true;
                         }
                         let again_glyph = if pad { hud::Chip::Face('A') } else { hud::Chip::Mouse(true) };
-                        if hud::glyph_button(ui, again_glyph, tr("Try again"), 1.05 * hud::FONT).clicked() {
+                        if hud::glyph_button(ui, again_glyph, text().defeat_try_again(), 1.05 * hud::FONT).clicked() {
                             reset = true;
                         }
                     });
@@ -1462,7 +1462,7 @@ impl Game {
             let (area, _) = ui.allocate_exact_size(rect.size(), egui::Sense::click());
             let p = ui.painter().clone();
             p.rect_filled(area, 0, hud::bg(0.88));
-            let title = p.layout_no_wrap(tr("Loadout").to_string(), egui::FontId::proportional(26.0), hud::FG);
+            let title = p.layout_no_wrap(text().loadout_title().to_string(), egui::FontId::proportional(26.0), hud::FG);
             p.galley(Align2::CENTER_TOP.anchor_size(area.center_top() + Vec2::new(0.0, 24.0), title.size()).min, title, hud::FG);
             let n = self.loadout.len();
             let row_h = 64.0;
@@ -1504,11 +1504,11 @@ impl Game {
                 match self.loadout[k] {
                     Some(i) => {
                         hud::paint_spell(&p, mid - Vec2::new(70.0, 0.0), 14.0, i, hud::SPELL_COLOURS[i]);
-                        let g = p.layout_no_wrap(tr(spells::SPELL_NAMES[i]).to_string(), egui::FontId::proportional(18.0), hud::FG);
+                        let g = p.layout_no_wrap(spells::spell_name(i).to_string(), egui::FontId::proportional(18.0), hud::FG);
                         p.galley(Align2::LEFT_CENTER.anchor_size(mid - Vec2::new(45.0, 0.0), g.size()).min, g, hud::FG);
                     }
                     None => {
-                        let g = p.layout_no_wrap(tr("(empty)").to_string(), egui::FontId::proportional(18.0), hud::DIM);
+                        let g = p.layout_no_wrap(text().loadout_empty().to_string(), egui::FontId::proportional(18.0), hud::DIM);
                         p.galley(Align2::LEFT_CENTER.anchor_size(mid - Vec2::new(45.0, 0.0), g.size()).min, g, hud::DIM);
                     }
                 }
@@ -1519,7 +1519,7 @@ impl Game {
                 .fixed_pos(area.center_bottom() - Vec2::new(0.0, 24.0))
                 .show(ctx, |ui| {
                     let g = if pad { hud::Chip::Face('B') } else { hud::Chip::Key("Esc") };
-                    back = hud::glyph_button(ui, g, tr("Back"), 1.05 * hud::FONT).clicked();
+                    back = hud::glyph_button(ui, g, text().action_back(), 1.05 * hud::FONT).clicked();
                 });
         });
         if let Some(k) = pick {
@@ -1652,7 +1652,7 @@ impl Game {
                 }
             }
             // the title and his souls, top; what the one picked is, bottom
-            let title = p.layout_no_wrap(tr("Skill tree").to_string(), egui::FontId::proportional(26.0), hud::FG);
+            let title = p.layout_no_wrap(text().tree_title().to_string(), egui::FontId::proportional(26.0), hud::FG);
             p.galley(Align2::CENTER_TOP.anchor_size(area.center_top() + Vec2::new(0.0, 24.0), title.size()).min, title, hud::FG);
             let souls = p.layout_no_wrap(self.souls.to_string(), hud::mono(1.3 * hud::FONT), hud::FG);
             let sp = area.right_top() + Vec2::new(-28.0 - souls.size().x, 30.0);
@@ -1662,9 +1662,9 @@ impl Game {
             let (name, what) = skills::shown(s);
             let level = self.skills.level(s.id);
             let state = match self.skills.cost(s) {
-                Some(c) => crate::i18n::trf("Next level: {} souls", &[&c]),
-                None if level >= s.levels => tr("Learnt in full").to_string(),
-                None => crate::i18n::trf("Needs {}", &[&s.needs.and_then(skills::skill).map_or("", |n| skills::shown(n).0)]),
+                Some(c) => crate::i18n::text().tree_next_level(c),
+                None if level >= s.levels => text().tree_learnt().to_string(),
+                None => crate::i18n::text().tree_needs(s.needs.and_then(skills::skill).map_or("", |n| skills::shown(n).0)),
             };
             let lines = [(format!("{name}  {level}/{}", s.levels), 1.4 * hud::FONT, hud::FG), (what.to_string(), hud::FONT, hud::FG), (state, hud::FONT, hud::DIM)];
             let mut y = area.bottom() - 150.0;
@@ -1684,9 +1684,9 @@ impl Game {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 18.0;
                         let g = if pad { hud::Chip::Face('A') } else { hud::Chip::Key("Enter") };
-                        buy = hud::glyph_button(ui, g, tr("Learn"), 1.05 * hud::FONT).clicked();
+                        buy = hud::glyph_button(ui, g, text().tree_learn(), 1.05 * hud::FONT).clicked();
                         let g = if pad { hud::Chip::Face('B') } else { hud::Chip::Key("Esc") };
-                        back = hud::glyph_button(ui, g, tr("Back"), 1.05 * hud::FONT).clicked();
+                        back = hud::glyph_button(ui, g, text().action_back(), 1.05 * hud::FONT).clicked();
                     });
                 });
             if self.tree.is_some() {
@@ -1710,8 +1710,8 @@ impl Game {
         let now_mods = ui.input(|i| i.modifiers);
         egui::Grid::new("controls").num_columns(3).min_col_width(130.0).spacing([24.0, 6.0]).show(ui, |ui| {
             ui.label("");
-            ui.label(hud::text(tr("Keyboard"), 12.0, hud::DIM));
-            ui.label(hud::text(tr("Controller"), 12.0, hud::DIM));
+            ui.label(hud::text(text().controls_keyboard(), 12.0, hud::DIM));
+            ui.label(hud::text(text().controls_controller(), 12.0, hud::DIM));
             ui.end_row();
             for a in ACTIONS {
                 ui.label(a.label());
@@ -1732,12 +1732,12 @@ impl Game {
             }
             // (fixed)
             for (what, key, pad) in [
-                ("Fly (controller)", Chip::Text("—"), Chip::Stick('L')),
-                ("Camera (click to take the mouse)", Chip::Text(tr("mouse · wheel")), Chip::Stick('R')),
-                ("Try again (defeated)", Chip::Key("Enter"), Chip::Face('A')),
-                ("Music", Chip::Key("M"), Chip::Text("—")),
+                (text().controls_fly(), Chip::Text("—"), Chip::Stick('L')),
+                (text().controls_camera(), Chip::Text(text().controls_mouse_wheel()), Chip::Stick('R')),
+                (text().controls_try_again(), Chip::Key("Enter"), Chip::Face('A')),
+                (text().settings_music(), Chip::Key("M"), Chip::Text("—")),
             ] {
-                ui.label(hud::text(tr(what), 12.5, hud::DIM));
+                ui.label(hud::text(what, 12.5, hud::DIM));
                 for c in [key, pad] {
                     ui.horizontal(|ui| {
                         ui.add_space(7.0);
@@ -1750,7 +1750,7 @@ impl Game {
         ui.add_space(6.0);
         nav.row();
         ui.horizontal(|ui| {
-            let r = hud::fill_toggle(ui, tr("Swap X and Y"), self.pads.swap_xy).on_hover_text(tr("For controllers that report X and Y the other way round"));
+            let r = hud::fill_toggle(ui, text().controls_swap_xy(), self.pads.swap_xy).on_hover_text(text().controls_swap_xy_tip());
             nav.item(ui, &r);
             if r.clicked() {
                 self.pads.swap_xy = !self.pads.swap_xy;
@@ -1758,7 +1758,7 @@ impl Game {
         });
         ui.add_space(6.0);
         nav.row();
-        let r = ui.button(tr("Reset to defaults"));
+        let r = ui.button(text().controls_reset());
         nav.item(ui, &r);
         if r.clicked() {
             self.binds = Binds::default();
@@ -1920,11 +1920,11 @@ fn bind_cell(ui: &mut egui::Ui, id: (Action, Device), chip: Option<hud::Chip>, w
             ui.spacing_mut().item_spacing.x = 0.0;
             match (waiting, chip) {
                 (true, _) => {
-                    ui.label(hud::text(tr("press…"), 12.0, hud::FOCUS));
+                    ui.label(hud::text(text().controls_press(), 12.0, hud::FOCUS));
                 }
                 (false, Some(c)) => hud::chip(ui, c),
                 (false, None) => {
-                    ui.label(hud::text(tr("—"), 12.0, hud::DIM));
+                    ui.label(hud::text("—", 12.0, hud::DIM));
                 }
             }
         });
@@ -1933,5 +1933,5 @@ fn bind_cell(ui: &mut egui::Ui, id: (Action, Device), chip: Option<hud::Chip>, w
     if r.hovered() && !waiting {
         ui.painter().rect_stroke(inner.response.rect, 4, egui::Stroke::new(1.0, hud::DIM), egui::StrokeKind::Inside);
     }
-    r.on_hover_text(tr(if waiting { "Press a key, or a button (Escape gives up)" } else { "Choose, then press the key or button to bind" }))
+    r.on_hover_text(if waiting { text().controls_waiting_tip() } else { text().controls_choose_tip() })
 }

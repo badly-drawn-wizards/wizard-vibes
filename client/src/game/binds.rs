@@ -17,7 +17,7 @@ pub enum Action {
     Dash,
     Cast,
     Shield,
-    // the spells, in SPELL_NAMES's order
+    // the spells, in spells' order (see spell_name)
     Spell(usize),
     ZoomIn,
     ZoomOut,
@@ -46,23 +46,25 @@ pub const ACTIONS: [Action; 17] = [
 ];
 
 impl Action {
-    pub fn label(self) -> &'static str {
-        crate::i18n::tr(match self {
-            Action::Forward => "Forward",
-            Action::Back => "Back",
-            Action::Left => "Left",
-            Action::Right => "Right",
-            Action::Climb => "Climb",
-            Action::Descend => "Descend",
-            Action::Dash => "Dash",
-            Action::Cast => "Cast",
-            Action::Shield => "Shield (hold)",
-            Action::Spell(i) => ["Spell slot 1", "Spell slot 2", "Spell slot 3", "Spell slot 4"][i.min(3)],
-            Action::ZoomIn => "Zoom in",
-            Action::ZoomOut => "Zoom out",
-            Action::Mode => "Mode",
-            Action::Pause => "Pause / menu",
-        })
+    pub fn label(self) -> String {
+        let t = crate::i18n::text();
+        match self {
+            Action::Forward => t.action_forward(),
+            Action::Back => t.action_back(),
+            Action::Left => t.action_left(),
+            Action::Right => t.action_right(),
+            Action::Climb => t.action_climb(),
+            Action::Descend => t.action_descend(),
+            Action::Dash => t.action_dash(),
+            Action::Cast => t.action_cast(),
+            Action::Shield => t.action_shield(),
+            Action::Spell(i) => return t.action_spell_slot(i + 1),
+            Action::ZoomIn => t.action_zoom_in(),
+            Action::ZoomOut => t.action_zoom_out(),
+            Action::Mode => t.settings_mode(),
+            Action::Pause => t.action_pause(),
+        }
+        .to_string()
     }
 
     fn key(self) -> String {
@@ -105,7 +107,15 @@ impl KeyBind {
 
     // Its name as shown (a mouse button's in the language chosen).
     pub fn shown(self) -> &'static str {
-        if self.is_mouse() { crate::i18n::tr(self.name()) } else { self.name() }
+        let t = crate::i18n::text();
+        match self {
+            KeyBind::Mouse(egui::PointerButton::Primary) => t.mouse_left(),
+            KeyBind::Mouse(egui::PointerButton::Secondary) => t.mouse_right(),
+            KeyBind::Mouse(egui::PointerButton::Middle) => t.mouse_middle(),
+            KeyBind::Mouse(egui::PointerButton::Extra1) => t.mouse_mouse4(),
+            KeyBind::Mouse(egui::PointerButton::Extra2) => t.mouse_mouse5(),
+            _ => self.name(),
+        }
     }
 
     pub fn is_mouse(self) -> bool {

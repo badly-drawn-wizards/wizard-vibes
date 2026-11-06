@@ -26,8 +26,21 @@ use super::Rng;
 // His spells, by number (a spell's number is not a kind of spell in flight,
 // below, though the first three are the same).
 pub const N_SPELLS: usize = 9;
-pub const SPELL_NAMES: [&str; N_SPELLS] =
-    ["Fire bolt", "Lightning strike", "Wind blade", "Healing", "Frost lance", "Arcane missiles", "Meteor", "Gravity well", "Spirit familiar"];
+// Each spell's name, in the language chosen.
+pub fn spell_name(i: usize) -> &'static str {
+    let t = crate::i18n::text();
+    match i {
+        0 => t.spell_fire_bolt(),
+        1 => t.spell_lightning_strike(),
+        2 => t.spell_wind_blade(),
+        3 => t.spell_healing(),
+        FROST_LANCE => t.spell_frost_lance(),
+        ARCANE => t.spell_arcane_missiles(),
+        METEOR => t.spell_meteor(),
+        GRAVITY => t.spell_gravity_well(),
+        _ => t.spell_spirit_familiar(),
+    }
+}
 pub const FROST_LANCE: usize = 4;
 pub const ARCANE: usize = 5;
 pub const METEOR: usize = 6;
@@ -272,7 +285,7 @@ impl Spells {
 
     // Takes spell i in hand, if he has it (see unlocked).
     pub fn select(&mut self, i: usize) {
-        if i < SPELL_NAMES.len() && self.unlocked[i] {
+        if i < N_SPELLS && self.unlocked[i] {
             self.selected = i;
         }
     }

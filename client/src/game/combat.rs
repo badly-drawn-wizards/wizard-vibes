@@ -474,9 +474,9 @@ impl Combat {
         let lost = n > 0 && e.down >= 0.0;
         if lost != h.lost.is_some() {
             h.lost = lost.then(|| match e.defeated {
-                0 => crate::i18n::tr("No enemies defeated").to_string(),
-                1 => crate::i18n::tr("1 enemy defeated").to_string(),
-                k => crate::i18n::trf("{} enemies defeated", &[&k]),
+                0 => crate::i18n::text().defeat_none_defeated().to_string(),
+                1 => crate::i18n::text().defeat_one_defeated().to_string(),
+                k => crate::i18n::text().defeat_many_defeated(k),
             });
         }
         // (defeated too: the flash fades, the defeat screen's own colours after)

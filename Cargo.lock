@@ -4902,6 +4902,7 @@ dependencies = [
  "web-sys",
  "web-time",
  "wgpu",
+ "wizard-i18n",
  "wizard-shader",
 ]
 
@@ -4917,6 +4918,17 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower-http",
+]
+
+[[package]]
+name = "wizard-i18n"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]
