@@ -9,7 +9,7 @@
 //
 // Colours are linear RGB.
 
-use crate::i18n::{tr, trf};
+use crate::i18n::{tr, tr_key, trf};
 use crate::nav::Nav;
 use crate::types::{ParamValues, Value};
 use serde::Deserialize;
@@ -27,6 +27,9 @@ pub struct Param {
     pub options: Option<Vec<String>>,
     #[serde(default)]
     pub compile: bool,
+    // (label and doc are keys into the language's table: see i18n.rs)
+    #[serde(default)]
+    pub doc: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -185,9 +188,9 @@ impl Params {
         let header = ui.horizontal(|ui| {
             let toggle = state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
             nav.item(ui, &toggle);
-            ui.strong(&g.name);
+            ui.strong(tr_key(&g.name));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let r = ui.small_button("↺").on_hover_text(trf("Reset {}", &[&g.name]));
+                let r = ui.small_button("↺").on_hover_text(trf("Reset {}", &[&tr_key(&g.name)]));
                 nav.item(ui, &r);
                 if r.clicked() {
                     let mut ps = vec![];
@@ -238,13 +241,17 @@ impl Params {
         let before = v.clone();
         ui.horizontal(|ui| {
             ui.add_enabled_ui(enabled, |ui| {
-                let label = if p.compile { format!("{} *", p.label) } else { p.label.clone() };
+                let label = if p.compile { format!("{} *", tr_key(&p.label)) } else { tr_key(&p.label).to_string() };
                 let tip = if p.compile {
                     tr(if enabled { "Compile-time: changing it rebuilds the shader" } else { "Compile-time: fixed without the dev server" })
                 } else {
                     ""
                 };
                 let l = ui.label(label);
+                let l = match &p.doc {
+                    Some(d) => l.on_hover_text(tr_key(d)),
+                    None => l,
+                };
                 if !tip.is_empty() {
                     l.on_hover_text(tip);
                 }
@@ -277,7 +284,7 @@ impl Params {
                         v = Value::Bool(b);
                     }
                     "select" => {
-                        let opts = p.options.clone().unwrap_or_default();
+                        let opts = shown_options(p);
                         let mut i = num(&v).round() as usize;
                         let r = egui::ComboBox::from_id_salt(("select", &p.id)).selected_text(opts.get(i).cloned().unwrap_or_default()).show_ui(ui, |ui| {
                             for (k, o) in opts.iter().enumerate() {
@@ -292,7 +299,7 @@ impl Params {
                         v = Value::Num(i as f64);
                     }
                     "flags" => {
-                        let opts = p.options.clone().unwrap_or_default();
+                        let opts = shown_options(p);
                         let mut bits = num(&v).round() as i64;
                         ui.vertical(|ui| {
                             ui.horizontal_wrapped(|ui| {
@@ -376,4 +383,10 @@ fn round(v: &Value) -> Value {
         Value::Num(x) => Value::Num(sig(*x)),
         b => b.clone(),
     }
+}
+
+// A parameter's options as shown (option.<id>.<option> in the language's
+// table; the options themselves are names in the shader's code).
+fn shown_options(p: &Param) -> Vec<String> {
+    p.options.clone().unwrap_or_default().iter().map(|o| tr_key(&format!("option.{}.{o}", p.id)).to_string()).collect()
 }

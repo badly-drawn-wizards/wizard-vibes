@@ -18,9 +18,9 @@ pub struct Skill {
 
 pub const SKILLS: &[Skill] = &[
     Skill { id: "soul", name: "Soul bond", what: "Souls restore 5 more mana", levels: 1, cost: 1, needs: None, at: (0.0, 0.0) },
-    Skill { id: "vitality", name: "Vitality", what: "2 more health", levels: 3, cost: 3, needs: Some("soul"), at: (-0.45, -0.55) },
+    Skill { id: "vitality", name: "Vitality", what: "2 more health", levels: 3, cost: 3, needs: Some("soul"), at: (-0.45, -0.5) },
     Skill { id: "mending", name: "Mending", what: "Healing 30% faster", levels: 3, cost: 5, needs: Some("vitality"), at: (-0.45, -1.0) },
-    Skill { id: "well", name: "Mana well", what: "20 more mana", levels: 3, cost: 3, needs: Some("soul"), at: (0.45, -0.55) },
+    Skill { id: "well", name: "Mana well", what: "20 more mana", levels: 3, cost: 3, needs: Some("soul"), at: (0.45, -0.5) },
     Skill { id: "flow", name: "Mana flow", what: "Mana refills 25% faster", levels: 3, cost: 5, needs: Some("well"), at: (0.45, -1.0) },
     Skill { id: "kindling", name: "Kindling", what: "Fire bolts charge 25% faster", levels: 3, cost: 4, needs: Some("soul"), at: (-0.9, 0.2) },
     Skill { id: "inferno", name: "Inferno", what: "Fire bursts reach 20% further", levels: 2, cost: 8, needs: Some("kindling"), at: (-0.9, 0.8) },

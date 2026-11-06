@@ -1,10 +1,14 @@
 // The words the player reads, in the language chosen (the settings'
-// Language row; kept between runs). The English is the key: tr("Settings")
-// is "Settings" in English and its translation in another language, or the
-// English again where a table has none. A string with values in it marks
-// them {} (in order: see trf). Adding a language: a Lang, its name, and a
-// table of (English, translation) pairs.
+// Language row; kept between runs), from client/lang/<language>.json:
+// key -> text. The interface's keys are its English (tr("Settings") is
+// "Settings" in English, its translation elsewhere, or the English again
+// where a table has none); the parameters' (params.json's labels, docs and
+// group names, and their options as option.<id>.<option>) are keys, with
+// their English in en.json too. A string with values in it marks them {}
+// (in order: see trf). Adding a language: a Lang, its name, and its file.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,10 +39,13 @@ impl Lang {
         LANGS.into_iter().find(|l| l.key() == k)
     }
 
-    fn table(self) -> &'static [(&'static str, &'static str)] {
+    fn table(self) -> &'static HashMap<String, String> {
+        static EN: OnceLock<HashMap<String, String>> = OnceLock::new();
+        static ES: OnceLock<HashMap<String, String>> = OnceLock::new();
+        let load = |text: &str| serde_json::from_str(text).unwrap_or_default();
         match self {
-            Lang::En => &[],
-            Lang::Es => ES,
+            Lang::En => EN.get_or_init(|| load(include_str!("../lang/en.json"))),
+            Lang::Es => ES.get_or_init(|| load(include_str!("../lang/es.json"))),
         }
     }
 }
@@ -59,7 +66,17 @@ pub fn tr(en: &'static str) -> &'static str {
 }
 
 pub fn tr_in(l: Lang, en: &'static str) -> &'static str {
-    l.table().iter().find(|(k, _)| *k == en).map_or(en, |(_, v)| v)
+    l.table().get(en).map_or(en, |v| v.as_str())
+}
+
+// A key's text in the language chosen (else in English, else the key):
+// for the parameters' keys, which are not English.
+pub fn tr_key(key: &str) -> &str {
+    let l = lang();
+    match l.table().get(key).or_else(|| Lang::En.table().get(key)) {
+        Some(v) => v.as_str(),
+        None => key,
+    }
 }
 
 // The same, its {}s filled in with `args`, in order.
@@ -83,160 +100,6 @@ pub fn trf_in(l: Lang, en: &'static str, args: &[&dyn std::fmt::Display]) -> Str
     out
 }
 
-const ES: &[(&str, &str)] = &[
-    // the pause menu
-    ("Paused", "En pausa"),
-    ("Settings", "Ajustes"),
-    ("Skills", "Habilidades"),
-    ("Skill tree", "Árbol de habilidades"),
-    ("{} souls", "{} almas"),
-    ("Next level: {} souls", "Siguiente nivel: {} almas"),
-    ("Learnt in full", "Aprendida del todo"),
-    ("Needs {}", "Requiere {}"),
-    ("Soul bond", "Vínculo de almas"),
-    ("Souls restore 5 more mana", "Las almas restauran 5 más de maná"),
-    ("Vitality", "Vitalidad"),
-    ("2 more health", "2 más de salud"),
-    ("Mending", "Sanación"),
-    ("Healing 30% faster", "Curación un 30% más rápida"),
-    ("Mana well", "Pozo de maná"),
-    ("20 more mana", "20 más de maná"),
-    ("Mana flow", "Flujo de maná"),
-    ("Mana refills 25% faster", "El maná se recarga un 25% más rápido"),
-    ("Kindling", "Yesca"),
-    ("Fire bolts charge 25% faster", "Las bolas de fuego se cargan un 25% más rápido"),
-    ("Inferno", "Infierno"),
-    ("Fire bursts reach 20% further", "Las explosiones de fuego llegan un 20% más lejos"),
-    ("Cool winds", "Vientos frescos"),
-    ("Wind blades heat 15% less", "Las cuchillas de viento se calientan un 15% menos"),
-    ("Static", "Estática"),
-    ("Lightning locks on 20% sooner", "El rayo fija el blanco un 20% antes"),
-    ("Reaper", "Segador"),
-    ("One more soul from each defeat", "Un alma más por cada derrota"),
-    ("Controls", "Controles"),
-    ("Parameters", "Parámetros"),
-    ("Language", "Idioma"),
-    ("Mode", "Modo"),
-    ("Camera", "Cámara"),
-    ("Enemies", "Enemigos"),
-    ("1 vs all", "1 contra todos"),
-    ("Free for all", "Todos contra todos"),
-    ("The enemies all fight him", "Todos los enemigos luchan contra él"),
-    ("The enemies fight each other too", "Los enemigos también luchan entre sí"),
-    ("Platform", "Plataforma"),
-    ("Rock", "Roca"),
-    ("Ice", "Hielo"),
-    ("Magic carpet", "Alfombra mágica"),
-    ("Song", "Canción"),
-    ("Volume", "Volumen"),
-    ("Music", "Música"),
-    ("Effects", "Efectos"),
-    ("on", "sí"),
-    ("off", "no"),
-    ("Quality", "Calidad"),
-    ("Render scale", "Escala de render"),
-    ("dynamic", "dinámica"),
-    ("Target fps", "Fps objetivo"),
-    ("Scale the resolution to keep the target frame rate", "Ajusta la resolución para mantener los fps objetivo"),
-    ("Over the shoulder", "Sobre el hombro"),
-    ("Centred", "Centrada"),
-    ("Picture", "Foto"),
-    ("The camera looks past his right shoulder", "La cámara mira por encima de su hombro derecho"),
-    ("The camera looks at him, centred", "La cámara lo mira, centrada"),
-    (
-        "Hold the scene still and fly the camera freely to frame a picture (Escape to come back)",
-        "Detiene la escena y deja volar la cámara para encuadrar una foto (Escape para volver)",
-    ),
-    ("Picture mode · click to look, fly as he would · Esc to return", "Modo foto · clic para mirar, vuela como él · Esc para volver"),
-    ("Music on or off (M)", "Música sí o no (M)"),
-    ("Sound effects on or off", "Efectos de sonido sí o no"),
-    ("No sound: {}", "Sin sonido: {}"),
-    // the modes
-    ("Fixed", "Fijo"),
-    ("Flight", "Vuelo"),
-    ("Fight", "Combate"),
-    ("Fixed: on the flight path", "Fijo: en la ruta de vuelo"),
-    ("Flight: free flight", "Vuelo: vuelo libre"),
-    ("Fight: enemies about", "Combate: hay enemigos"),
-    ("{} (F cycles)", "{} (F cambia)"),
-    ("Mode (F)", "Modo (F)"),
-    // quality
-    ("Low", "Baja"),
-    ("Med", "Media"),
-    ("High", "Alta"),
-    ("Quality: {}{}", "Calidad: {}{}"),
-    (" (loading…)", " (cargando…)"),
-    // the controls
-    ("Keyboard", "Teclado"),
-    ("Controller", "Mando"),
-    ("Forward", "Adelante"),
-    ("Back", "Atrás"),
-    ("Left", "Izquierda"),
-    ("Right", "Derecha"),
-    ("Climb", "Subir"),
-    ("Descend", "Bajar"),
-    ("Boost", "Acelerar"),
-    ("Cast", "Lanzar"),
-    ("Shield (hold)", "Escudo (mantener)"),
-    ("Zoom in", "Acercar"),
-    ("Zoom out", "Alejar"),
-    ("Pause / menu", "Pausa / menú"),
-    ("Fly (controller)", "Volar (mando)"),
-    ("Camera (click to take the mouse)", "Cámara (clic para tomar el ratón)"),
-    ("mouse · wheel", "ratón · rueda"),
-    ("Try again (defeated)", "Reintentar (derrotado)"),
-    ("Swap X and Y", "Intercambiar X e Y"),
-    ("For controllers that report X and Y the other way round", "Para mandos que informan X e Y al revés"),
-    ("Reset to defaults", "Restablecer"),
-    ("press…", "pulsa…"),
-    ("Press a key, or a button (Escape gives up)", "Pulsa una tecla o un botón (Escape cancela)"),
-    ("Choose, then press the key or button to bind", "Elige y luego pulsa la tecla o el botón que asignar"),
-    ("Left click", "Clic izquierdo"),
-    ("Right click", "Clic derecho"),
-    ("Middle click", "Clic central"),
-    ("Mouse 4", "Ratón 4"),
-    ("Mouse 5", "Ratón 5"),
-    // the spells
-    ("Fire bolt", "Bola de fuego"),
-    ("Lightning strike", "Rayo"),
-    ("Wind blade", "Cuchilla de viento"),
-    ("Healing", "Curación"),
-    // the fight
-    ("Health", "Salud"),
-    ("Mana", "Maná"),
-    ("Defeated", "Derrotado"),
-    ("Try again", "Reintentar"),
-    ("↺ Reset", "↺ Reiniciar"),
-    ("Start the fight again (View / Back on a controller)", "Empieza el combate de nuevo (Vista / Atrás en el mando)"),
-    ("No enemies defeated", "Ningún enemigo derrotado"),
-    ("1 enemy defeated", "1 enemigo derrotado"),
-    ("{} enemies defeated", "{} enemigos derrotados"),
-    ("{} defeated", "{} derrotados"),
-    // the top bar
-    ("compiling…", "compilando…"),
-    ("loading…", "cargando…"),
-    (" · paused", " · en pausa"),
-    (" · controller", " · mando"),
-    (" dynamic", " dinámica"),
-    ("music", "música"),
-    ("fx", "efectos"),
-    ("Music on (M)", "Música activada (M)"),
-    ("Music off (M)", "Música desactivada (M)"),
-    ("Sound effects on", "Efectos de sonido activados"),
-    ("Sound effects off", "Efectos de sonido desactivados"),
-    ("Fold the bar", "Plegar la barra"),
-    ("Unfold the bar", "Desplegar la barra"),
-    // the parameters
-    ("Copy changes", "Copiar cambios"),
-    ("Every value that differs from its default, as JSON", "Cada valor distinto del predeterminado, en JSON"),
-    ("Reset all", "Restablecer todo"),
-    ("copied", "copiado"),
-    ("Reset", "Restablecer"),
-    ("Reset {}", "Restablecer {}"),
-    ("Compile-time: changing it rebuilds the shader", "De compilación: cambiarlo recompila el shader"),
-    ("Compile-time: fixed without the dev server", "De compilación: fijo sin el servidor de desarrollo"),
-    ("(the parameters come with the shader)", "(los parámetros llegan con el shader)"),
-];
 
 #[cfg(test)]
 mod tests {
@@ -249,5 +112,8 @@ mod tests {
         assert_eq!(tr_in(Lang::Es, "Settings"), "Ajustes");
         assert_eq!(trf_in(Lang::Es, "{} enemies defeated", &[&3]), "3 enemigos derrotados");
         assert_eq!(tr_in(Lang::Es, "not in the table"), "not in the table");
+        // (the parameters' keys: their English in en.json)
+        assert_eq!(Lang::En.table().get("param.exposure").map(String::as_str), Some("Exposure"));
+        assert_eq!(Lang::Es.table().get("param.exposure").map(String::as_str), Some("Exposición"));
     }
 }

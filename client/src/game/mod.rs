@@ -1133,8 +1133,8 @@ impl Game {
             ui.label(egui::RichText::new(crate::i18n::trf("{} souls", &[&self.souls])).strong());
         });
         let w = ui.available_width().min(520.0);
-        let (area, _) = ui.allocate_exact_size(Vec2::new(w, 290.0), egui::Sense::hover());
-        let at = |s: &skills::Skill| area.center() + Vec2::new(s.at.0 * (0.5 * w - 40.0), s.at.1 * 115.0);
+        let (area, _) = ui.allocate_exact_size(Vec2::new(w, 340.0), egui::Sense::hover());
+        let at = |s: &skills::Skill| area.center() + Vec2::new(s.at.0 * (0.5 * w - 40.0), s.at.1 * 140.0);
         let p = ui.painter();
         for s in SKILLS {
             if let Some(n) = s.needs.and_then(skills::skill) {

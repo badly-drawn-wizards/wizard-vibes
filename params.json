@@ -2,11 +2,11 @@
   "$comment": "Tweakable parameters, shown in the drawer and generated into fut/params.fut (uniforms) and fut/config.fut (compile-time, \"compile\": true). Kinds: slider, int, color (linear RGB), checkbox, select, flags (a bitmask of the options; each also becomes a <id>_<option> constant). See dev/params.ts.",
   "groups": [
     {
-      "name": "Output",
+      "name": "group.output",
       "params": [
         {
           "id": "exposure",
-          "label": "Exposure",
+          "label": "param.exposure",
           "kind": "slider",
           "min": 0.2,
           "max": 3,
@@ -15,7 +15,7 @@
         },
         {
           "id": "vignette",
-          "label": "Vignette",
+          "label": "param.vignette",
           "kind": "slider",
           "min": 0,
           "max": 1.5,
@@ -24,7 +24,7 @@
         },
         {
           "id": "aa",
-          "label": "Anti-aliasing",
+          "label": "param.aa",
           "kind": "select",
           "options": [
             "Off",
@@ -35,7 +35,7 @@
         },
         {
           "id": "aa_threshold",
-          "label": "AA edge contrast",
+          "label": "param.aa_threshold",
           "kind": "slider",
           "min": 0.01,
           "max": 0.3,
@@ -44,7 +44,7 @@
         },
         {
           "id": "view",
-          "label": "View",
+          "label": "param.view",
           "kind": "select",
           "options": [
             "Shaded",
@@ -56,7 +56,7 @@
         },
         {
           "id": "layers",
-          "label": "Layers",
+          "label": "param.layers",
           "kind": "flags",
           "options": [
             "Figure",
@@ -77,14 +77,14 @@
       ]
     },
     {
-      "name": "Wizard",
+      "name": "group.wizard",
       "groups": [
         {
-          "name": "Robe & body",
+          "name": "group.robe_body",
           "params": [
             {
               "id": "robe_colour",
-              "label": "Robe",
+              "label": "param.robe_colour",
               "kind": "color",
               "default": [
                 0.2888,
@@ -94,7 +94,7 @@
             },
             {
               "id": "robe_hem",
-              "label": "Robe hem radius",
+              "label": "param.robe_hem",
               "kind": "slider",
               "min": 0.35,
               "max": 0.8,
@@ -103,7 +103,7 @@
             },
             {
               "id": "belt_height",
-              "label": "Belt height",
+              "label": "param.belt_height",
               "kind": "slider",
               "min": 0.75,
               "max": 1.15,
@@ -112,7 +112,7 @@
             },
             {
               "id": "breath",
-              "label": "Breathing",
+              "label": "param.breath",
               "kind": "slider",
               "min": 0,
               "max": 3,
@@ -121,7 +121,7 @@
             },
             {
               "id": "lean",
-              "label": "Lean into turns",
+              "label": "param.lean",
               "kind": "slider",
               "min": 0,
               "max": 2,
@@ -131,11 +131,11 @@
           ]
         },
         {
-          "name": "Face",
+          "name": "group.face",
           "params": [
             {
               "id": "skin_colour",
-              "label": "Skin",
+              "label": "param.skin_colour",
               "kind": "color",
               "default": [
                 0.85,
@@ -145,7 +145,7 @@
             },
             {
               "id": "iris_colour",
-              "label": "Eyes",
+              "label": "param.iris_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -156,7 +156,7 @@
             },
             {
               "id": "beard_tint",
-              "label": "Beard tint",
+              "label": "param.beard_tint",
               "kind": "color",
               "default": [
                 1,
@@ -166,7 +166,7 @@
             },
             {
               "id": "brow_colour",
-              "label": "Eyebrows",
+              "label": "param.brow_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -178,11 +178,11 @@
           ]
         },
         {
-          "name": "Hat",
+          "name": "group.hat",
           "params": [
             {
               "id": "hat_colour",
-              "label": "Hat",
+              "label": "param.hat_colour",
               "kind": "color",
               "default": [
                 0.09,
@@ -192,7 +192,7 @@
             },
             {
               "id": "hat_droop",
-              "label": "Hat droop",
+              "label": "param.hat_droop",
               "kind": "slider",
               "min": 0,
               "max": 1.5,
@@ -201,7 +201,7 @@
             },
             {
               "id": "band_height",
-              "label": "Hat band height",
+              "label": "param.band_height",
               "kind": "slider",
               "min": 0.01,
               "max": 0.2,
@@ -210,7 +210,7 @@
             },
             {
               "id": "band_colour",
-              "label": "Hat band",
+              "label": "param.band_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -221,7 +221,7 @@
             },
             {
               "id": "star_colour",
-              "label": "Hat stars",
+              "label": "param.star_colour",
               "kind": "color",
               "default": [
                 1,
@@ -231,7 +231,7 @@
             },
             {
               "id": "star_glow",
-              "label": "Hat star glow",
+              "label": "param.star_glow",
               "kind": "slider",
               "min": 0,
               "max": 2,
@@ -241,11 +241,11 @@
           ]
         },
         {
-          "name": "Gear",
+          "name": "group.gear",
           "params": [
             {
               "id": "gold_colour",
-              "label": "Gold (cradle, buckle)",
+              "label": "param.gold_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -256,7 +256,7 @@
             },
             {
               "id": "leather_colour",
-              "label": "Leather",
+              "label": "param.leather_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -267,7 +267,7 @@
             },
             {
               "id": "tome_colour",
-              "label": "Tome",
+              "label": "param.tome_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -278,7 +278,7 @@
             },
             {
               "id": "wood_colour",
-              "label": "Staff wood",
+              "label": "param.wood_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -290,11 +290,11 @@
           ]
         },
         {
-          "name": "Orb",
+          "name": "group.orb",
           "params": [
             {
               "id": "orb_light",
-              "label": "Light",
+              "label": "param.orb_light",
               "kind": "slider",
               "min": 0,
               "max": 8,
@@ -303,7 +303,7 @@
             },
             {
               "id": "orb_glow",
-              "label": "Glow",
+              "label": "param.orb_glow",
               "kind": "slider",
               "min": 0,
               "max": 3,
@@ -312,7 +312,7 @@
             },
             {
               "id": "orb_glow_extent",
-              "label": "Glow extent",
+              "label": "param.orb_glow_extent",
               "kind": "slider",
               "min": 0.02,
               "max": 0.3,
@@ -321,7 +321,7 @@
             },
             {
               "id": "orb_ior",
-              "label": "Index of refraction",
+              "label": "param.orb_ior",
               "kind": "slider",
               "min": 1,
               "max": 2.4,
@@ -330,13 +330,13 @@
             },
             {
               "id": "orb_reflections",
-              "label": "Reflections",
+              "label": "param.orb_reflections",
               "kind": "checkbox",
               "default": false
             },
             {
               "id": "orb_glow_colour",
-              "label": "Glow colour",
+              "label": "param.orb_glow_colour",
               "kind": "color",
               "default": [
                 0.35,
@@ -346,7 +346,7 @@
             },
             {
               "id": "lightning",
-              "label": "Lightning brightness",
+              "label": "param.lightning",
               "kind": "slider",
               "min": 0,
               "max": 3,
@@ -355,7 +355,7 @@
             },
             {
               "id": "shield_colour",
-              "label": "Shield",
+              "label": "param.shield_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -367,11 +367,11 @@
           ]
         },
         {
-          "name": "Potions",
+          "name": "group.potions",
           "params": [
             {
               "id": "potion_light",
-              "label": "Light",
+              "label": "param.potion_light",
               "kind": "slider",
               "min": 0,
               "max": 4,
@@ -380,7 +380,7 @@
             },
             {
               "id": "potion_glow",
-              "label": "Glow",
+              "label": "param.potion_glow",
               "kind": "slider",
               "min": 0,
               "max": 5,
@@ -389,7 +389,7 @@
             },
             {
               "id": "potion_colour_1",
-              "label": "Left",
+              "label": "param.potion_colour_1",
               "compile": true,
               "kind": "color",
               "default": [
@@ -400,7 +400,7 @@
             },
             {
               "id": "potion_colour_2",
-              "label": "Middle",
+              "label": "param.potion_colour_2",
               "compile": true,
               "kind": "color",
               "default": [
@@ -411,7 +411,7 @@
             },
             {
               "id": "potion_colour_3",
-              "label": "Right",
+              "label": "param.potion_colour_3",
               "compile": true,
               "kind": "color",
               "default": [
@@ -425,14 +425,14 @@
       ]
     },
     {
-      "name": "Platform",
+      "name": "group.platform",
       "groups": [
         {
-          "name": "Rock, ice & carpet",
+          "name": "group.rock_ice_carpet",
           "params": [
             {
               "id": "rock_dark",
-              "label": "Dark bands",
+              "label": "param.rock_dark",
               "kind": "color",
               "default": [
                 0.55,
@@ -442,7 +442,7 @@
             },
             {
               "id": "rock_light",
-              "label": "Light bands",
+              "label": "param.rock_light",
               "kind": "color",
               "default": [
                 0.72,
@@ -452,7 +452,7 @@
             },
             {
               "id": "rock_top",
-              "label": "Top",
+              "label": "param.rock_top",
               "kind": "color",
               "default": [
                 0.3,
@@ -462,7 +462,7 @@
             },
             {
               "id": "ice_colour",
-              "label": "Ice",
+              "label": "param.ice_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -473,7 +473,7 @@
             },
             {
               "id": "carpet_colour",
-              "label": "Carpet",
+              "label": "param.carpet_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -484,7 +484,7 @@
             },
             {
               "id": "carpet_trim",
-              "label": "Carpet border",
+              "label": "param.carpet_trim",
               "compile": true,
               "kind": "color",
               "default": [
@@ -496,11 +496,11 @@
           ]
         },
         {
-          "name": "Runes",
+          "name": "group.runes",
           "params": [
             {
               "id": "rune_glow",
-              "label": "Glow",
+              "label": "param.rune_glow",
               "kind": "slider",
               "min": 0,
               "max": 12,
@@ -509,7 +509,7 @@
             },
             {
               "id": "rune_pulse",
-              "label": "Pulse",
+              "label": "param.rune_pulse",
               "kind": "slider",
               "min": 0,
               "max": 0.5,
@@ -518,7 +518,7 @@
             },
             {
               "id": "rune_colour",
-              "label": "Colour",
+              "label": "param.rune_colour",
               "kind": "color",
               "default": [
                 0.25,
@@ -532,7 +532,7 @@
       "params": [
         {
           "id": "platform",
-          "label": "Platform",
+          "label": "param.platform",
           "kind": "select",
           "options": [
             "Rock",
@@ -540,19 +540,19 @@
             "Magic carpet"
           ],
           "default": 0,
-          "doc": "What the wizard flies on (also in the top bar)."
+          "doc": "param.platform.doc"
         }
       ]
     },
     {
-      "name": "Sky",
+      "name": "group.sky",
       "groups": [
         {
-          "name": "Sky & stars",
+          "name": "group.sky_stars",
           "params": [
             {
               "id": "sky_horizon",
-              "label": "Horizon",
+              "label": "param.sky_horizon",
               "kind": "color",
               "default": [
                 0.06,
@@ -562,7 +562,7 @@
             },
             {
               "id": "sky_zenith",
-              "label": "Zenith",
+              "label": "param.sky_zenith",
               "kind": "color",
               "default": [
                 0.004,
@@ -572,7 +572,7 @@
             },
             {
               "id": "star_density",
-              "label": "Star density",
+              "label": "param.star_density",
               "kind": "slider",
               "min": 0,
               "max": 0.01,
@@ -581,7 +581,7 @@
             },
             {
               "id": "star_brightness",
-              "label": "Star brightness",
+              "label": "param.star_brightness",
               "kind": "slider",
               "min": 0,
               "max": 8000,
@@ -590,7 +590,7 @@
             },
             {
               "id": "twinkle",
-              "label": "Twinkle",
+              "label": "param.twinkle",
               "kind": "slider",
               "min": 0,
               "max": 1,
@@ -600,11 +600,11 @@
           ]
         },
         {
-          "name": "Moon",
+          "name": "group.moon",
           "params": [
             {
               "id": "moon_colour",
-              "label": "Colour",
+              "label": "param.moon_colour",
               "kind": "color",
               "default": [
                 1,
@@ -614,7 +614,7 @@
             },
             {
               "id": "moon_strength",
-              "label": "Strength",
+              "label": "param.moon_strength",
               "kind": "slider",
               "min": 0,
               "max": 3,
@@ -623,7 +623,7 @@
             },
             {
               "id": "moon_azimuth",
-              "label": "Azimuth",
+              "label": "param.moon_azimuth",
               "kind": "slider",
               "min": -180,
               "max": 180,
@@ -632,7 +632,7 @@
             },
             {
               "id": "moon_elevation",
-              "label": "Elevation",
+              "label": "param.moon_elevation",
               "kind": "slider",
               "min": 2,
               "max": 85,
@@ -641,7 +641,7 @@
             },
             {
               "id": "moon_size",
-              "label": "Size",
+              "label": "param.moon_size",
               "kind": "slider",
               "min": 0.01,
               "max": 0.15,
@@ -650,7 +650,7 @@
             },
             {
               "id": "moon_brightness",
-              "label": "Disc brightness",
+              "label": "param.moon_brightness",
               "kind": "slider",
               "min": 0,
               "max": 3,
@@ -659,7 +659,7 @@
             },
             {
               "id": "moon_halo",
-              "label": "Halo",
+              "label": "param.moon_halo",
               "kind": "slider",
               "min": 0,
               "max": 0.5,
@@ -669,11 +669,11 @@
           ]
         },
         {
-          "name": "Atmosphere",
+          "name": "group.atmosphere",
           "params": [
             {
               "id": "fog",
-              "label": "Fog",
+              "label": "param.fog",
               "kind": "slider",
               "min": 0,
               "max": 0.005,
@@ -682,7 +682,7 @@
             },
             {
               "id": "view_distance",
-              "label": "View distance",
+              "label": "param.view_distance",
               "kind": "slider",
               "min": 30,
               "max": 500,
@@ -691,7 +691,7 @@
             },
             {
               "id": "cloud_cover",
-              "label": "Cloud cover",
+              "label": "param.cloud_cover",
               "kind": "slider",
               "min": 0,
               "max": 0.7,
@@ -700,7 +700,7 @@
             },
             {
               "id": "cloud_density",
-              "label": "Cloud density",
+              "label": "param.cloud_density",
               "kind": "slider",
               "min": 0,
               "max": 4,
@@ -709,7 +709,7 @@
             },
             {
               "id": "cloud_colour",
-              "label": "Cloud colour",
+              "label": "param.cloud_colour",
               "kind": "color",
               "default": [
                 0.42,
@@ -722,14 +722,14 @@
       ]
     },
     {
-      "name": "Land",
+      "name": "group.land",
       "groups": [
         {
-          "name": "Terrain",
+          "name": "group.terrain",
           "params": [
             {
               "id": "moss_colour",
-              "label": "Moss",
+              "label": "param.moss_colour",
               "kind": "color",
               "default": [
                 0.09,
@@ -739,7 +739,7 @@
             },
             {
               "id": "sand_colour",
-              "label": "Desert sand",
+              "label": "param.sand_colour",
               "kind": "color",
               "default": [
                 0.42,
@@ -749,7 +749,7 @@
             },
             {
               "id": "stone_colour",
-              "label": "Stone",
+              "label": "param.stone_colour",
               "kind": "color",
               "default": [
                 0.2,
@@ -759,7 +759,7 @@
             },
             {
               "id": "snow_colour",
-              "label": "Snow",
+              "label": "param.snow_colour",
               "kind": "color",
               "default": [
                 0.75,
@@ -769,7 +769,7 @@
             },
             {
               "id": "snow_line",
-              "label": "Snow line",
+              "label": "param.snow_line",
               "kind": "slider",
               "min": 3,
               "max": 11,
@@ -779,11 +779,11 @@
           ]
         },
         {
-          "name": "Water",
+          "name": "group.water",
           "params": [
             {
               "id": "sea_level",
-              "label": "Sea level",
+              "label": "param.sea_level",
               "kind": "slider",
               "min": -3,
               "max": 3,
@@ -792,7 +792,7 @@
             },
             {
               "id": "river_width",
-              "label": "River width",
+              "label": "param.river_width",
               "kind": "slider",
               "min": 0,
               "max": 0.08,
@@ -801,7 +801,7 @@
             },
             {
               "id": "water_colour",
-              "label": "Water",
+              "label": "param.water_colour",
               "kind": "color",
               "default": [
                 0.01,
@@ -812,11 +812,11 @@
           ]
         },
         {
-          "name": "Trees",
+          "name": "group.trees",
           "params": [
             {
               "id": "tree_density",
-              "label": "Trees",
+              "label": "param.tree_density",
               "kind": "slider",
               "min": 0,
               "max": 1,
@@ -825,7 +825,7 @@
             },
             {
               "id": "leaf_colour",
-              "label": "Leaves",
+              "label": "param.leaf_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -836,7 +836,7 @@
             },
             {
               "id": "needle_colour",
-              "label": "Pine needles",
+              "label": "param.needle_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -847,7 +847,7 @@
             },
             {
               "id": "trunk_colour",
-              "label": "Bark",
+              "label": "param.trunk_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -859,11 +859,11 @@
           ]
         },
         {
-          "name": "Buildings",
+          "name": "group.buildings",
           "params": [
             {
               "id": "structure_density",
-              "label": "Buildings",
+              "label": "param.structure_density",
               "kind": "slider",
               "min": 0,
               "max": 1,
@@ -872,7 +872,7 @@
             },
             {
               "id": "brick_size",
-              "label": "Brick size",
+              "label": "param.brick_size",
               "kind": "slider",
               "min": 0.08,
               "max": 0.5,
@@ -881,7 +881,7 @@
             },
             {
               "id": "wall_colour",
-              "label": "Cottage walls",
+              "label": "param.wall_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -892,7 +892,7 @@
             },
             {
               "id": "thatch_colour",
-              "label": "Cottage roofs",
+              "label": "param.thatch_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -903,7 +903,7 @@
             },
             {
               "id": "tower_colour",
-              "label": "Tower stone",
+              "label": "param.tower_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -914,7 +914,7 @@
             },
             {
               "id": "slate_colour",
-              "label": "Tower roofs",
+              "label": "param.slate_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -925,7 +925,7 @@
             },
             {
               "id": "sandstone_colour",
-              "label": "Pyramids",
+              "label": "param.sandstone_colour",
               "compile": true,
               "kind": "color",
               "default": [
@@ -936,7 +936,7 @@
             },
             {
               "id": "window_colour",
-              "label": "Window light",
+              "label": "param.window_colour",
               "kind": "color",
               "default": [
                 1,
@@ -946,7 +946,7 @@
             },
             {
               "id": "window_glow",
-              "label": "Window glow",
+              "label": "param.window_glow",
               "kind": "slider",
               "min": 0,
               "max": 8,
@@ -958,34 +958,34 @@
       ]
     },
     {
-      "name": "Enemies",
+      "name": "group.enemies",
       "params": [
         {
           "id": "enemies",
-          "label": "Enemies",
+          "label": "param.enemies",
           "kind": "int",
           "min": 0,
           "max": 6,
           "default": 5,
-          "doc": "Other wizards flying round him."
+          "doc": "param.enemies.doc"
         },
         {
           "id": "enemy_seed",
-          "label": "Appearance seed",
+          "label": "param.enemy_seed",
           "kind": "int",
           "min": 0,
           "max": 999,
           "default": 1,
-          "doc": "Picks each enemy's looks, platform and circle colour."
+          "doc": "param.enemy_seed.doc"
         }
       ]
     },
     {
-      "name": "Lighting",
+      "name": "group.lighting",
       "params": [
         {
           "id": "fill",
-          "label": "Sky fill",
+          "label": "param.fill",
           "kind": "slider",
           "min": 0,
           "max": 1.5,
@@ -994,7 +994,7 @@
         },
         {
           "id": "rim",
-          "label": "Rim",
+          "label": "param.rim",
           "kind": "slider",
           "min": 0,
           "max": 1,
@@ -1003,7 +1003,7 @@
         },
         {
           "id": "sheen",
-          "label": "Cloth sheen",
+          "label": "param.sheen",
           "kind": "slider",
           "min": 0,
           "max": 2,
@@ -1013,11 +1013,11 @@
       ]
     },
     {
-      "name": "Flight",
+      "name": "group.flight",
       "params": [
         {
           "id": "bank",
-          "label": "Bank into turns",
+          "label": "param.bank",
           "kind": "slider",
           "min": 0,
           "max": 4,
@@ -1027,11 +1027,11 @@
       ]
     },
     {
-      "name": "Shader (recompiles)",
+      "name": "group.shader_recompiles",
       "params": [
         {
           "id": "march_steps",
-          "label": "March steps",
+          "label": "param.march_steps",
           "kind": "int",
           "min": 32,
           "max": 512,
@@ -1040,7 +1040,7 @@
         },
         {
           "id": "terrain_steps",
-          "label": "Terrain steps",
+          "label": "param.terrain_steps",
           "kind": "int",
           "min": 32,
           "max": 512,
@@ -1049,7 +1049,7 @@
         },
         {
           "id": "shadow_steps",
-          "label": "Shadow steps",
+          "label": "param.shadow_steps",
           "kind": "int",
           "min": 16,
           "max": 192,
@@ -1058,7 +1058,7 @@
         },
         {
           "id": "cloud_samples",
-          "label": "Cloud samples",
+          "label": "param.cloud_samples",
           "kind": "int",
           "min": 6,
           "max": 64,
@@ -1067,35 +1067,35 @@
         },
         {
           "id": "draw_trees",
-          "label": "Trees (2-6 ms at 1080p)",
+          "label": "param.draw_trees",
           "kind": "checkbox",
           "default": true,
           "compile": true
         },
         {
           "id": "full_enemies",
-          "label": "Enemies as detailed as him (slow)",
+          "label": "param.full_enemies",
           "kind": "checkbox",
           "default": true,
           "compile": true
         },
         {
           "id": "orb_tendrils",
-          "label": "Lightning inside the orb",
+          "label": "param.orb_tendrils",
           "kind": "checkbox",
           "default": true,
           "compile": true
         },
         {
           "id": "orb_arcs",
-          "label": "Lightning arcs",
+          "label": "param.orb_arcs",
           "kind": "checkbox",
           "default": false,
           "compile": true
         },
         {
           "id": "bolts_per_kind",
-          "label": "Bolts",
+          "label": "param.bolts_per_kind",
           "kind": "int",
           "min": 1,
           "max": 8,
@@ -1104,7 +1104,7 @@
         },
         {
           "id": "max_spells",
-          "label": "Spells at once",
+          "label": "param.max_spells",
           "kind": "int",
           "min": 1,
           "max": 16,
