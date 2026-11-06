@@ -198,8 +198,9 @@ pub fn patch(k: i32) -> Patch {
     let swell_pan = |l: Layer| Layer { swell: true, pan: true, ..l };
     let am = |l: Layer, am_rate: f32, am_depth: f32| Layer { am_rate, am_depth, ..l };
     if k == sfx_cast_fire {
-        // a whoosh opening up as it goes, over a soft thump
-        Patch { length: 0.9, a: bp(400.0, 2500.0, 0.25, 0.8, 0.6, 0.01, 0.25), b: lp(300.0, 120.0, 0.15, 0.7, 0.5, 0.005, 0.12), wet: 0.15, peak: 0.8 }
+        // a woof: flame catching, a breath of dark air and a low resonant
+        // body (with the whump and crackle), more push than swish
+        Patch { length: 0.8, a: lp(1100.0, 260.0, 0.22, 0.9, 0.85, 0.008, 0.16), b: lp(210.0, 130.0, 0.3, 2.2, 0.75, 0.012, 0.2), wet: 0.12, peak: 0.85 }
     } else if k == sfx_cast_strike {
         // a snap, and a buzzing hiss trembling at the mains' rate
         Patch { length: 0.8, a: bp(3000.0, 6000.0, 0.1, 2.0, 0.4, 0.001, 0.06), b: am(bp(1200.0, 1200.0, 1.0, 6.0, 0.25, 0.002, 0.15), 90.0, 0.8), wet: 0.2, peak: 0.75 }
@@ -207,14 +208,17 @@ pub fn patch(k: i32) -> Patch {
         // a resonant swoosh crossing from left to right, air above it
         Patch { length: 1.1, a: swell_pan(bp(500.0, 2200.0, 0.8, 3.0, 0.7, 0.0, 0.0)), b: swell_pan(bp(2500.0, 5000.0, 0.8, 1.0, 0.3, 0.0, 0.0)), wet: 0.25, peak: 0.7 }
     } else if k == sfx_burst {
-        // a roar darkening as it dies, over a deep thump
-        Patch { length: 2.2, a: lp(2500.0, 150.0, 0.8, 0.9, 0.8, 0.003, 0.5), b: lp(120.0, 120.0, 1.0, 1.2, 0.9, 0.002, 0.3), wet: 0.35, peak: 0.95 }
+        // an explosion: a roar opening bright and darkening as it dies, over
+        // a low rumble that shakes as it rolls away (with the crack, the
+        // falling boom and the debris)
+        Patch { length: 2.6, a: lp(2600.0, 140.0, 0.6, 0.8, 0.7, 0.001, 0.5), b: am(lp(95.0, 70.0, 1.5, 1.6, 1.2, 0.004, 0.65), 7.0, 0.35), wet: 0.4, peak: 0.97 }
     } else if k == sfx_thunder {
         // a crack, then rolling rumble
         Patch { length: 3.0, a: bp(4000.0, 2500.0, 0.1, 0.5, 0.7, 0.0005, 0.05), b: am(lp(180.0, 180.0, 1.0, 0.8, 1.0, 0.05, 0.9), 2.3, 0.6), wet: 0.5, peak: 0.95 }
     } else if k == sfx_gust {
-        // a glassy hiss falling, under the chimes
-        Patch { length: 1.3, a: bp(6000.0, 3000.0, 0.3, 4.0, 0.3, 0.001, 0.2), b: bp(1500.0, 1500.0, 1.0, 1.0, 0.2, 0.001, 0.1), wet: 0.35, peak: 0.6 }
+        // a wind blade striking: a sharp slice down from very high, then
+        // air swirling and tumbling away (with a shing and a few chimes)
+        Patch { length: 1.2, a: bp(8000.0, 1800.0, 0.12, 1.4, 0.75, 0.0005, 0.06), b: am(bp(1300.0, 450.0, 0.7, 2.0, 0.5, 0.012, 0.35), 11.0, 0.55), wet: 0.3, peak: 0.7 }
     } else if k == sfx_hurt {
         // a smack (with the thud and the sour chord)
         Patch { length: 0.7, a: lp(1500.0, 300.0, 0.1, 1.0, 0.6, 0.001, 0.08), b: quiet, wet: 0.1, peak: 0.85 }
@@ -267,29 +271,39 @@ pub fn layer_gain(l: Layer, length: f32, c: i32, t: f32) -> f32 {
 pub fn tonal(k: i32, c: i32, t: f32) -> f32 {
     let sd = 1000 * c;
     if k == sfx_cast_fire {
-        0.25 * env(0.01, 0.25, t) * crackle(sd + 2, 120.0, t)
+        // the whump: a low sine falling from 90 to 55 Hz; a little crackle
+        let whump = (tau * (55.0 * t + 35.0 / 14.0 * (1.0 - (-14.0 * t).exp()))).sin() * env(0.01, 0.13, t);
+        0.55 * whump + 0.1 * env(0.03, 0.25, t) * crackle(sd + 2, 90.0, t)
     } else if k == sfx_cast_strike {
         // a zap: a buzzing tone diving in pitch
         let buzz = 0.6 + 0.4 * (tau * 60.0 * t).sin();
         0.3 * env(0.003, 0.12, t) * buzz * tone(1400.0, -7.0, 8, t)
     } else if k == sfx_burst {
-        let boom = (tau * (35.0 * t + 30.0 / 6.0 * (1.0 - (-6.0 * t).exp()))).sin() * env(0.004, 0.35, t);
-        0.5 * boom + 0.18 * env(0.05, 0.5, t) * crackle(sd + 6, 60.0 * (-t).exp(), t)
+        // the crack (dense clicks for a few milliseconds), the boom (two
+        // sines falling from 60 to 30 Hz and an octave under), and debris
+        // pattering down
+        let crack = env(0.0003, 0.012, t) * crackle(sd + 5, 4000.0, t);
+        let fall = |f: f32| (tau * (0.5 * f * t + 0.5 * f / 5.0 * (1.0 - (-5.0 * t).exp()))).sin();
+        let boom = (0.7 * fall(60.0) + 0.5 * fall(30.0)) * env(0.003, 0.45, t);
+        0.35 * crack + 0.85 * boom + 0.14 * env(0.08, 0.7, t) * crackle(sd + 6, 70.0 * (-0.8 * t).exp(), t)
     } else if k == sfx_thunder {
         // a second, smaller crack a moment after the first
         0.3 * env(0.0005, 0.03, t - 0.12) * crackle(sd + 7, 200.0, t)
     } else if k == sfx_gust {
-        // the blade shattering: high chimes, scattered
+        // the shing (a blade's ring: two inharmonic partials, a hair apart
+        // on each side), and the blade's shards: a few chimes, scattered
+        let ring = |f: f32| (tau * f * (1.0 + 0.002 * c as f32) * t).sin();
+        let shing = env(0.0008, 0.18, t) * (ring(3150.0) + 0.6 * ring(4730.0) + 0.3 * ring(6890.0));
         let chime = |j: i32| {
-            let at = 0.15 * hash2(sd + j, 21);
-            let f = 2000.0 + 4000.0 * hash2(sd + j, 23);
-            env(0.001, 0.12, t - at) * (tau * f * (t - at)).sin()
+            let at = 0.04 + 0.2 * hash2(sd + j, 21);
+            let f = 2400.0 + 3600.0 * hash2(sd + j, 23);
+            env(0.001, 0.08, t - at) * (tau * f * (t - at)).sin()
         };
         let mut s = 0.0f32;
-        for j in 0..8 {
+        for j in 0..4 {
             s = s + chime(j);
         }
-        0.12 * s
+        0.14 * shing + 0.06 * s
     } else if k == sfx_hurt {
         let thud = (tau * (60.0 * t + 50.0 / 12.0 * (1.0 - (-12.0 * t).exp()))).sin() * env(0.003, 0.12, t);
         0.6 * thud + 0.12 * env(0.005, 0.25, t) * (tone(330.0, 0.0, 4, t) + tone(349.0, 0.0, 4, t))
