@@ -1,5 +1,5 @@
 // fut/textures.fut: surface textures: bark on the staff, cloth on the robe,
-// leather on the belt. Each material has a height field (in world units,
+// leather on the belt; bark, leaves and needles on the trees. Each material has a height field (in world units,
 // along the normal) that tilts the shading normal (bump mapping), and colour
 // variation.
 //
@@ -393,6 +393,85 @@ pub fn terrain_bump(fp: f32, w: Vec3) -> f32 {
 }
 
 // ---------------------------------------------------------------------
+// Trees, in world space (the trunks and branches mostly stand up, so bark
+// runs along y). Each fades by the footprint as the rest do; a far tree is
+// its colours alone.
+
+// Bark: plates and furrows stretched up the trunk (about 0.06 across),
+// finer cracks, and lighter and darker patches: (height, plate, tone).
+#[inline(never)]
+pub fn tree_bark(fp: f32, w: Vec3) -> (f32, f32, f32) {
+    let plate = plates(fp, 0.06, 16.0, 2.2, 2.0, w);
+    let cracks = vnoise3(vec(w.x * 70.0, w.y * 9.0, w.z * 70.0)) * keep(fp, 0.012);
+    let tone = vnoise3(vec(w.x * 3.0, w.y * 0.8, w.z * 3.0));
+    (0.006 * plate + 0.0015 * cracks, plate, tone)
+}
+
+// Leaves: a 3D cellular pattern, a leaf to a cell (about 0.05 across), each
+// stretched along a direction of its own (so leaves, not tiles), domed
+// (high at its middle, low at its edges) and tilted along its length (so
+// each takes the light its own way), its own shade, with a midrib
+// along that direction: (height, edge (1 on an edge), shade (0..1), vein
+// (1 on the midrib)). Too small to show, none of it.
+#[inline(never)]
+pub fn leaf_cells(fp: f32, w: Vec3) -> (f32, f32, f32, f32) {
+    let k = keep(fp, 0.05);
+    if k <= 0.0 {
+        return (0.0, 0.0, 0.5, 0.0);
+    }
+    let q = scale(20.0, w);
+    let (cx, cy, cz) = (q.x.floor(), q.y.floor(), q.z.floor());
+    let (mut f1, mut f2) = (9.0f32, 9.0f32);
+    let (mut id, mut near, mut tilt) = (0.5f32, splat(0.0), 0f32);
+    let mut i = 0;
+    while i < 27 {
+        let (dx, dy, dz) = (imod(i, 3) - 1, imod(idiv(i, 3), 3) - 1, idiv(i, 9) - 1);
+        let (ix, iy, iz) = (ftoi(cx) + dx, ftoi(cy) + dy, ftoi(cz) + dz);
+        let c = vec(ix as f32 + 0.15 + 0.7 * hash3(ix, iy, iz), iy as f32 + 0.15 + 0.7 * hash3(iy, iz, ix), iz as f32 + 0.15 + 0.7 * hash3(iz, ix, iy));
+        // (the leaf's direction, and the distance squeezed along it: an
+        // ellipse twice as long as wide)
+        let a = 2.0 * PI * hash3(ix - 5, iy + 2, iz + 9);
+        let dir = normalise(vec(a.cos(), 0.6 * hash3(iz, iy, ix) - 0.3, a.sin()));
+        let d = q - c;
+        let along = dot(d, dir);
+        let d = d - scale(0.5 * along, dir);
+        let d2 = dot(d, d);
+        if d2 < f1 {
+            f2 = f1;
+            f1 = d2;
+            id = hash3(ix + 7, iy - 3, iz + 11);
+            tilt = hash3(iy + 4, ix - 6, iz + 1) - 0.5;
+            near = vec(along, length(d - scale(dot(d, dir), dir)), 0.0);
+        } else if d2 < f2 {
+            f2 = d2;
+        }
+        i += 1;
+    }
+    let (f1, f2) = (f1.sqrt(), f2.sqrt());
+    let edge = smoothstep(0.15, 0.0, f2 - f1) * k;
+    // (the midrib: the line through the leaf's middle along its direction;
+    // near.y is the distance from it)
+    let vein = smoothstep(0.05, 0.0, near.y) * smoothstep(0.7, 0.2, f1) * keep(fp, 0.02);
+    // (each leaf also tilted along its length, by its own amount: some
+    // catch the light, some do not; the tilt fading out at its edge, where
+    // the next leaf's starts, so the height has no step there to sparkle)
+    let inner = smoothstep(0.0, 0.25, f2 - f1);
+    (0.004 * k * ((1.0 - f1 * f1).maximum(0.0) + 1.6 * tilt * near.x * inner), edge, id, vein)
+}
+
+// Needles: streaks running down and round each tier, broken into bunches
+// (a noise's patches) with darker gaps between: (height, streak (1 along a
+// needle, 0 in a gap)).
+#[inline(never)]
+pub fn needle_streaks(fp: f32, w: Vec3) -> (f32, f32) {
+    let warp = 2.0 * vnoise3(scale(5.0, w));
+    let a = fract(w.x * 26.0 + w.z * 21.0 + 9.0 * w.y + warp);
+    let bunch = smoothstep(0.3, 0.65, vnoise3(vec(w.x * 9.0, w.y * 5.0, w.z * 9.0)));
+    let streak = (1.0 - (2.0 * a - 1.0).abs()) * bunch * keep(fp, 0.04);
+    (0.004 * streak * streak, streak)
+}
+
+// ---------------------------------------------------------------------
 
 // Height field of material m, or 0 where it has none.
 pub fn bump_height(pose: Pose, fp: f32, m: i32, p: Vec3) -> f32 {
@@ -412,6 +491,12 @@ pub fn bump_height(pose: Pose, fp: f32, m: i32, p: Vec3) -> f32 {
         if pose.prm.platform == platform_rock { flagstone_height(fp, p) } else { 0.0 }
     } else if m == m_terrain {
         terrain_bump(fp, to_world(pose.fl, p))
+    } else if m == m_trunk {
+        tree_bark(fp, to_world(pose.fl, p)).0
+    } else if m == m_leaves {
+        leaf_cells(fp, to_world(pose.fl, p)).0
+    } else if m == m_needles {
+        needle_streaks(fp, to_world(pose.fl, p)).0
     } else {
         0.0
     }
@@ -419,7 +504,7 @@ pub fn bump_height(pose: Pose, fp: f32, m: i32, p: Vec3) -> f32 {
 
 #[inline]
 pub fn has_bump(m: i32) -> bool {
-    m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork || m == m_hat || m == m_ground || m == m_terrain
+    m == m_staff || m == m_robe || m == m_leather || m == m_beard || m == m_cork || m == m_hat || m == m_ground || m == m_terrain || m == m_trunk || m == m_leaves || m == m_needles
 }
 
 // Tilts normal n by the gradient of the height field h across the surface.

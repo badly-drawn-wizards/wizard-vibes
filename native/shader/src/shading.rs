@@ -430,17 +430,33 @@ pub fn is_tree(m: i32) -> bool {
 }
 
 #[inline(never)]
-pub fn tree_material(trunk: Vec3, leaf: Vec3, needle: Vec3, m: i32, w: Vec3) -> Material {
+pub fn tree_material(trunk: Vec3, leaf: Vec3, needle: Vec3, fp: f32, m: i32, w: Vec3) -> Material {
     if m == m_trunk {
-        Material { ks: 0.02, ..plain(scale(0.7 + 0.6 * vnoise2(w.y * 9.0, w.z.atan2(w.x) * 3.0), trunk)) }
+        // bark: lighter plates, dark narrow furrows, patches along the trunk
+        let (_, plate, tone) = tree_bark(fp, w);
+        let furrow = smoothstep(0.25, 0.0, plate);
+        Material { ks: 0.02, ..plain(scale((0.75 + 0.5 * tone) * (1.0 - 0.6 * furrow), trunk)) }
     } else {
-        // clumps of lighter and darker leaves, a little sheen on the lit side
+        // clumps of lighter and darker foliage, a little sheen on the lit
+        // side; up close, each leaf its own shade, darker at its edges, its
+        // midrib lighter (or each needle's streak)
         let v = 0.6 * vnoise3(scale(3.0, w)) + 0.4 * vnoise3(scale(11.0, w));
+        // (each leaf a little yellower or bluer; a few gaps between them, the
+        // crown's shade showing through)
+        let (detail, hue) = if m == m_leaves {
+            let (_, edge, shade, vein) = leaf_cells(fp, w);
+            let gap = smoothstep(0.1, 0.0, shade) * keep(fp, 0.05);
+            ((0.85 + 0.3 * shade) * (1.0 - 0.1 * edge) * (1.0 + 0.25 * vein) * (1.0 - 0.6 * gap), vec(1.0 + 0.25 * (shade - 0.5), 1.0, 1.0 - 0.3 * (shade - 0.5)))
+        } else {
+            let (_, streak) = needle_streaks(fp, w);
+            (0.6 + 0.65 * streak, splat(1.0))
+        };
+        let base = if m == m_leaves { leaf } else { needle };
         Material {
-            ks: 0.12,
-            shininess: 12.0,
+            ks: if m == m_leaves { 0.16 } else { 0.1 },
+            shininess: 14.0,
             rim: false,
-            ..plain(scale(0.55 + 0.9 * v, if m == m_leaves { leaf } else { needle }))
+            ..plain(scale((0.55 + 0.9 * v) * detail, base * hue))
         }
     }
 }
@@ -648,7 +664,7 @@ pub fn surface(pose: Pose, g: Glow, tagged: i32, p: Vec3, rd: Vec3, t: f32) -> V
         ng
     };
     let mat = if is_tree(m) {
-        tree_material(trunk_colour, leaf_colour, needle_colour, m, to_world(pose.fl, p))
+        tree_material(trunk_colour, leaf_colour, needle_colour, fp, m, to_world(pose.fl, p))
     } else if is_enemy(m) {
         enemy_material(pose.prm, g, pose.foes, pose.secs, pose.tm, pose.fl, fp, m, p, n)
     } else {
