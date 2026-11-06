@@ -11,7 +11,7 @@
 // under 8 the seconds it has still to appear, 8 and over 8 plus the seconds
 // since its defeat.
 
-use super::spells::{Cut, Spells, Target, BURST, CHARGE, FIRE, HIS, MARK, STRIKE, WARMUP, WIND, WINDUP};
+use super::spells::{Cut, Spells, Target, BURST, CHARGE, FIRE, FROST, HIS, MARK, MISSILE, STRIKE, WARMUP, WELL_REACH, WIND, WINDUP};
 use super::vec::{add, dist, dot, len, normalise, scale, sub, turn, V3};
 use super::Rng;
 use std::f32::consts::PI;
@@ -63,7 +63,7 @@ pub fn kill_code(kind: u32, cut: Option<Cut>, pos: V3, yaw: f32) -> f32 {
 
 fn damage(kind: u32) -> i32 {
     match kind {
-        BURST | WIND => 1,
+        BURST | WIND | FROST | MISSILE => 1,
         STRIKE => 2,
         _ => 0,
     }
@@ -170,6 +170,10 @@ const AGGRO_HIM: f32 = 3.0;
 const AGGRO_OTHER: f32 = 1.0;
 const AGGRO_HIT: f32 = 2.0;
 const AGGRO_SETTLE: f32 = 6.0;
+// (a frost lance's slow: how long, and to what share of its speed and its
+// casting's pace)
+const FROST_SLOW: f32 = 2.5;
+const SLOWED: f32 = 0.35;
 const BLADES: u32 = 5;
 const SLOW_BLADE: f32 = 0.3;
 const FAST_BLADE: f32 = 0.14;
@@ -193,6 +197,7 @@ struct Slot {
     strafe_t: f32,
     target: i32, // whom it casts at: him (HIS), or free for all another
     chosen: bool, // (free for all) its next target chosen
+    slow: f32,    // seconds still slowed (a frost lance): it moves, and casts, the slower
     aggro: [f32; MAX + 1], // against each other one, and (last) him
 }
 
@@ -216,6 +221,7 @@ impl Slot {
             strafe_t: 0.0,
             target: HIS,
             chosen: false,
+            slow: 0.0,
             aggro: aggro_at_rest(),
         }
     }
@@ -375,6 +381,9 @@ impl Enemies {
                 return;
             }
             s.hp -= damage;
+            if kind == FROST {
+                s.slow = FROST_SLOW;
+            }
             if s.hp > 0 {
                 s.aggro[if owner == HIS { MAX } else { (owner as usize).min(MAX) }] += AGGRO_HIT;
             }
@@ -431,6 +440,7 @@ impl Enemies {
         for i in 0..MAX {
             let arena = self.arena;
             let missiles = spells.missiles_at(i as i32);
+        let wells = spells.wells();
             let s = &mut self.slots[i];
             if s.down >= 0.0 {
                 // (a telegraph cut short)
@@ -512,6 +522,18 @@ impl Enemies {
                     let l = len(want);
                     if l > TOP_SPEED { scale(TOP_SPEED / l, want) } else { want }
                 };
+                // (slowed by frost; drawn into his gravity wells, the more
+                // the nearer, whatever it wants)
+                s.slow = (s.slow - dt).max(0.0);
+                let mut target_vel = if s.slow > 0.0 { scale(SLOWED, target_vel) } else { target_vel };
+                for w in &wells {
+                    let to = sub(*w, s.pos);
+                    let d = len(to);
+                    if d < WELL_REACH && d > 0.3 {
+                        let k = 1.0 - d / WELL_REACH;
+                        target_vel = add(scale(1.0 - k, target_vel), scale(k * 12.0 / d, to));
+                    }
+                }
                 let k = 1.0 - (-dt * STEER * if s.dodge > 0.0 { 3.0 } else { 1.0 }).exp();
                 for j in 0..3 {
                     s.vel[j] += (target_vel[j] - s.vel[j]) * k;
@@ -543,6 +565,8 @@ impl Enemies {
             let chest = add(at, [0.0, 1.1, 0.0]);
             let in_range = dist(chest, orb) <= RANGE;
             let kind = spell_of(seed, s.generation, i);
+            // (slowed, it casts the slower too)
+            let dt = if s.slow > 0.0 { SLOWED * dt } else { dt };
             s.act_t += dt;
             match s.act {
                 Act::Idle => {

@@ -11,7 +11,9 @@ use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
 use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, CHARGE_TIME, FIRE, HEALING, LOCK_TIME, MARK, STRIKE, WARMUP, WIND};
+use super::spells::{
+    aim_ground, Lock, Sound, SpellEvent, Spells, ARCANE, CHARGE_TIME, FAMILIAR, FIRE, FROST_LANCE, GRAVITY, HEALING, LOCK_TIME, MARK, METEOR, STRIKE, WARMUP, WIND,
+};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
@@ -19,6 +21,7 @@ use crate::types::SfxEvent;
 const CAST_SOUND: [usize; super::spells::N_SPELLS] =
     [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP, sfx::CAST_WIND, sfx::CAST_STRIKE, sfx::CAST_FIRE, sfx::GUST, sfx::APPEAR];
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
+const METEOR_CHANNEL: f32 = 1.2; // seconds a meteor takes to call down (held)
 const SOUL_MANA: f32 = 30.0; // mana a defeated enemy's soul brings him
 const BUFFER: f32 = 0.35; // seconds a press of cast is remembered, to start a spell not yet ready
 // the wind blades' gatling: seconds between blades, spun down and up; how
@@ -233,10 +236,15 @@ impl Combat {
         // following it) or the ground there (staying put, however he
         // turns), and lands there once locked (its cost then); let go
         // before, and it is not cast
-        let striking = selected == STRIKE as usize;
+        // (the meteor likewise: held, called down on what it locks on to,
+        // longer to lock; he cannot speed up meanwhile: see Game::step)
+        let striking = selected == STRIKE as usize || selected == METEOR;
+        if selected == METEOR {
+            spells.lock_time = METEOR_CHANNEL;
+        }
         if striking && can && m.casting {
-            if spells.lock.is_none() && self.buffered > 0.0 && spells.ready(STRIKE as usize) {
-                if self.mana.value >= SPELL_COST[STRIKE as usize] {
+            if spells.lock.is_none() && self.buffered > 0.0 && spells.ready(selected) {
+                if self.mana.value >= SPELL_COST[selected] {
                     spells.lock = Some(match spells.lock_target(m.origin, m.dir) {
                         Some((c, side)) => Lock { age: 0.0, target: Some(c), side, ground: None },
                         None => Lock { age: 0.0, target: None, side: -1, ground: Some((aim_ground(m.origin, m.dir), None)) },
@@ -261,10 +269,17 @@ impl Combat {
                 spells.lock = Some(lock);
                 if lock.age >= spells.lock_time {
                     spells.lock = None;
-                    if self.mana.spend(SPELL_COST[STRIKE as usize]) {
+                    if self.mana.spend(SPELL_COST[selected]) {
                         let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
-                        spells.cast_at(m.origin, m.dir, at, rng);
-                        self.sfx.push(sfx::here(CAST_SOUND[STRIKE as usize]));
+                        if selected == METEOR {
+                            // (the ground not yet found: where he aimed, at
+                            // sea level)
+                            let at = at.unwrap_or_else(|| lock.ground.map_or(m.him, |(g, _)| g));
+                            spells.cast_meteor(at, rng);
+                        } else {
+                            spells.cast_at(m.origin, m.dir, at, rng);
+                        }
+                        self.sfx.push(sfx::here(CAST_SOUND[selected]));
                     } else {
                         self.fizzle(m.time);
                     }
@@ -272,6 +287,40 @@ impl Combat {
             }
         } else {
             spells.lock = None;
+        }
+        // the frost lance, arcane missiles, gravity well and spirit
+        // familiar: pressed, cast at once (remembered a moment, as the
+        // others: see BUFFER)
+        if matches!(selected, FROST_LANCE | ARCANE | GRAVITY | FAMILIAR) && can && self.buffered > 0.0 && spells.ready(selected) {
+            let cost = SPELL_COST[selected];
+            if self.mana.value >= cost {
+                let cast = match selected {
+                    FROST_LANCE => spells.cast_frost(m.origin, m.dir, m.vel, rng),
+                    ARCANE => {
+                        let target = spells.aimed(m.origin, m.dir, 0.35).map(|t| t.0);
+                        spells.cast_missiles(m.origin, m.dir, target, rng)
+                    }
+                    GRAVITY => {
+                        // (at the enemy aimed at, else ahead, short of the
+                        // ground)
+                        let at = spells.aimed(m.origin, m.dir, 0.2).map(|t| t.1).unwrap_or_else(|| {
+                            let g = aim_ground(m.origin, m.dir);
+                            let far = super::vec::dist(g, m.origin).min(14.0);
+                            super::vec::add(m.origin, super::vec::scale(far, m.dir))
+                        });
+                        spells.cast_well(at, rng)
+                    }
+                    _ => spells.summon(rng),
+                };
+                if cast {
+                    self.mana.spend(cost);
+                    self.sfx.push(sfx::here(CAST_SOUND[selected]));
+                }
+                self.buffered = 0.0;
+                self.short = false;
+            } else {
+                self.short = true;
+            }
         }
         // the wind blades, like a gatling gun: held, they warm up (none
         // flying, the gusts swirling round the orb: see Spells::pack) for

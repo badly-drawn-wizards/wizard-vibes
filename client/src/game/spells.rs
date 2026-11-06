@@ -53,7 +53,23 @@ pub const MISSILE: u32 = 13; // an arcane missile: homes in on its target (vel: 
 pub const FALLING: u32 = 14; // a meteor falling to where it was called (top: whence)
 pub const WELL: u32 = 15; // a gravity well: pulls enemies, and their spells, in
 pub const SPIRIT: u32 = 16; // his spirit familiar, circling him and casting missiles
-pub const CHAIN: u32 = 17; // his strike's lightning jumping on to another enemy (drawn only): from pos to vel
+pub const CHAIN: u32 = 17;
+const NO_TARGET: i32 = -100;
+// (a frost lance's speed; an arcane missile's, and how sharply it turns;
+// a meteor's fall, seconds, from how high; a gravity well's reach, its
+// pull on enemy spells; his familiar's circle round him, its turn a
+// second, and its casting's reach and pace)
+const FROST_SPEED: f32 = 40.0;
+const MISSILE_SPEED: f32 = 22.0;
+const MISSILE_TURN: f32 = 6.0;
+const METEOR_FALL: f32 = 0.9;
+const METEOR_HEIGHT: f32 = 28.0;
+pub const WELL_REACH: f32 = 14.0;
+const WELL_PULL: f32 = 30.0;
+const SPIRIT_ORBIT: f32 = 1.7;
+const SPIRIT_TURN: f32 = 1.3;
+const SPIRIT_REACH: f32 = 30.0;
+const SPIRIT_PACE: f32 = 1.2; // his strike's lightning jumping on to another enemy (drawn only): from pos to vel
 // (his strike chains on from the enemy it hits to the nearest other within
 // CHAIN_RANGE, and so on, CHAIN_JUMPS times, each doing CHAIN_DAMAGE of its
 // damage)
@@ -171,6 +187,9 @@ struct Spell {
     quiet: bool, // a wind blade that fades at the end of its flight (not bursting)
     trail: Vec<V3>, // a soul's path behind it, newest last (TAIL of it)
     absorb: f32,    // a soul reaching him: how far it has been taken in (0..1), or -1
+    target: i32,    // an arcane missile's: whom it homes in on (a side), or NO_TARGET
+    struck: u32,    // a frost lance's: those it has passed through (a bit a side)
+    next_shot: f32, // his familiar's: seconds until it casts again
 }
 
 // (seconds a soul takes to be taken in, shrinking, its tail drawn after)
@@ -306,6 +325,100 @@ impl Spells {
         true
     }
 
+    // His frost lance from `origin` along `dir`, carried on by his own
+    // velocity, with its cooldown.
+    pub fn cast_frost(&mut self, origin: V3, dir: V3, carry: V3, rng: &mut Rng) -> bool {
+        if !self.launch(FROST, origin, dir, HIS, None, rng) {
+            return false;
+        }
+        let s = self.items.last_mut().unwrap();
+        s.vel = super::vec::add(super::vec::scale(FROST_SPEED, dir), carry);
+        self.cooled(FROST_LANCE);
+        true
+    }
+
+    // His arcane missiles: three, fanned out from `origin` along `dir`,
+    // homing in on `target` (a side) if there is one, with their cooldown.
+    pub fn cast_missiles(&mut self, origin: V3, dir: V3, target: Option<i32>, rng: &mut Rng) -> bool {
+        let side = super::vec::normalise([dir[2], 0.0, -dir[0]]);
+        let mut any = false;
+        for k in [-1.0f32, 0.0, 1.0] {
+            let d = super::vec::normalise(super::vec::add(dir, super::vec::add(super::vec::scale(0.35 * k, side), [0.0, 0.25 * (1.0 - k.abs()), 0.0])));
+            if self.launch(MISSILE, origin, d, HIS, None, rng) {
+                let s = self.items.last_mut().unwrap();
+                s.vel = super::vec::scale(MISSILE_SPEED, d);
+                s.target = target.unwrap_or(NO_TARGET);
+                any = true;
+            }
+        }
+        if any {
+            self.cooled(ARCANE);
+        }
+        any
+    }
+
+    // His meteor, called down on `at`: it falls from high above it, and
+    // bursts there, as a fully charged bolt and more.
+    pub fn cast_meteor(&mut self, at: V3, rng: &mut Rng) -> bool {
+        let from = super::vec::add(at, [6.0, METEOR_HEIGHT, -4.0]);
+        if !self.launch(FALLING, from, [0.0, -1.0, 0.0], HIS, None, rng) {
+            return false;
+        }
+        let s = self.items.last_mut().unwrap();
+        s.vel = super::vec::scale(1.0 / METEOR_FALL, sub(at, from));
+        s.life = METEOR_FALL;
+        s.power = 1.0;
+        self.cooled(METEOR);
+        true
+    }
+
+    // His gravity well, at `at`, with its cooldown.
+    pub fn cast_well(&mut self, at: V3, rng: &mut Rng) -> bool {
+        if !self.launch(WELL, at, [0.0, 1.0, 0.0], HIS, None, rng) {
+            return false;
+        }
+        self.items.last_mut().unwrap().vel = [0.0; 3];
+        self.cooled(GRAVITY);
+        true
+    }
+
+    // His spirit familiar, summoned beside him (the one before, gone), with
+    // its cooldown.
+    pub fn summon(&mut self, rng: &mut Rng) -> bool {
+        self.items.retain(|s| s.kind != SPIRIT);
+        let at = super::vec::add(self.here, [SPIRIT_ORBIT, 2.4, 0.0]);
+        if !self.launch(SPIRIT, at, [0.0, 1.0, 0.0], HIS, None, rng) {
+            return false;
+        }
+        self.cooled(FAMILIAR);
+        true
+    }
+
+    // Where his gravity wells are (the enemies are pulled to them).
+    pub fn wells(&self) -> Vec<V3> {
+        self.items.iter().filter(|s| s.kind == WELL && s.age > 0.2).map(|s| s.pos).collect()
+    }
+
+    // The enemy nearest his aim (within `cone` radians of it, in reach): its
+    // side and centre.
+    pub fn aimed(&self, origin: V3, dir: V3, cone: f32) -> Option<(i32, V3)> {
+        self.targets
+            .iter()
+            .filter(|t| t.side >= 0 && t.r < 1.0 && dist(t.c, origin) < STRIKE_RANGE * 1.5)
+            .map(|t| {
+                let v = sub(t.c, origin);
+                ((dot(v, dir) / len(v)).clamp(-1.0, 1.0).acos(), t)
+            })
+            .filter(|(a, _)| *a < cone)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, t)| (t.side, t.c))
+    }
+
+    fn cooled(&mut self, spell: usize) {
+        self.cooldowns[spell] = COOLDOWN[spell];
+        self.since_cast = 0.0;
+    }
+
     // Casts his strike at `at` (a locked target), or where he aims if none,
     // unless at the limit; with its cooldown.
     pub fn cast_at(&mut self, origin: V3, dir: V3, at: Option<V3>, rng: &mut Rng) -> bool {
@@ -339,6 +452,9 @@ impl Spells {
             quiet: false,
             trail: Vec::new(),
             absorb: -1.0,
+            target: NO_TARGET,
+            struck: 0,
+            next_shot: 0.5,
         };
         self.next_id += 1;
         if kind == STRIKE || kind == MARK {
@@ -474,6 +590,26 @@ impl Spells {
         let events = &mut self.events;
         let mut chains: Vec<(V3, V3)> = Vec::new();
         for s in &mut self.items {
+            // a frost lance: through each it meets, slowing it (see
+            // enemies.rs), on until its time is up
+            if s.kind == FROST {
+                for t in targets {
+                    let bit = 1u32 << (t.side + 1).clamp(0, 31);
+                    if Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r && s.struck & bit == 0 {
+                        s.struck |= bit;
+                        events.push(SpellEvent::Hit { side: t.side, kind: FROST, owner: s.owner, cut: None, scale: 1.0 });
+                    }
+                }
+                continue;
+            }
+            // an arcane missile: gone into what it meets
+            if s.kind == MISSILE {
+                if let Some(t) = targets.iter().find(|t| Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r) {
+                    events.push(SpellEvent::Hit { side: t.side, kind: MISSILE, owner: s.owner, cut: None, scale: 1.0 });
+                    s.age = s.life;
+                }
+                continue;
+            }
             if s.kind == FIRE || s.kind == WIND {
                 let Some(t) = targets.iter().find(|t| Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r) else {
                     continue;
@@ -545,8 +681,58 @@ impl Spells {
         let out = holding || self.since_cast < 0.7;
         let goal = if out { 1.0 } else { 0.0 };
         self.staff += (goal - self.staff) * (1.0 - (-dt * if out { 12.0 } else { 2.5 }).exp());
+        let wells = self.wells();
+        let mut shots: Vec<(V3, V3, i32)> = Vec::new();
+        let (here, targets) = (self.here, &self.targets);
         for s in &mut self.items {
             s.age += dt;
+            // (an arcane missile turns towards its target, if it still stands)
+            if s.kind == MISSILE {
+                if let Some(t) = targets.iter().filter(|t| t.side == s.target && t.r < 1.0).min_by(|a, b| dist(a.c, s.pos).total_cmp(&dist(b.c, s.pos))) {
+                    let want = super::vec::scale(MISSILE_SPEED / dist(t.c, s.pos).max(1e-3), sub(t.c, s.pos));
+                    let k = 1.0 - (-dt * MISSILE_TURN).exp();
+                    for j in 0..3 {
+                        s.vel[j] += (want[j] - s.vel[j]) * k;
+                    }
+                }
+            }
+            // (an enemy's bolt or blade near his gravity well, drawn in)
+            if s.owner != HIS && (s.kind == FIRE || s.kind == WIND) {
+                for w in &wells {
+                    let to = sub(*w, s.pos);
+                    let d = len(to);
+                    if d < 0.5 * WELL_REACH && d > 0.1 {
+                        let pull = WELL_PULL * dt * (1.0 - d / (0.5 * WELL_REACH)) / d;
+                        for j in 0..3 {
+                            s.vel[j] += to[j] * pull;
+                        }
+                    }
+                }
+            }
+            // (his familiar circles him, and casts at the nearest enemy in
+            // reach every so often)
+            if s.kind == SPIRIT {
+                let a = SPIRIT_TURN * s.age;
+                let at = super::vec::add(here, [SPIRIT_ORBIT * a.cos(), 2.4 + 0.2 * (3.0 * a).sin(), SPIRIT_ORBIT * a.sin()]);
+                s.vel = super::vec::scale(1.0 / dt.max(1e-4), sub(at, s.pos));
+                s.pos = at;
+                s.next_shot -= dt;
+                if s.next_shot <= 0.0 {
+                    s.next_shot = SPIRIT_PACE;
+                    let near = targets.iter().filter(|t| t.side >= 0 && t.r < 1.0 && dist(t.c, at) < SPIRIT_REACH).min_by(|a, b| dist(a.c, at).total_cmp(&dist(b.c, at)));
+                    if let Some(t) = near {
+                        shots.push((at, super::vec::normalise(sub(t.c, at)), t.side));
+                    }
+                }
+                continue;
+            }
+            // (a meteor, landed: it bursts, a fully charged bolt's burst)
+            if s.kind == FALLING && s.age >= s.life {
+                s.pos = super::vec::add(s.pos, super::vec::scale(dt, s.vel));
+                Self::burst(s, &mut self.events);
+                s.power = 1.0;
+                continue;
+            }
             // (a soul flies to him, faster and faster, turning towards him;
             // reaching him, it is taken in: drawn into him, shrinking, its
             // tail after it; then gone)
@@ -613,6 +799,15 @@ impl Spells {
                 self.events.push(SpellEvent::Sound { what: Sound::Strike, pos: s.pos });
             }
         }
+        // (his familiar's missiles)
+        let mut rng = Rng::new(self.next_id as u64 * 104729);
+        for (at, dir, side) in shots {
+            if self.launch(MISSILE, at, dir, HIS, None, &mut rng) {
+                let s = self.items.last_mut().unwrap();
+                s.vel = super::vec::scale(MISSILE_SPEED, dir);
+                s.target = side;
+            }
+        }
         self.collide();
         self.items.retain(|s| s.age < s.life);
     }
@@ -656,7 +851,10 @@ impl Spells {
             if !(d < 1e5) {
                 continue;
             }
-            if s.kind == FIRE && d < 0.15 {
+            // (a frost lance or an arcane missile meeting the land: gone)
+            if (s.kind == FROST || s.kind == MISSILE) && d < 0.15 {
+                s.age = s.life;
+            } else if s.kind == FIRE && d < 0.15 {
                 // burst where it hit
                 Self::burst(s, &mut self.events);
             } else if s.kind == WIND && d < 0.15 {
@@ -847,6 +1045,66 @@ mod tests {
         assert_eq!(s.pack()[0], STRIKE as f32);
         assert!(s.events.contains(&SpellEvent::Sound { what: Sound::Strike, pos: [1.0, 2.0, 3.0] }));
         assert_eq!(hits(&s), vec![(HIS, STRIKE)]);
+    }
+
+    #[test]
+    fn frost_pierces_one_after_another() {
+        let mut rng = Rng::new(1);
+        let mut s = Spells::default();
+        s.targets = vec![Target { c: [0.0, 0.0, 6.0], r: 0.9, side: 0 }, Target { c: [0.0, 0.0, 12.0], r: 0.9, side: 1 }];
+        assert!(s.cast_frost([0.0; 3], [0.0, 0.0, 1.0], [0.0; 3], &mut rng));
+        assert!(!s.ready(FROST_LANCE));
+        for _ in 0..30 {
+            s.update(1.0 / 60.0, false);
+        }
+        assert_eq!(hits(&s), vec![(0, FROST), (1, FROST)]);
+    }
+
+    #[test]
+    fn missiles_home_in() {
+        let mut rng = Rng::new(1);
+        let mut s = Spells::default();
+        // (off to the side of where they are cast)
+        s.targets = vec![Target { c: [6.0, 0.0, 8.0], r: 0.9, side: 2 }];
+        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], Some(2), &mut rng));
+        for _ in 0..120 {
+            s.update(1.0 / 60.0, false);
+        }
+        assert_eq!(hits(&s), vec![(2, MISSILE); 3]);
+    }
+
+    #[test]
+    fn a_meteor_falls_and_bursts() {
+        let mut rng = Rng::new(1);
+        let mut s = Spells::default();
+        s.targets = vec![Target { c: [1.0, 0.5, 0.0], r: 0.9, side: 0 }];
+        assert!(s.cast_meteor([0.0; 3], &mut rng));
+        for _ in 0..90 {
+            s.update(1.0 / 60.0, false);
+        }
+        assert!(hits(&s).contains(&(0, BURST)), "{:?}", hits(&s));
+    }
+
+    #[test]
+    fn the_familiar_shoots() {
+        let mut rng = Rng::new(1);
+        let mut s = Spells::default();
+        s.targets = vec![Target { c: [0.0, 2.0, 10.0], r: 0.9, side: 0 }];
+        assert!(s.summon(&mut rng));
+        for _ in 0..300 {
+            s.update(1.0 / 60.0, false);
+        }
+        assert!(!hits(&s).is_empty());
+    }
+
+    #[test]
+    fn a_well_is_where_it_was_cast() {
+        let mut rng = Rng::new(1);
+        let mut s = Spells::default();
+        assert!(s.cast_well([3.0, 0.0, 4.0], &mut rng));
+        assert!(s.wells().is_empty());
+        s.update(0.5, false);
+        assert_eq!(s.wells(), vec![[3.0, 0.0, 4.0]]);
     }
 }
 

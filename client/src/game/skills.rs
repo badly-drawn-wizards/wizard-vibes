@@ -32,13 +32,18 @@ pub const SKILLS: &[Skill] = &[
     Skill { id: "slot2", name: "Spell slot", what: "A second spell slot", levels: 1, cost: 4, needs: Some("soul"), at: (0.0, -1.0) },
     Skill { id: "slot3", name: "Spell slot", what: "A third spell slot", levels: 1, cost: 10, needs: Some("slot2"), at: (0.0, -2.0) },
     Skill { id: "slot4", name: "Spell slot", what: "A fourth spell slot", levels: 1, cost: 20, needs: Some("slot3"), at: (0.0, -3.0) },
+    Skill { id: "frost", name: "Frost lance", what: "Unlocks the frost lance", levels: 1, cost: 6, needs: Some("wind"), at: (2.0, 1.0) },
+    Skill { id: "gravity", name: "Gravity well", what: "Unlocks the gravity well", levels: 1, cost: 10, needs: Some("frost"), at: (3.0, 1.0) },
+    Skill { id: "arcane", name: "Arcane missiles", what: "Unlocks the arcane missiles", levels: 1, cost: 6, needs: Some("soul"), at: (0.0, 1.0) },
+    Skill { id: "familiar", name: "Spirit familiar", what: "Unlocks the spirit familiar", levels: 1, cost: 12, needs: Some("arcane"), at: (0.0, 2.0) },
+    Skill { id: "meteor", name: "Meteor", what: "Unlocks the meteor", levels: 1, cost: 12, needs: Some("inferno"), at: (-3.0, -1.0) },
     Skill { id: "reaper", name: "Reaper", what: "One more soul from each defeat", levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
 ];
 
 // Whether a skill unlocks something new (a spell, or a spell slot), rather
 // than improving: drawn as a hexagon.
 pub fn unlocks(s: &Skill) -> bool {
-    matches!(s.id, "lightning" | "wind" | "healing" | "slot2" | "slot3" | "slot4")
+    matches!(s.id, "lightning" | "wind" | "healing" | "frost" | "arcane" | "meteor" | "gravity" | "familiar" | "slot2" | "slot3" | "slot4")
 }
 
 pub fn skill(id: &str) -> Option<&'static Skill> {

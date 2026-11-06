@@ -879,7 +879,7 @@ impl Game {
         let (held, stick) = if self.picture.is_some() { (Held::default(), None) } else { (held, stick) };
         // (channelling, he cannot speed up: no input; he drifts on, slowing
         // as the air's drag takes his speed)
-        let channelling = self.spells.channel >= 0.0;
+        let channelling = self.spells.channel >= 0.0 || (self.spells.selected == spells::METEOR && self.spells.lock.is_some());
         let (held, stick) = if channelling || self.death.is_some() { (flight::Held::default(), None) } else { (held, stick) };
         let dash = std::mem::take(&mut self.dash) || pad.is_some_and(|p| p.dash);
         self.flight.update(game_dt, self.time, heading + self.orbit.cam.yaw + PI, &held, stick.as_ref(), dash);

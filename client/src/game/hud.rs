@@ -562,6 +562,55 @@ pub fn paint_spell(p: &egui::Painter, c: Pos2, r: f32, i: usize, colour: Color32
                 p.add(Shape::line(pts, Stroke::new(0.1 * r, colour)));
             }
         }
+        4 => {
+            // an ice shard: a long diamond, and a chip beside it
+            p.add(Shape::convex_polygon(vec![v(0.45, -0.7), v(0.15, -0.05), v(-0.45, 0.7), v(-0.15, 0.05)], colour, Stroke::NONE));
+            p.add(Shape::convex_polygon(vec![v(-0.35, -0.45), v(-0.2, -0.3), v(-0.35, -0.15), v(-0.5, -0.3)], colour, Stroke::NONE));
+        }
+        5 => {
+            // sparkles: three four-pointed stars
+            for (x, y, s) in [(-0.35, 0.25, 0.32), (0.3, 0.3, 0.26), (0.0, -0.35, 0.4)] {
+                let c2 = v(x, y);
+                let (o, i) = (s * r, 0.3 * s * r);
+                let pts: Vec<Pos2> = (0..8)
+                    .map(|k| {
+                        let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                        let rr = if k % 2 == 0 { o } else { i };
+                        c2 + Vec2::new(a.sin(), -a.cos()) * rr
+                    })
+                    .collect();
+                for k in 0..8 {
+                    p.add(Shape::convex_polygon(vec![c2, pts[k], pts[(k + 1) % 8]], colour, Stroke::NONE));
+                }
+            }
+        }
+        6 => {
+            // a meteor: a rock, its trail of fire streaming up behind
+            for k in 0..3 {
+                let o = (k as f32 - 1.0) * 0.18;
+                p.line_segment([v(0.15 + o, 0.15 - o), v(0.75 + o, -0.6 - o)], Stroke::new(0.12 * r, colour.gamma_multiply(0.6)));
+            }
+            p.circle_filled(v(-0.15, 0.3), 0.38 * r, colour);
+        }
+        7 => {
+            // a spiral, inwards
+            let pts: Vec<Pos2> = (0..=40)
+                .map(|k| {
+                    let t = k as f32 / 40.0;
+                    let a = t * 3.0 * std::f32::consts::TAU;
+                    c + Vec2::new(a.cos(), a.sin()) * (0.75 * (1.0 - t) + 0.05) * r
+                })
+                .collect();
+            p.add(Shape::line(pts, Stroke::new(0.11 * r, colour)));
+        }
+        8 => {
+            // a familiar: a round spirit, wings either side, two eyes
+            p.circle_filled(c, 0.38 * r, colour);
+            for s in [-1.0f32, 1.0] {
+                p.add(Shape::convex_polygon(vec![v(0.3 * s, -0.05), v(0.85 * s, -0.5), v(0.7 * s, 0.1)], colour, Stroke::NONE));
+                p.circle_filled(v(0.13 * s, -0.05), 0.07 * r, bg(1.0));
+            }
+        }
         _ => {
             // a cross, rounded
             let w = 0.3 * r;
@@ -669,6 +718,16 @@ pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32
             }
         }
         "kindling" => spell(0),
+        "frost" | "arcane" | "meteor" | "gravity" | "familiar" => {
+            spell(match id {
+                "frost" => 4,
+                "arcane" => 5,
+                "meteor" => 6,
+                "gravity" => 7,
+                _ => 8,
+            });
+            ring();
+        }
         "inferno" => {
             // a burst: rays out from a ball
             p.circle_filled(c, 0.35 * r, colour);
