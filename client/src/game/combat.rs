@@ -11,13 +11,14 @@ use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
 use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, CHARGE_TIME, FIRE, HEALING, LOCK_TIME, MARK, STRIKE, WIND};
+use super::spells::{aim_ground, Lock, Sound, SpellEvent, Spells, CHARGE_TIME, FIRE, HEALING, LOCK_TIME, MARK, STRIKE, WARMUP, WIND};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
 
 const CAST_SOUND: [usize; 4] = [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP];
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
+const SOUL_MANA: f32 = 30.0; // mana a defeated enemy's soul brings him
 const BUFFER: f32 = 0.35; // seconds a press of cast is remembered, to start a spell not yet ready
 // the wind blades' gatling: seconds between blades, spun down and up; how
 // long it takes to spin up, and down; the heat each blade adds (1:
@@ -27,10 +28,10 @@ const SLOW_SHOT: f32 = 0.33;
 const FAST_SHOT: f32 = 0.125;
 const SPIN_UP: f32 = 1.2;
 const SPIN_DOWN: f32 = 0.6;
-const SHOT_HEAT: f32 = 0.09;
-const HEAT_COOL: f32 = 0.35;
-const OVERHEAT_COOL: f32 = 0.5;
-const HEAT_RESUME: f32 = 0.25;
+const SHOT_HEAT: f32 = 0.13;
+const HEAT_COOL: f32 = 0.22;
+const OVERHEAT_COOL: f32 = 0.35;
+const HEAT_RESUME: f32 = 0.2;
 
 // What the fight needs to know of the frame.
 #[derive(Clone, Copy, Debug)]
@@ -77,6 +78,8 @@ pub struct Combat {
     healed: f32,  // healing channelled towards the next point of health
     here: (V3, V3), // him, and the way he looks
     started: bool,  // the fight has an arena (it starts with the first enemies)
+    // where enemies were defeated (their souls to send him)
+    souls: Vec<V3>,
     // sounds to play
     pub sfx: Vec<SfxEvent>,
     pub hud: Hud,
@@ -95,6 +98,7 @@ impl Default for Combat {
             healed: 0.0,
             here: ([0.0; 3], [0.0, 0.0, 1.0]),
             started: false,
+            souls: Vec::new(),
             sfx: Vec::new(),
             hud: Hud::default(),
         }
@@ -255,10 +259,11 @@ impl Combat {
         } else {
             spells.lock = None;
         }
-        // the wind blades, like a gatling gun: held, they come faster and
-        // faster as it spins up, each heating it, which cools all the
-        // while; too hot, it overheats, and will not fire again until it
-        // has cooled well down
+        // the wind blades, like a gatling gun: held, they warm up (none
+        // flying, the gusts swirling round the orb: see Spells::pack) for
+        // WARMUP, then come faster and faster as it spins up, each heating
+        // it, which cools all the while; too hot, it overheats, and will not
+        // fire again until it has cooled well down
         let winding = selected == WIND as usize;
         let g = &mut spells.gatling;
         g.heat = (g.heat - m.dt * if g.overheated { OVERHEAT_COOL } else { HEAT_COOL }).max(0.0);
@@ -266,10 +271,14 @@ impl Combat {
             g.overheated = false;
         }
         g.next = (g.next - m.dt).max(0.0);
-        let spinning = winding && can && m.casting && !g.overheated;
+        let holding = winding && can && m.casting && !g.overheated;
+        g.warm = if holding { g.warm + m.dt } else { 0.0 };
+        let spinning = holding && g.warm >= WARMUP;
         g.spin = (g.spin + m.dt * if spinning { 1.0 / SPIN_UP } else { -1.0 / SPIN_DOWN }).clamp(0.0, 1.0);
-        let wants = m.casting || self.buffered > 0.0;
-        if winding && can && wants && !spells.gatling.overheated && spells.gatling.next <= 0.0 && spells.ready(WIND as usize) {
+        if holding {
+            spells.since_cast = 0.0;
+        }
+        if spinning && spells.gatling.next <= 0.0 && spells.ready(WIND as usize) {
             let cost = SPELL_COST[WIND as usize];
             if self.mana.value >= cost && spells.cast_blade(m.origin, m.dir, rng) {
                 self.mana.spend(cost);
@@ -300,6 +309,9 @@ impl Combat {
         spells.targets = self.enemies.targets(n, m.seed, m.time, m.him);
         self.enemies.update(m.dt, n, m.seed, m.time, m.him, spells, rng);
         self.enemy_events();
+        for at in std::mem::take(&mut self.souls) {
+            spells.soul(at);
+        }
         self.show(n, m, spells);
     }
 
@@ -312,6 +324,10 @@ impl Combat {
                     self.enemies.hit_with(side, kind, cut, scale);
                     self.enemy_events();
                 }
+                SpellEvent::Soul => {
+                    self.mana.value = (self.mana.value + SOUL_MANA).min(MANA);
+                    self.sfx.push(sfx::here(sfx::SHIELD_UP));
+                }
                 SpellEvent::Sound { what, pos } => {
                     let kind = match what {
                         Sound::Burst => sfx::BURST,
@@ -321,6 +337,9 @@ impl Combat {
                     self.sfx.push(self.placed(kind, pos));
                 }
             }
+        }
+        for at in std::mem::take(&mut self.souls) {
+            spells.soul(at);
         }
         // (the HUD as it now stands: the health and defeat a hit changed)
         self.hud.health = self.enemies.hp as f32 / PLAYER_HP as f32;
@@ -346,7 +365,10 @@ impl Combat {
                     sfx::here(sfx::BLOCK)
                 }
                 EnemyEvent::Hurt => sfx::here(sfx::HURT),
-                EnemyEvent::Defeat(pos) => self.placed(sfx::DEFEAT, pos),
+                EnemyEvent::Defeat(pos) => {
+                    self.souls.push(super::vec::add(pos, [0.0, 1.3, 0.0]));
+                    self.placed(sfx::DEFEAT, pos)
+                }
                 EnemyEvent::Appear(pos) => self.placed(sfx::APPEAR, pos),
                 EnemyEvent::Cast(kind, pos) => {
                     let k = if kind == MARK {
@@ -482,13 +504,15 @@ mod tests {
     fn casting_costs_mana() {
         let mut c = Combat::default();
         let mut s = Spells::default();
-        s.selected = 2;
+        s.selected = FIRE as usize;
         let mut rng = Rng::new(1);
-        let m = Moment { casting: true, n: 0, ..moment() };
+        // (a tap: its cost as it starts, the bolt as it is let go)
+        c.update(&Moment { casting: true, n: 0, dt: 0.0, ..moment() }, &mut s, &mut rng);
+        let m = Moment { casting: false, n: 0, ..moment() };
         c.update(&m, &mut s, &mut rng);
         assert_eq!(s.count(), 1);
-        assert_eq!(c.mana.value, MANA - SPELL_COST[2]);
-        assert_eq!(c.sfx.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![sfx::CAST_WIND]);
+        assert_eq!(c.mana.value, MANA - SPELL_COST[FIRE as usize]);
+        assert_eq!(c.sfx.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![sfx::CAST_FIRE]);
         // not from behind the shield
         let m = Moment { casting: true, shielding: true, n: 0, dt: 1.0, ..moment() };
         c.update(&m, &mut s, &mut rng);
@@ -583,7 +607,9 @@ mod tests {
                 break;
             }
         }
-        assert!(casts.len() >= 6, "{casts:?}");
+        assert!(casts.len() >= 5, "{casts:?}");
+        // (none while it warms up)
+        assert!(casts[0] as f32 >= WARMUP * 60.0 - 1.0, "{casts:?}");
         let gap = |k: usize| casts[k + 1] - casts[k];
         assert!(gap(0) > gap(casts.len() - 2), "{casts:?}");
         // until it overheats: no more, held or not, until it has cooled
@@ -600,6 +626,25 @@ mod tests {
         }
         assert!(!s.gatling.overheated && s.gatling.heat == 0.0 && s.gatling.spin == 0.0);
         assert_eq!(casts.len(), n);
+    }
+
+    #[test]
+    fn a_soul_restores_mana() {
+        let mut c = Combat::default();
+        let mut s = Spells::default();
+        c.mana.value = 10.0;
+        s.here = [0.0, 12.0, 0.0];
+        s.soul([8.0, 12.0, 8.0]);
+        let mut got = false;
+        for _ in 0..600 {
+            s.update(1.0 / 60.0, false);
+            c.handle(&mut s);
+            if c.mana.value >= 10.0 + SOUL_MANA - 1e-3 {
+                got = true;
+                break;
+            }
+        }
+        assert!(got && s.count() == 0, "{}", c.mana.value);
     }
 
     #[test]

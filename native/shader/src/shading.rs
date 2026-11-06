@@ -483,7 +483,9 @@ pub fn enemy_surface(lk: Looks, sheen: f32, glow: f32, tm: f32, rock: (Vec3, Vec
     } else if part == part_staff {
         Material { ks: 0.05, ..plain(scale(0.75 + 0.25 * (q.y * 40.0).sin(), vec(0.3, 0.19, 0.1))) }
     } else if part == part_orb {
-        Material { emission: scale(2.5, lk.circle), ks: 1.0, shininess: 80.0, ..plain(scale(0.3, lk.circle)) }
+        // (in its spell's colour, as his orb takes it)
+        let tint = if lk.spell == 0 { vec(1.0, 0.42, 0.12) } else if lk.spell == 2 { vec(0.4, 0.88, 1.0) } else { vec(0.75, 0.8, 1.0) };
+        Material { emission: scale(2.5, tint), ks: 1.0, shininess: 80.0, ..plain(scale(0.3, tint)) }
     } else if part == part_flesh {
         flesh(fp, q)
     } else {

@@ -966,7 +966,7 @@
           "kind": "int",
           "min": 0,
           "max": 6,
-          "default": 3,
+          "default": 5,
           "doc": "Other wizards flying round him."
         },
         {
@@ -1076,7 +1076,7 @@
           "id": "full_enemies",
           "label": "Enemies as detailed as him (slow)",
           "kind": "checkbox",
-          "default": false,
+          "default": true,
           "compile": true
         },
         {

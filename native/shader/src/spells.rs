@@ -16,9 +16,13 @@
 //                 was moving at (a, b, c)
 //   spell_mark    where an enemy's strike will land, (x, y, z), when its
 //                 life is up (it then becomes the strike, from height b)
-//   spell_charge  a fire bolt being charged at the orb (where he holds it
-//                 this frame: the slot's position unused), its charge so
-//                 far age / life
+//   spell_charge  a fire bolt being charged at his orb (where he holds it
+//                 this frame), or with a = 1 at (x, y, z) (an enemy's),
+//                 its charge so far age / life
+//   spell_windup  wind blades warming up, likewise: gusts swirling in
+//                 round the orb, faster and brighter as age / life nears 1
+//   spell_wisp    a defeated enemy's soul at (x, y, z), flying at (a, b,
+//                 c) to him
 //
 // Every spell fades out over the last part of its life; the seed makes each
 // one a little different. Any other kind is an empty slot. Positions are in
@@ -36,6 +40,8 @@ pub const spell_mark: i32 = 5;
 pub const spell_heal: i32 = 6;
 pub const spell_lock: i32 = 7; // his strike locking on: a mark, green
 pub const spell_charge: i32 = 8;
+pub const spell_windup: i32 = 9;
+pub const spell_wisp: i32 = 10;
 
 // Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 // (distance, t, and how far beyond tmax the nearest point of the segment
@@ -136,7 +142,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         // the fuller it is, embers circling in to it
         let f = saturate(age / life);
         let rad = 0.05 + 0.2 * f;
-        let p = orb;
+        let p = if q.x > 0.5 { p } else { orb };
         let (dist, t, behind) = ray_segment(o, d, tmax, p, p);
         let (core, halo) = glow_line(rad, 2.0 * rad, dist);
         let flick = 0.8 + 0.2 * (secs * (30.0 + 40.0 * f)).sin();
@@ -155,6 +161,36 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             flick * seen(t, behind, 0.3),
             scale(4.0 * core, mix(vec(1.0, 0.42, 0.08), vec(1.0, 0.92, 0.65), hot)) + scale(0.2 * halo, vec(1.0, 0.35, 0.05)) + scale(2.5 * f * embers, vec(1.0, 0.6, 0.2)),
         )
+    } else if kind == spell_windup {
+        // gusts swirling in round the orb: arcs circling it, tighter, faster
+        // and brighter as it warms up
+        let f = saturate(age / life);
+        let c = if q.x > 0.5 { p } else { orb };
+        let mut glow = 0.0f32;
+        let mut tt = 0.0f32;
+        let mut j = 0;
+        while j < 3 {
+            let r = 0.42 - 0.22 * f + 0.05 * j as f32;
+            let a0 = secs * (6.0 + 10.0 * f) * (if j == 1 { -1.0 } else { 1.0 }) + 2.1 * j as f32;
+            let tilt = 0.5 * j as f32 - 0.5;
+            let point = move |k: i32| {
+                let a = a0 + 0.35 * k as f32;
+                c + vec(r * a.cos(), tilt * r * a.sin() * 0.6, r * a.sin())
+            };
+            let (dd, t, _) = ray_polyline(o, d, tmax, 4, point);
+            let (core, halo) = glow_line(0.012 + 0.012 * f, 0.08, dd);
+            glow = glow + core + 0.15 * halo;
+            tt = t;
+            j += 1;
+        }
+        scale((0.4 + 1.6 * f) * glow * seen(tt, 0.0, 0.3), vec(0.55, 0.92, 1.0))
+    } else if kind == spell_wisp {
+        // a soul: a pale, wavering light with a fading tail behind it
+        let tail = p - scale(0.08, q);
+        let (dist, t, behind) = ray_segment(o, d, tmax, tail, p);
+        let (core, halo) = glow_line(0.07, 0.5, dist);
+        let flick = 0.8 + 0.2 * (secs * 17.0 + i as f32 * 2.3).sin();
+        scale(fade * flick * seen(t, behind, 0.3), scale(2.5 * core, vec(0.8, 0.95, 1.0)) + scale(0.35 * halo, vec(0.45, 0.75, 1.0)))
     } else if kind == spell_burst {
         // An explosion: a billowing fireball that swells fast and cools
         // from yellow-white through orange to a dull red, a shockwave ring

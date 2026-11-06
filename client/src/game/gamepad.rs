@@ -110,6 +110,9 @@ pub struct Pads {
     gilrs: Option<gilrs::Gilrs>,
     #[cfg(not(target_arch = "wasm32"))]
     started: bool,
+    // X and Y read the other way round (as some controllers report them:
+    // the default; the controls tab can turn it off)
+    pub swap_xy: bool,
     // the last read's buttons (for "pressed since")
     last: Raw,
     // the left stick's direction (up, down, left, right) as a menu's
@@ -124,6 +127,11 @@ pub struct Pads {
 }
 
 impl Pads {
+    // With X and Y swapped, or not.
+    pub fn new(swap_xy: bool) -> Pads {
+        Pads { swap_xy, ..Default::default() }
+    }
+
     // The first connected controller's state, if there is one, its
     // buttons as bound.
     pub fn read(&mut self, binds: &Binds) -> Option<Pad> {
@@ -132,6 +140,7 @@ impl Pads {
     }
 
     fn pad(&mut self, r: Raw, binds: &Binds) -> Pad {
+        let r = if self.swap_xy { Raw { x: r.y, y: r.x, ..r } } else { r };
         let last = self.last;
         self.last = r;
         let [mx, my] = stick(r.left[0], r.left[1]);

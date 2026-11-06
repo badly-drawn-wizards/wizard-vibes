@@ -1,8 +1,9 @@
 // The fight with the enemy wizards (web/enemies.ts; drawn by
-// fut/enemies.fut). Where each one is is worked out the same way the
-// renderer does it (a pure function of the time, his position, the seed and
-// its generation), so the spells can hit what is drawn. Here: their health,
-// their defeat and replacement, their casting at him, and his health.
+// fut/enemies.fut). Here: where each is (it steers for its spot circling
+// the arena, keeps off him, drifts round him, keeps apart from the others,
+// and dodges his bolts and blades: the renderer is told where), their
+// health, their defeat and replacement, their casting at him (each its own
+// spell, telegraphed as his are), and his health.
 //
 // Each enemy's state goes to the renderer as one float (see foes in
 // fut/enemies.fut): 16 times its generation (how many have had its place
@@ -10,8 +11,8 @@
 // under 8 the seconds it has still to appear, 8 and over 8 plus the seconds
 // since its defeat.
 
-use super::spells::{Spells, Target, BURST, FIRE, HIS, MARK, STRIKE, WIND};
-use super::vec::{add, dist, normalise, scale, sub, turn, V3};
+use super::spells::{Spells, Target, BURST, CHARGE, FIRE, HIS, MARK, STRIKE, WARMUP, WIND, WINDUP};
+use super::vec::{add, dist, dot, len, normalise, scale, sub, turn, V3};
 use super::Rng;
 use std::f32::consts::PI;
 
@@ -82,17 +83,33 @@ pub fn rnd(seed: i64, generation: i64, i: usize, k: i64) -> f32 {
     hash3(seed + 7919 * generation, i as i64 + 17, k + 101)
 }
 
-// Where enemy i (of generation generation) stands, circling `arena`, and which way
-// it faces, he being at `him` (enemy_at in fut/enemies.fut, while it is not
-// falling).
-pub fn enemy_at(seed: i64, generation: i64, i: usize, secs: f32, arena: V3, him: V3) -> (V3, f32) {
+// Where enemy i (of generation generation) would like to be: circling
+// `arena` at its own distance, height and speed (it steers there, unless
+// keeping away from him or dodging: see Enemies::update).
+pub fn home(seed: i64, generation: i64, i: usize, secs: f32, arena: V3) -> V3 {
     let r = |k| rnd(seed, generation, i, k);
     let radius = 9.0 + 12.0 * r(0);
     let speed = (0.04 + 0.06 * r(1)) * if r(2) < 0.5 { -1.0 } else { 1.0 };
     let a = 2.0 * PI * (i as f32 / MAX as f32 + 0.12 * r(3)) + speed * secs;
     let h = -1.5 + 4.0 * r(4) + 0.5 * (0.6 * secs + 6.3 * r(5)).sin();
-    let pos = add(arena, [radius * a.sin(), h, radius * a.cos()]);
-    (pos, (him[0] - pos[0]).atan2(him[2] - pos[2]))
+    add(arena, [radius * a.sin(), h, radius * a.cos()])
+}
+
+// Which spell enemy i (of generation generation) casts, always (its orb
+// shows it: the renderer picks it the same way, see looks_of).
+pub fn spell_of(seed: i64, generation: i64, i: usize) -> u32 {
+    let r = rnd(seed, generation, i, 29);
+    if r < 0.5 { FIRE } else if r < 0.8 { WIND } else { STRIKE }
+}
+
+// Which way one at `pos` faces him (a yaw), as the renderer turns it.
+pub fn facing(pos: V3, him: V3) -> f32 {
+    (him[0] - pos[0]).atan2(him[2] - pos[2])
+}
+
+// Its orb, where it casts from.
+fn orb_of(pos: V3, him: V3) -> V3 {
+    add(pos, turn(facing(pos, him), [0.45, 2.05, 0.2]))
 }
 
 // His shield, raised (shield_centre and shield_radius in fut/shading.fut).
@@ -115,6 +132,34 @@ pub enum EnemyEvent {
     Cast(u32, V3),
 }
 
+// What an enemy is doing about its spell: biding its time; charging a fire
+// bolt (for so long), or warming up its wind blades (each shown at its
+// orb: `telegraph`); or loosing a run of wind blades.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Act {
+    Idle,
+    Charging { secs: f32 },
+    Warming,
+    Blades { left: u32, next: f32, shot: u32 },
+}
+
+// How an enemy moves: as fast as this, turning its velocity towards what it
+// wants this quickly (a second), no nearer him than NEAR, nor nearer
+// another than APART; it sees his bolts and blades coming this far ahead
+// (seconds), and dodges those that would pass within DODGE_BY.
+const TOP_SPEED: f32 = 7.0;
+const STEER: f32 = 2.5;
+const NEAR: f32 = 8.0;
+const APART: f32 = 4.5;
+const LOOKAHEAD: f32 = 0.9;
+const DODGE_BY: f32 = 2.4;
+// (its fire bolts' charge, at most; its wind blades' warm-up, and how many
+// in a run, and how far apart, spun down and up)
+const ENEMY_POWER: f32 = 0.5;
+const BLADES: u32 = 5;
+const SLOW_BLADE: f32 = 0.3;
+const FAST_BLADE: f32 = 0.14;
+
 #[derive(Clone, Debug)]
 struct Slot {
     generation: i64,
@@ -123,6 +168,37 @@ struct Slot {
     appear: f32, // seconds still to appear
     down: f32,   // seconds since its defeat, or -1
     cast_in: f32, // seconds to its next spell
+    pos: V3,     // where it is (its platform's top; defeated, where it was)
+    vel: V3,
+    act: Act,
+    act_t: f32, // seconds into it
+    telegraph: Option<u32>,
+    dodge: f32, // seconds of dodging left
+    dodge_dir: V3,
+    strafe: f32, // which way it drifts round him (-1 or 1), and for how long more
+    strafe_t: f32,
+}
+
+impl Slot {
+    fn new(generation: i64, appear: f32, cast_in: f32, pos: V3) -> Slot {
+        Slot {
+            generation,
+            hp: HP,
+            kill: 0.0,
+            appear,
+            down: -1.0,
+            cast_in,
+            pos,
+            vel: [0.0; 3],
+            act: Act::Idle,
+            act_t: 0.0,
+            telegraph: None,
+            dodge: 0.0,
+            dodge_dir: [0.0; 3],
+            strafe: 1.0,
+            strafe_t: 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -138,6 +214,7 @@ pub struct Enemies {
     seen: (i64, f32, V3), // seed, secs, him as of the last targets()
     last: Option<V3>,     // where he was last frame
     vel: V3,              // how fast he is going, smoothed
+    placed: bool,         // the slots have been put where they belong
 }
 
 impl Default for Enemies {
@@ -150,10 +227,11 @@ impl Default for Enemies {
             shielded: false,
             arena: [0.0, ARENA_FLOOR, 12.0],
             events: Vec::new(),
-            slots: (0..MAX).map(|i| Slot { generation: 0, hp: HP, kill: 0.0, appear: 0.0, down: -1.0, cast_in: 5.0 + i as f32 * 2.0 }).collect(),
+            slots: (0..MAX).map(|i| Slot::new(0, 0.0, 5.0 + i as f32 * 2.0, [0.0; 3])).collect(),
             seen: (0, 0.0, [0.0; 3]),
             last: None,
             vel: [0.0; 3],
+            placed: false,
         }
     }
 }
@@ -178,6 +256,20 @@ impl Enemies {
         f
     }
 
+    // Where each stands (fx0 .. fz5 of the drive record).
+    pub fn positions(&self) -> [V3; MAX] {
+        let mut f = [[0.0; 3]; MAX];
+        for (i, s) in self.slots.iter().enumerate() {
+            f[i] = s.pos;
+        }
+        f
+    }
+
+    // How fast enemy `side` is going (for aiming at it), if it stands.
+    pub fn velocity(&self, side: i32) -> Option<V3> {
+        self.slots.get(side as usize).filter(|s| s.down < 0.0).map(|s| s.vel)
+    }
+
     // The spheres spells can hit: his (or his shield), and the first n
     // enemies' that stand.
     pub fn targets(&mut self, n: usize, seed: i64, secs: f32, him: V3) -> Vec<Target> {
@@ -192,7 +284,7 @@ impl Enemies {
         self.seen = (seed, secs, him);
         for (i, s) in self.slots.iter().take(n).enumerate() {
             if s.down < 0.0 && s.appear < 0.5 {
-                out.extend(spheres(enemy_at(seed, s.generation, i, secs, self.arena, him).0, i as i32));
+                out.extend(spheres(s.pos, i as i32));
             }
         }
         out
@@ -206,9 +298,12 @@ impl Enemies {
         self.down = -1.0;
         self.defeated = 0;
         self.hurt = 99.0;
+        let (seed, secs, _) = self.seen;
         for (i, s) in self.slots.iter_mut().enumerate() {
-            *s = Slot { generation: s.generation + 1, hp: HP, kill: 0.0, appear: APPEAR, down: -1.0, cast_in: 5.0 + i as f32 * 2.0 };
+            let generation = s.generation + 1;
+            *s = Slot::new(generation, APPEAR, 5.0 + i as f32 * 2.0, home(seed, generation, i, secs, self.arena));
         }
+        self.placed = true;
     }
 
     // A spell of `kind` hit `side`.
@@ -241,6 +336,7 @@ impl Enemies {
                 self.down = 0.0;
             }
         } else {
+            let him = self.seen.2;
             let Some(s) = self.slots.get_mut(side as usize) else { return };
             if s.down >= 0.0 {
                 return;
@@ -248,18 +344,16 @@ impl Enemies {
             s.hp -= damage;
             if s.hp <= 0 {
                 s.down = 0.0;
+                s.vel = [0.0; 3];
                 self.defeated += 1;
-                let (seed, secs, him) = self.seen;
-                let generation = s.generation;
-                let (pos, yaw) = enemy_at(seed, generation, side as usize, secs, self.arena, him);
-                s.kill = kill_code(kind, cut, pos, yaw);
-                self.events.push(EnemyEvent::Defeat(pos));
+                s.kill = kill_code(kind, cut, s.pos, facing(s.pos, him));
+                self.events.push(EnemyEvent::Defeat(s.pos));
             }
         }
     }
 
-    // Advances the fight by dt with n enemies, he being at `him`; they cast
-    // with `spells`.
+    // Advances the fight by dt with n enemies, he being at `him`; they move
+    // and cast with `spells` (seeing his spells there to dodge).
     #[allow(clippy::too_many_arguments)]
     pub fn update(&mut self, dt: f32, n: usize, seed: i64, secs: f32, him: V3, spells: &mut Spells, rng: &mut Rng) {
         if let Some(last) = self.last
@@ -285,64 +379,190 @@ impl Enemies {
             self.arena = add(self.arena, scale(k, [away[0], 0.0, away[2]]));
         }
         self.arena[1] += (him[1].max(ARENA_FLOOR) - self.arena[1]) * (1.0 - (-dt / 4.0).exp());
+        if !self.placed {
+            for (i, s) in self.slots.iter_mut().enumerate() {
+                s.pos = home(seed, s.generation, i, secs, self.arena);
+            }
+            self.placed = true;
+        }
+        let missiles = spells.his_missiles();
+        let others: Vec<(bool, V3)> = self.slots.iter().take(n).map(|s| (s.down < 0.0, s.pos)).collect();
         for i in 0..MAX {
+            let arena = self.arena;
             let s = &mut self.slots[i];
             if s.down >= 0.0 {
+                // (a telegraph cut short)
+                if let Some(id) = s.telegraph.take() {
+                    spells.end(id);
+                }
                 s.down += dt;
                 if s.down >= RESPAWN {
-                    *s = Slot { generation: s.generation + 1, hp: HP, kill: 0.0, appear: APPEAR, down: -1.0, cast_in: 4.0 + 4.0 * rng.uniform() };
-                    let generation = s.generation;
+                    let generation = s.generation + 1;
+                    let pos = home(seed, generation, i, secs, arena);
+                    *s = Slot::new(generation, APPEAR, 4.0 + 4.0 * rng.uniform(), pos);
                     if i < n {
-                        self.events.push(EnemyEvent::Appear(enemy_at(seed, generation, i, secs, self.arena, him).0));
+                        self.events.push(EnemyEvent::Appear(pos));
                     }
                 }
                 continue;
             }
             s.appear = (s.appear - dt).max(0.0);
-            if i >= n || s.appear > 0.0 || self.down >= 0.0 {
+            if i >= n || dt == 0.0 {
                 continue;
             }
-            s.cast_in -= dt;
-            if s.cast_in > 0.0 {
+            // it moves (not while still appearing)
+            if s.appear <= 0.0 {
+                let r = |k| rnd(seed, s.generation, i, k);
+                let skill = 0.35 + 0.6 * r(31);
+                // (its spot circling the arena; then kept off him, sliding
+                // round him as it goes)
+                let want_at = home(seed, s.generation, i, secs, arena);
+                let mut want = sub(want_at, s.pos);
+                let off = sub(s.pos, him);
+                let d = len(off).max(1e-3);
+                if d < NEAR {
+                    want = add(want, scale(2.0 * (NEAR - d) / d, off));
+                }
+                s.strafe_t -= dt;
+                if s.strafe_t <= 0.0 {
+                    s.strafe = if rng.uniform() < 0.5 { -1.0 } else { 1.0 };
+                    s.strafe_t = 1.5 + 3.0 * rng.uniform();
+                }
+                let round = normalise([off[2], 0.0, -off[0]]);
+                want = add(want, scale(1.5 * s.strafe * skill, round));
+                // (apart from the others)
+                for (j, &(up, p)) in others.iter().enumerate() {
+                    let v = sub(s.pos, p);
+                    let dd = len(v);
+                    if j != i && up && dd < APART && dd > 1e-3 {
+                        want = add(want, scale(3.0 * (APART - dd) / dd, v));
+                    }
+                }
+                // (his bolts and blades coming its way: out of their path,
+                // if it notices, the more skilled the sooner)
+                if s.dodge <= 0.0 {
+                    let chest = add(s.pos, [0.0, 1.1, 0.0]);
+                    for &(p, v) in &missiles {
+                        let rel = sub(chest, p);
+                        let vv = dot(v, v).max(1e-6);
+                        let t = dot(rel, v) / vv;
+                        if t <= 0.0 || t > LOOKAHEAD * skill + 0.2 {
+                            continue;
+                        }
+                        let miss = sub(rel, scale(t, v));
+                        if len(miss) < DODGE_BY && rng.uniform() < skill * dt * 8.0 {
+                            let side = if len(miss) > 1e-3 { normalise(miss) } else { normalise([v[2], 0.0, -v[0]]) };
+                            s.dodge = 0.45;
+                            s.dodge_dir = scale(TOP_SPEED * 1.4, side);
+                        }
+                    }
+                }
+                let target_vel = if s.dodge > 0.0 {
+                    s.dodge -= dt;
+                    s.dodge_dir
+                } else {
+                    let l = len(want);
+                    if l > TOP_SPEED { scale(TOP_SPEED / l, want) } else { want }
+                };
+                let k = 1.0 - (-dt * STEER * if s.dodge > 0.0 { 3.0 } else { 1.0 }).exp();
+                for j in 0..3 {
+                    s.vel[j] += (target_vel[j] - s.vel[j]) * k;
+                }
+                s.pos = add(s.pos, scale(dt, s.vel));
+                s.pos[1] = s.pos[1].clamp(arena[1] - 4.0, arena[1] + 6.0);
+            }
+            if s.appear > 0.0 || self.down >= 0.0 {
                 continue;
             }
-            s.cast_in = 6.0 + 6.0 * rng.uniform() + n as f32;
-            let generation = s.generation;
-            self.cast(seed, generation, i, secs, him, spells, rng);
+            // it casts: its own spell, telegraphed as his are
+            let orb = orb_of(s.pos, him);
+            if let Some(id) = s.telegraph {
+                spells.place(id, orb);
+            }
+            let chest = add(him, [0.0, 1.1, 0.0]);
+            let in_range = dist(chest, orb) <= RANGE;
+            let kind = spell_of(seed, s.generation, i);
+            s.act_t += dt;
+            match s.act {
+                Act::Idle => {
+                    s.cast_in -= dt;
+                    if s.cast_in > 0.0 || !in_range {
+                        continue;
+                    }
+                    s.act_t = 0.0;
+                    if kind == FIRE {
+                        let secs = 0.6 + 0.8 * rng.uniform();
+                        s.telegraph = spells.telegraph(CHARGE, orb, secs + 0.1, i as i32, rng);
+                        s.act = Act::Charging { secs };
+                    } else if kind == WIND {
+                        s.telegraph = spells.telegraph(WINDUP, orb, WARMUP + 0.1, i as i32, rng);
+                        s.act = Act::Warming;
+                    } else {
+                        // (a strike is marked first: its own telegraph)
+                        s.cast_in = 6.0 + 6.0 * rng.uniform() + n as f32;
+                        let lead = 1.1;
+                        let (mx, mz) = (miss(rng), miss(rng));
+                        let at = add(add(him, scale(lead, self.vel)), [mx, 0.6, mz]);
+                        if spells.launch(MARK, orb, [0.0, 1.0, 0.0], i as i32, Some(at), rng) {
+                            self.events.push(EnemyEvent::Cast(MARK, at));
+                        }
+                    }
+                }
+                Act::Charging { secs: c } if s.act_t >= c => {
+                    if let Some(id) = s.telegraph.take() {
+                        spells.end(id);
+                    }
+                    let power = ENEMY_POWER * (c / 1.4).min(1.0);
+                    let speed = 30.0 * (1.0 + 0.6 * power);
+                    let aim = aim_at(chest, orb, self.vel, speed, rng);
+                    if spells.launch(FIRE, orb, aim, i as i32, None, rng) {
+                        spells.empower_last(power);
+                        self.events.push(EnemyEvent::Cast(FIRE, orb));
+                    }
+                    s.act = Act::Idle;
+                    s.cast_in = 5.0 + 5.0 * rng.uniform() + n as f32;
+                }
+                Act::Warming if s.act_t >= WARMUP => {
+                    if let Some(id) = s.telegraph.take() {
+                        spells.end(id);
+                    }
+                    s.act = Act::Blades { left: BLADES, next: 0.0, shot: 0 };
+                }
+                Act::Blades { left, next, shot } => {
+                    let next = next - dt;
+                    if next > 0.0 {
+                        s.act = Act::Blades { left, next, shot };
+                        continue;
+                    }
+                    let aim = aim_at(chest, orb, self.vel, 24.0, rng);
+                    if spells.launch(WIND, orb, aim, i as i32, None, rng) {
+                        self.events.push(EnemyEvent::Cast(WIND, orb));
+                    }
+                    let spun = (shot as f32 / (BLADES - 1) as f32).min(1.0);
+                    s.act = if left > 1 {
+                        Act::Blades { left: left - 1, next: SLOW_BLADE + (FAST_BLADE - SLOW_BLADE) * spun, shot: shot + 1 }
+                    } else {
+                        s.cast_in = 6.0 + 6.0 * rng.uniform() + n as f32;
+                        Act::Idle
+                    };
+                }
+                _ => {}
+            }
         }
     }
+}
 
-    // Enemy i casts at him: its kind of spell, from its orb, aimed where he
-    // will be when it arrives, give or take.
-    #[allow(clippy::too_many_arguments)]
-    fn cast(&mut self, seed: i64, generation: i64, i: usize, secs: f32, him: V3, spells: &mut Spells, rng: &mut Rng) {
-        let (pos, yaw) = enemy_at(seed, generation, i, secs, self.arena, him);
-        let orb = add(pos, turn(yaw, [0.45, 2.05, 0.2]));
-        let r = rnd(seed, generation, i, 29);
-        let kind = if r < 0.5 { FIRE } else if r < 0.8 { WIND } else { STRIKE };
-        let chest = add(him, [0.0, 1.1, 0.0]);
-        if dist(chest, orb) > RANGE {
-            return;
-        }
-        // (off by up to 2.5 either way, mostly less)
-        let mut miss = || (rng.uniform() + rng.uniform() - 1.0) * 2.5;
-        if kind == STRIKE {
-            // marked first, where he will be by the time it lands
-            let lead = 1.1;
-            let (mx, mz) = (miss(), miss());
-            let at = add(add(him, scale(lead, self.vel)), [mx, 0.6, mz]);
-            if spells.launch(MARK, orb, [0.0, 1.0, 0.0], i as i32, Some(at), rng) {
-                self.events.push(EnemyEvent::Cast(MARK, at));
-            }
-            return;
-        }
-        let speed = if kind == FIRE { 30.0 } else { 24.0 };
-        let (mx, my, mz) = (miss(), miss(), miss());
-        let aim = add(add(chest, scale(dist(chest, orb) / speed, self.vel)), [mx, my / 2.0, mz]);
-        if spells.launch(kind, orb, normalise(sub(aim, orb)), i as i32, None, rng) {
-            self.events.push(EnemyEvent::Cast(kind, orb));
-        }
-    }
+// (off by up to 2.5 either way, mostly less)
+fn miss(rng: &mut Rng) -> f32 {
+    (rng.uniform() + rng.uniform() - 1.0) * 2.5
+}
+
+// The way to cast from `orb` at `chest` (moving at `vel`) so a spell going
+// `speed` meets it, give or take.
+fn aim_at(chest: V3, orb: V3, vel: V3, speed: f32, rng: &mut Rng) -> V3 {
+    let (mx, my, mz) = (miss(rng), miss(rng), miss(rng));
+    let aim = add(add(chest, scale(dist(chest, orb) / speed, vel)), [mx, my / 2.0, mz]);
+    normalise(sub(aim, orb))
 }
 
 #[cfg(test)]
@@ -358,17 +578,40 @@ mod tests {
     }
 
     #[test]
-    fn positions_follow_the_formula() {
+    fn home_circles_the_arena() {
         let arena = [1.0, 12.0, 12.0];
         let (seed, generation, i, secs) = (1, 2, 3, 7.5);
         let r = |k| rnd(seed, generation, i, k);
-        let (pos, yaw) = enemy_at(seed, generation, i, secs, arena, [0.0, 12.0, 0.0]);
+        let pos = home(seed, generation, i, secs, arena);
         let radius = 9.0 + 12.0 * r(0);
         let flat = (pos[0] - arena[0]).hypot(pos[2] - arena[2]);
         assert!((flat - radius).abs() < 1e-3);
         let h = pos[1] - arena[1];
         assert!(h >= -2.0 && h <= 3.0);
-        assert!((yaw - (-pos[0]).atan2(-pos[2])).abs() < 1e-6);
+    }
+
+    #[test]
+    fn they_dodge_what_comes_at_them() {
+        // one enemy, a bolt flying straight at it: it moves out of the way
+        let mut e = Enemies::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(5);
+        let him = [0.0, 12.0, 0.0];
+        e.reset([0.0, 12.0, 12.0]);
+        e.update(2.0, 1, 1, 0.0, him, &mut spells, &mut rng);
+        let start = e.slots[0].pos;
+        let chest = add(start, [0.0, 1.1, 0.0]);
+        let from = add(chest, scale(-12.0, normalise(sub(chest, him))));
+        spells.launch(FIRE, from, normalise(sub(chest, from)), HIS, None, &mut rng);
+        let mut dodged = false;
+        for _ in 0..20 {
+            e.update(1.0 / 60.0, 1, 1, 0.0, him, &mut spells, &mut rng);
+            spells.update(1.0 / 60.0, false);
+            dodged |= e.slots[0].dodge > 0.0;
+        }
+        assert!(dodged);
+        let missed = len(sub(e.slots[0].pos, start));
+        assert!(missed > 0.5, "{missed}");
     }
 
     #[test]

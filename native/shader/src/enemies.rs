@@ -1,9 +1,8 @@
 // fut/enemies.fut: enemies: other wizards flying round him, each on a
 // platform of its own (see platform.fut) with a magic circle of its own
 // colour, and looks of its own, all hashed from the seed and its number.
-// Where they are is a pure function of the time, the arena (see foes.fut)
-// and where he is: each circles the arena at its own distance, height and
-// speed, turned to face him, so he can fly round them.
+// Where they are comes from the harness (see foes.fut: it moves them, as
+// their AI has them), each turned to face him.
 //
 // Their fights are run by the harness (web/enemies.ts), which passes each
 // one's state as a float (see foe_of): how many times it has been replaced
@@ -73,18 +72,12 @@ pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
     let r#gen = ftoi(gf);
     let appear = if phase < 8.0 { saturate(phase / appear_time) } else { 0.0 };
     let dying = if phase >= 8.0 { phase - 8.0 } else { -1.0 };
-    let r = move |k: i32| enemy_rnd(seed, r#gen, i, k);
-    let radius = 9.0 + 12.0 * r(0);
-    let speed = (0.04 + 0.06 * r(1)) * (if r(2) < 0.5 { -1.0 } else { 1.0 });
-    // (spread round him, then each drifting round at its own speed)
-    let a = 2.0 * PI * (i as f32 / max_enemies as f32 + 0.12 * r(3)) + speed * secs;
-    let h = -1.5 + 4.0 * r(4) + 0.5 * (0.6 * secs + 6.3 * r(5)).sin();
-    let off = vec(radius * a.sin(), h, radius * a.cos());
+    let _ = (seed, secs);
     // (a defeated one falls, faster and faster, tumbling over, and shrinks
     // away at the end; a new one grows in)
     let fall = if dying >= 0.0 { 2.5 * dying * dying } else { 0.0 };
     let size = if dying >= 0.0 { smoothstep(fall_time, fall_time - 1.0, dying) } else { 1.0 - 0.95 * appear * appear };
-    let pos = fs.arena + off;
+    let pos = foe_pos(fs, i);
     let to_him = fl.pos - pos;
     let (kill, cut_n, cut_o) = kill_of(foe_kill(fs, i));
     Enemy {
@@ -498,6 +491,9 @@ pub struct Looks {
     pub droop: f32,
     pub beard_len: f32,
     pub phase: f32,
+    // the spell it casts (as his: 0 fire, 1 lightning, 2 wind), which its
+    // orb shows
+    pub spell: i32,
 }
 
 pub fn looks_of(seed: i32, g: i32, i: i32) -> Looks {
@@ -529,6 +525,11 @@ pub fn looks_of(seed: i32, g: i32, i: i32) -> Looks {
         droop: 0.3 * r(26),
         beard_len: 0.2 + 0.4 * r(27),
         phase: 6.3 * r(28),
+        // (as the client's enemies.rs picks it)
+        spell: {
+            let k = r(29);
+            if k < 0.5 { 0 } else if k < 0.8 { 2 } else { 1 }
+        },
     }
 }
 
@@ -563,6 +564,7 @@ pub fn sd_enemy_figure(lk: Looks, secs: f32, q: Vec3, parts: i32) -> (f32, i32) 
 // With full_enemies: the pose of an enemy with looks lk (his, at rest,
 // breathing in its own time, in its colours and proportions).
 pub fn enemy_pose(prm: Params, lk: Looks, secs: f32) -> Pose {
+    let dr = Drive { spell: lk.spell as f32, ..on_path };
     let prm = Params {
         robe_colour: lk.robe,
         hat_colour: lk.hat,
@@ -572,7 +574,7 @@ pub fn enemy_pose(prm: Params, lk: Looks, secs: f32) -> Pose {
         hat_droop: lk.droop,
         ..prm
     };
-    pose_at(secs + lk.phase, prm, on_path)
+    pose_at(secs + lk.phase, prm, dr)
 }
 
 // The figure of enemy i (looks lk), at q in its space, its parts in `parts`
@@ -590,9 +592,10 @@ pub fn enemy_figure(prm: Params, i: i32, lk: Looks, secs: f32, q: Vec3, parts: i
             | (if parts & parts_staff != 0 { layers_staff } else { 0 })
             | (if body && !hat { no_hat } else { 0 })
             | (if hat && !body { only_hat } else { 0 });
+        // (its orb his, in the colour of its spell)
         let (d, fm) = if mask & figure_layers != 0 { bounded_figure(mask, ep, 0.1, q) } else { nothing };
-        let h = (d, m_enemy_full + full_parts * i + hit_material(fm));
-        if parts & parts_staff != 0 { umin((sd_sphere(q - ep.orb, orb_radius), m + part_orb), h) } else { h }
+        let _ = m;
+        (d, m_enemy_full + full_parts * i + hit_material(fm))
     } else {
         let (d, part) = sd_enemy_figure(lk, secs, q, parts);
         (d, m + part)

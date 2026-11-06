@@ -53,6 +53,7 @@ const STORE_MODE: &str = "wizard-mode";
 // (renamed as the defaults changed: casting by mouse, not Space)
 const STORE_BINDS: &str = "wizard-binds-2";
 const STORE_SHOULDER: &str = "wizard-over-shoulder";
+const STORE_SWAP_XY: &str = "wizard-swap-xy";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -112,6 +113,8 @@ pub struct Game {
     over_shoulder: bool,
     // picture mode, if on (see Picture)
     picture: Option<Picture>,
+    // the enemies fighting, as last logged
+    enemies_shown: usize,
     // his orb as the renderer last posed it (his frame, before his heading:
     // see set_orb), and where he was last step and how fast he went
     orb: V3,
@@ -184,7 +187,7 @@ impl Game {
             mods: egui::Modifiers::NONE,
             mouse_armed: false,
             menu_holds: false,
-            pads: Pads::default(),
+            pads: Pads::new(get(STORE_SWAP_XY).as_deref() != Some("0")),
             look: look::MouseLook::default(),
             rng: Rng::new(seed),
             time: 0.0,
@@ -194,6 +197,7 @@ impl Game {
             shoulder: 0.0,
             over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
             picture: None,
+            enemies_shown: 0,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -212,6 +216,7 @@ impl Game {
         storage.set_string(STORE_MODE, self.mode.name.key().to_string());
         eframe::set_value(storage, STORE_BINDS, &self.binds.saved());
         storage.set_string(STORE_SHOULDER, if self.over_shoulder { "1" } else { "0" }.to_string());
+        storage.set_string(STORE_SWAP_XY, if self.pads.swap_xy { "1" } else { "0" }.to_string());
         if let Some(c) = self.quality.choice {
             storage.set_string(STORE_QUALITY, c.key().to_string());
         }
@@ -234,11 +239,6 @@ impl Game {
     // menu's navigation), taken once.
     pub fn menu_input(&mut self) -> Option<gamepad::Pad> {
         self.menu.take()
-    }
-
-    // Starts the fight again (from the pause menu).
-    pub fn reset_fight(&mut self) {
-        self.combat.reset(&mut self.spells);
     }
 
     // The device used last (whose glyphs are shown).
@@ -365,6 +365,15 @@ impl Game {
         let picture = self.picture.is_some();
         if view.clicked() && (!self.paused || picture) && (!defeated || picture) && !self.look.held() {
             self.look.grab(ctx);
+        }
+        // (a click on the view, outside the dialogs, dismisses them: the
+        // pause menu resumes, the defeat panel tries again)
+        if view.clicked() && !picture {
+            if self.paused {
+                self.paused = false;
+            } else if defeated {
+                self.combat.reset(&mut self.spells);
+            }
         }
         let (dx, dy) = self.look.take(ctx);
         if dx != 0.0 || dy != 0.0 {
@@ -514,6 +523,10 @@ impl Game {
             }
         }
         let n = self.enemy_count(params);
+        if n != self.enemies_shown {
+            log::info!("fight: {n} enemies");
+            self.enemies_shown = n;
+        }
         let pad_cast = pad.is_some_and(|p| p.cast);
         let game_dt = if self.paused { 0.0 } else { dt };
         let (origin, dir) = self.cast_from();
@@ -616,6 +629,7 @@ impl Game {
         [drive.arena_x, drive.arena_y, drive.arena_z] = arena;
         drive.foe = foes;
         drive.kill = kills;
+        drive.foe_pos = self.combat.enemies.positions();
 
 
         // (and for a lock on the ground, its height)
@@ -874,7 +888,6 @@ impl Game {
             egui::Area::new(egui::Id::unique("wizard-defeat"))
                 .pivot(Align2::CENTER_CENTER)
                 .fixed_pos(egui::pos2(rect.center().x, rect.top() + 0.4 * rect.height()))
-                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     // (ease-out)
                     ui.set_opacity(1.0 - (1.0 - alpha).powi(2));
@@ -883,15 +896,11 @@ impl Game {
                             ui.spacing_mut().item_spacing.y = 10.0;
                             ui.label(hud::text("Defeated", 1.8 * hud::FONT, hud::DEFEAT).extra_letter_spacing(0.1 * 1.8 * hud::FONT));
                             ui.label(hud::text(stats.clone(), hud::FONT, hud::FG));
-                            if hud::plain_button(ui, "Try again", 1.05 * hud::FONT, Vec2::new(16.0, 4.0)).clicked() {
+                            // (its glyph: the controller's A, or a click)
+                            let glyph = if self.spellbar.device == Device::Pad { hud::Chip::Face('A') } else { hud::Chip::Mouse };
+                            if hud::glyph_button(ui, glyph, "Try again", 1.05 * hud::FONT).clicked() {
                                 reset = true;
                             }
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 0.0;
-                                ui.label(hud::text("or press Enter (", 0.8 * hud::FONT, hud::DIM));
-                                hud::chip(ui, hud::Chip::Face('A'));
-                                ui.label(hud::text(" on a controller)", 0.8 * hud::FONT, hud::DIM));
-                            });
                         });
                     });
                 });
@@ -947,6 +956,15 @@ impl Game {
                     });
                 }
                 ui.end_row();
+            }
+        });
+        ui.add_space(6.0);
+        nav.row();
+        ui.horizontal(|ui| {
+            let r = hud::fill_toggle(ui, "Swap X and Y", self.pads.swap_xy).on_hover_text("For controllers that report X and Y the other way round");
+            nav.item(ui, &r);
+            if r.clicked() {
+                self.pads.swap_xy = !self.pads.swap_xy;
             }
         });
         ui.add_space(6.0);
@@ -1041,7 +1059,7 @@ mod tests {
         let mut g = Game::new(None);
         let p = params(3.0);
         let o = frame(&ctx, &mut g, &p, vec![]);
-        assert_eq!(o.drive, Drive { staff: o.drive.staff, shoulder: o.drive.shoulder, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 1.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
+        assert_eq!(o.drive, Drive { staff: o.drive.staff, shoulder: o.drive.shoulder, foe_pos: o.drive.foe_pos, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 1.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
         assert!(o.probe.is_none());
         assert_eq!(o.overrides, vec![("enemies".to_string(), Value::Num(0.0))]);
         // F twice: fight

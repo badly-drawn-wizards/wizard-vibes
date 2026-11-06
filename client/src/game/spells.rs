@@ -35,10 +35,13 @@ pub const GUST: u32 = 4; // a wind blade's burst into small blades
 pub const MARK: u32 = 5; // where a strike is about to land
 pub const HEAL: u32 = 6; // healing being channelled, round him
 pub const LOCK: u32 = 7; // his strike locking on to a target (held)
-pub const CHARGE: u32 = 8; // his fire bolt being charged at the orb (held)
+pub const CHARGE: u32 = 8; // a fire bolt being charged at the orb (his: held)
+pub const WINDUP: u32 = 9; // wind blades warming up at the orb
+pub const WISP: u32 = 10; // a defeated enemy's soul, flying to him (it restores his mana)
 pub const STRIDE: usize = 10;
 
-const LIFE: [f32; 8] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME]; // seconds, by kind
+const LIFE: [f32; 11] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5, 12.0]; // seconds, by kind
+pub const WARMUP: f32 = 0.5; // seconds wind blades warm up before the first flies
 pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
 const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s
 const COOLDOWN: [f32; 4] = [0.9, 2.0, 0.0, 0.0]; // seconds before the spell's next cast (wind: see Gatling)
@@ -111,6 +114,8 @@ pub enum SpellEvent {
     Hit { side: i32, kind: u32, owner: i32, cut: Option<(V3, V3)>, scale: f32 },
     // (for the sound: a bolt bursting, a blade breaking up, a strike landing)
     Sound { what: Sound, pos: V3 },
+    // a soul reached him
+    Soul,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +146,8 @@ struct Spell {
 // cooled (see combat.rs). `next`: seconds until it may fire again.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Gatling {
+    // seconds it has been held, warming up (none fly until WARMUP)
+    pub warm: f32,
     pub spin: f32,
     pub heat: f32,
     pub overheated: bool,
@@ -296,7 +303,7 @@ impl Spells {
             }
             s.top = origin[1].max(s.pos[1]) + STRIKE_HEIGHT;
         } else {
-            let v = SPEED[kind as usize];
+            let v = SPEED.get(kind as usize).copied().unwrap_or(0.0);
             s.vel = [dir[0] * v, dir[1] * v, dir[2] * v];
         }
         if kind == STRIKE && s.pos[1] != 0.0 {
@@ -304,6 +311,57 @@ impl Spells {
         }
         self.items.push(s);
         true
+    }
+
+    // An enemy's telegraph (CHARGE or WINDUP), at `at` for `secs`: its id
+    // (to move it with the enemy's orb, and end it), unless at the limit.
+    pub fn telegraph(&mut self, kind: u32, at: V3, secs: f32, owner: i32, rng: &mut Rng) -> Option<u32> {
+        if !self.launch(kind, at, [0.0, 1.0, 0.0], owner, None, rng) {
+            return None;
+        }
+        let s = self.items.last_mut().unwrap();
+        s.life = secs;
+        // (drawn where it is, not at his orb)
+        s.vel = [1.0, 0.0, 0.0];
+        Some(s.id)
+    }
+
+    // The last spell launched, charged by `power` (an enemy's fire bolt:
+    // faster, and its burst bigger and harder).
+    pub fn empower_last(&mut self, power: f32) {
+        if let Some(s) = self.items.last_mut() {
+            s.power = power.clamp(0.0, 1.0);
+            let k = 1.0 + 0.6 * s.power;
+            s.vel = s.vel.map(|v| v * k);
+            s.seed += 100000.0 * (100.0 * s.power).round();
+        }
+    }
+
+    // Moves spell `id` to `at` (a telegraph following its enemy's orb).
+    pub fn place(&mut self, id: u32, at: V3) {
+        if let Some(s) = self.items.iter_mut().find(|s| s.id == id) {
+            s.pos = at;
+        }
+    }
+
+    // Ends spell `id`.
+    pub fn end(&mut self, id: u32) {
+        self.items.retain(|s| s.id != id);
+    }
+
+    // A defeated enemy's soul, rising from `at` and then flying to him.
+    pub fn soul(&mut self, at: V3) {
+        let rng = &mut Rng::new(at[0].to_bits() as u64 ^ ((at[2].to_bits() as u64) << 32) ^ self.next_id as u64);
+        if self.launch(WISP, at, [0.0, 1.0, 0.0], HIS, None, rng) {
+            let s = self.items.last_mut().unwrap();
+            s.vel = [2.0 * (rng.uniform() - 0.5), 4.0, 2.0 * (rng.uniform() - 0.5)];
+        }
+    }
+
+    // His bolts and blades in flight (where, and how fast), for the
+    // enemies to dodge.
+    pub fn his_missiles(&self) -> Vec<(V3, V3)> {
+        self.items.iter().filter(|s| s.owner == HIS && (s.kind == FIRE || s.kind == WIND)).map(|s| (s.pos, s.vel)).collect()
     }
 
     // The enemy target nearest his aim, within LOCK_ON of it and in range.
@@ -409,8 +467,26 @@ impl Spells {
         self.staff += (goal - self.staff) * (1.0 - (-dt * if out { 12.0 } else { 2.5 }).exp());
         for s in &mut self.items {
             s.age += dt;
-            // (a gust stays where the blade broke; its velocity only aims the shards)
-            if s.kind != GUST {
+            // (a soul flies to him, faster and faster, turning towards him;
+            // reaching him, it is gone)
+            if s.kind == WISP {
+                let to = sub(super::vec::add(self.here, [0.0, 1.3, 0.0]), s.pos);
+                let d = len(to);
+                if d < 0.6 {
+                    s.age = s.life;
+                    self.events.push(SpellEvent::Soul);
+                    continue;
+                }
+                let speed = 4.0 + 14.0 * s.age.min(1.5);
+                let want = super::vec::scale(speed / d, to);
+                let k = 1.0 - (-dt * 3.0).exp();
+                for j in 0..3 {
+                    s.vel[j] += (want[j] - s.vel[j]) * k;
+                }
+            }
+            // (telegraphs stay where they are put; a gust stays where the
+            // blade broke: its velocity only aims the shards)
+            if s.kind != GUST && s.kind != CHARGE && s.kind != WINDUP {
                 for i in 0..3 {
                     s.pos[i] += s.vel[i] * dt;
                 }
@@ -516,6 +592,14 @@ impl Spells {
                 let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, LOCK_TIME, 11.0];
                 out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
             }
+        }
+        // (his wind blades warming up, at the orb: likewise)
+        let g = self.gatling;
+        if g.warm > 0.0 && g.warm < WARMUP && self.limit > 0 {
+            let i = self.items.len().min(self.limit - 1);
+            let [x, y, z] = self.orb;
+            let slot = [WINDUP as f32, x, y, z, 0.0, 0.0, 0.0, g.warm, WARMUP, 3.0];
+            out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
         // (charging, the fire bolt at the orb: likewise)
         if self.charge >= 0.0 && self.limit > 0 {

@@ -399,6 +399,7 @@ impl App {
         let names = ["Settings", "Controls", "Parameters"];
         let pad = self.game.device() == crate::game::spellbar::Device::Pad;
         egui::Window::new("Paused")
+            .order(egui::Order::Foreground)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -521,16 +522,6 @@ impl App {
                     scale.set_target((fps + 5.0 * steps as f32).clamp(crate::scale::TARGET_MIN, crate::scale::TARGET_MAX));
                 }
             });
-            ui.end_row();
-
-            ui.label("Fight");
-            nav.row();
-            let r = ui.button("Start it again");
-            nav.item(ui, &r);
-            if r.clicked() {
-                game.reset_fight();
-                game.set_paused(false);
-            }
             ui.end_row();
         });
     }

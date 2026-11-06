@@ -60,6 +60,8 @@ pub struct Drive {
     pub arena_y: f32,
     pub arena_z: f32,
     pub foe: [f32; 6],
+    // where each stands (its platform's top, in the world: fx0 .. fz5)
+    pub foe_pos: [[f32; 3]; 6],
     // what defeated each (a kill code: see kill_of in the shader's enemies.rs)
     pub kill: [f32; 6],
 }
@@ -96,6 +98,7 @@ pub const ON_PATH: Drive = Drive {
     arena_y: 12.0,
     arena_z: 12.0,
     foe: [0.0; 6],
+    foe_pos: [[0.0; 3]; 6],
     kill: [0.0; 6],
 };
 
@@ -134,6 +137,10 @@ impl Drive {
             "arena_y" => self.arena_y,
             "arena_z" => self.arena_z,
             f if f.starts_with("foe") => f[3..].parse::<usize>().ok().and_then(|i| self.foe.get(i).copied()).unwrap_or(0.0),
+            f if f.len() == 3 && (f.starts_with("fx") || f.starts_with("fy") || f.starts_with("fz")) => {
+                let a = (f.as_bytes()[1] - b'x') as usize;
+                f[2..].parse::<usize>().ok().and_then(|i| self.foe_pos.get(i)).map_or(0.0, |p| p[a])
+            }
             f if f.starts_with("kill") => f[4..].parse::<usize>().ok().and_then(|i| self.kill.get(i).copied()).unwrap_or(0.0),
             _ => panic!("no drive field {id}"),
         }
@@ -182,6 +189,13 @@ impl Drive {
                 Some(x) => x,
                 None => return false,
             },
+            f if f.len() == 3 && (f.starts_with("fx") || f.starts_with("fy") || f.starts_with("fz")) => {
+                let a = (f.as_bytes()[1] - b'x') as usize;
+                match f[2..].parse::<usize>().ok().and_then(|i| self.foe_pos.get_mut(i)) {
+                    Some(p) => &mut p[a],
+                    None => return false,
+                }
+            }
             _ => return false,
         };
         *f = v;
