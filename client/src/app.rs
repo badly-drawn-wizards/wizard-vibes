@@ -29,6 +29,11 @@ pub struct App {
     shader: Option<Shader>,
     error: Option<String>,
     building: bool,
+    // natively, a shader being made off the UI thread (its module and
+    // pipelines: the driver compiling each kernel takes seconds), and when
+    // it was started; the current one draws meanwhile
+    #[cfg(not(target_arch = "wasm32"))]
+    compiling: Option<(std::sync::mpsc::Receiver<Result<Shader, String>>, Instant)>,
     frame: Frame,
     // the image the scene is copied into, and its egui id
     image: Option<(wgpu::Texture, egui::TextureId)>,
@@ -121,6 +126,8 @@ impl App {
             shader: None,
             error: None,
             building: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            compiling: None,
             frame: Frame::default(),
             image: None,
             start: now,
@@ -232,21 +239,68 @@ impl App {
                         continue;
                     }
                     self.reload = false;
-                    let t = Instant::now();
-                    match Shader::new(&rs.device, &files) {
-                        Ok(s) => {
-                            log::info!("shader {} ({}) loaded in {:.1} s", s.version, if s.spirv { "SPIR-V" } else { "WGSL" }, t.elapsed().as_secs_f32());
-                            if let Some(p) = self.params.as_mut() {
-                                p.compile = s.meta.compile.clone();
-                            }
-                            self.shader = Some(s);
-                            self.error = None;
-                        }
-                        Err(e) => self.error = Some(format!("loading the shader: {e}")),
+                    // natively, off the UI thread (a newer build replaces one
+                    // still compiling: its result goes nowhere); in the
+                    // browser the page's GPU process compiles, so here
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let device = rs.device.clone();
+                        std::thread::spawn(move || {
+                            let _ = tx.send(Shader::new(&device, &files));
+                        });
+                        self.compiling = Some((rx, Instant::now()));
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let t = Instant::now();
+                        let made = Shader::new(&rs.device, &files);
+                        self.install(made, t);
                     }
                 }
             }
         }
+    }
+
+    // A shader made (or not), started at `since`: in place of the last.
+    fn install(&mut self, made: Result<Shader, String>, since: Instant) {
+        match made {
+            Ok(s) => {
+                log::info!("shader {} ({}) loaded in {:.1} s", s.version, if s.spirv { "SPIR-V" } else { "WGSL" }, since.elapsed().as_secs_f32());
+                if let Some(p) = self.params.as_mut() {
+                    p.compile = s.meta.compile.clone();
+                }
+                self.shader = Some(s);
+                self.error = None;
+            }
+            Err(e) => self.error = Some(format!("loading the shader: {e}")),
+        }
+    }
+
+    // Natively: a shader finished compiling off the UI thread, if one has.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_compiled(&mut self) {
+        let Some((rx, since)) = &self.compiling else { return };
+        let since = *since;
+        match rx.try_recv() {
+            Ok(made) => {
+                self.compiling = None;
+                self.install(made, since);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.compiling = None;
+                self.error = Some("loading the shader: its thread stopped".into());
+            }
+        }
+    }
+
+    // Whether a shader is being made (natively, off the UI thread).
+    fn compiling(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.compiling.is_some();
+        #[cfg(target_arch = "wasm32")]
+        false
     }
 
     fn set_schema(&mut self, s: Schema) {
@@ -272,7 +326,7 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("hud").show(ui, |ui| {
             ui.horizontal(|ui| {
-                let status = match (&self.shader, self.building) {
+                let status = match (&self.shader, self.building || self.compiling()) {
                     (_, true) => "compiling…".to_string(),
                     (None, _) => "loading…".to_string(),
                     (Some(s), _) => format!("{} · {}", &s.version[..8], if s.spirv { "SPIR-V" } else { "WGSL" }),
@@ -415,9 +469,11 @@ impl App {
         }
         // (the frame rate says something of the scale only while drawing a
         // shader that is in place, and not paused)
-        let drawing = self.shader.is_some() && !self.building && self.unsupported.is_none() && !self.game.paused();
+        let drawing = self.shader.is_some() && !self.building && !self.compiling() && self.unsupported.is_none() && !self.game.paused();
         self.scale.frame(dt, drawing);
         self.handle_events(frame);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.take_compiled();
         let secs = (now - self.start).as_secs_f64();
         let server = self.source.has_server();
         if let Some(p) = self.params.as_mut() {
