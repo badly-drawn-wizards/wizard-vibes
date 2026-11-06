@@ -89,8 +89,8 @@ impl Quality {
         self.busy = false;
     }
 
-    // The panel: a button per level (in the top bar).
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    // The panel: a button per level (in the pause menu).
+    pub fn ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         if !self.enabled {
             return;
         }
@@ -103,7 +103,9 @@ impl Quality {
             for l in LEVELS {
                 let pressed = Some(l) == self.choice;
                 let tip = format!("Quality: {}{}", l.name(), if self.busy && pressed { " (loading…)" } else { "" });
-                if super::hud::toggle_button(ui, l.name(), pressed, false).on_hover_text(tip).clicked() {
+                let r = super::hud::toggle_button(ui, l.name(), pressed, false).on_hover_text(tip);
+                nav.item(ui, &r);
+                if r.clicked() {
                     chosen = Some(l);
                 }
             }

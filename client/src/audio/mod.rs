@@ -187,8 +187,9 @@ impl Audio {
 
     // The songs, for the pause menu: a button each, the chosen one filled
     // (a switch computes the new one from its start, unless its loop is
-    // kept from before).
-    pub fn songs(&mut self, ui: &mut egui::Ui) {
+    // kept from before): one row of the menu's navigation, however they
+    // wrap.
+    pub fn songs(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         let names = wizard_shader::music::song_names;
         ui.vertical(|ui| {
             // (three to a row)
@@ -196,7 +197,9 @@ impl Audio {
                 ui.horizontal(|ui| {
                     for (j, name) in row.1.iter().enumerate() {
                         let k = (3 * row.0 + j) as u32;
-                        if crate::game::hud::fill_toggle(ui, name, self.song == k).clicked() {
+                        let r = crate::game::hud::fill_toggle(ui, name, self.song == k);
+                        nav.item(ui, &r);
+                        if r.clicked() {
                             self.song = k;
                         }
                     }

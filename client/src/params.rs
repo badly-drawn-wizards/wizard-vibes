@@ -9,6 +9,7 @@
 //
 // Colours are linear RGB.
 
+use crate::nav::Nav;
 use crate::types::{ParamValues, Value};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
@@ -135,15 +136,21 @@ impl Params {
         out
     }
 
-    // The drawer's contents.
-    pub fn ui(&mut self, ui: &mut egui::Ui, now: f64) {
+    // The drawer's contents: a row of the navigation (nav) for each
+    // group's header and each control.
+    pub fn ui(&mut self, ui: &mut egui::Ui, now: f64, nav: &mut Nav) {
+        nav.row();
         ui.horizontal(|ui| {
-            if ui.button("Copy changes").on_hover_text("Every value that differs from its default, as JSON").clicked() {
+            let r = ui.button("Copy changes").on_hover_text("Every value that differs from its default, as JSON");
+            nav.item(ui, &r);
+            if r.clicked() {
                 let text = serde_json::to_string_pretty(&self.changes()).unwrap();
                 ui.ctx().copy_text(text);
                 self.copied = Some(("copied".into(), now));
             }
-            if ui.button("Reset all").clicked() {
+            let r = ui.button("Reset all");
+            nav.item(ui, &r);
+            if r.clicked() {
                 let all: Vec<Param> = self.schema.params().into_iter().cloned().collect();
                 for p in &all {
                     self.reset(p, now);
@@ -159,12 +166,12 @@ impl Params {
         egui::ScrollArea::vertical().show(ui, |ui| {
             let groups = self.schema.groups.clone();
             for (i, g) in groups.iter().enumerate() {
-                self.group(ui, g, &format!("{i}"), 0, now);
+                self.group(ui, g, &format!("{i}"), 0, now, nav);
             }
         });
     }
 
-    fn group(&mut self, ui: &mut egui::Ui, g: &Group, path: &str, depth: usize, now: f64) {
+    fn group(&mut self, ui: &mut egui::Ui, g: &Group, path: &str, depth: usize, now: f64, nav: &mut Nav) {
         // top-level groups start open, except the shader's (compile-time)
         let shader_only = !g.params.is_empty() && g.params.iter().all(|p| p.compile);
         let default_open = depth == 0 && !shader_only;
@@ -172,31 +179,36 @@ impl Params {
         let open = *self.open.get(path).unwrap_or(&default_open);
         let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, open);
         state.set_open(open);
-        let (toggle, _, body) = state
-            .show_header(ui, |ui| {
-                ui.strong(&g.name);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("↺").on_hover_text(format!("Reset {}", g.name)).clicked() {
-                        let mut ps = vec![];
-                        collect(g, &mut ps);
-                        for p in &ps {
-                            self.reset(p, now);
-                        }
+        // (the header: its toggle and its reset, a row of the navigation)
+        nav.row();
+        let header = ui.horizontal(|ui| {
+            let toggle = state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
+            nav.item(ui, &toggle);
+            ui.strong(&g.name);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let r = ui.small_button("↺").on_hover_text(format!("Reset {}", g.name));
+                nav.item(ui, &r);
+                if r.clicked() {
+                    let mut ps = vec![];
+                    collect(g, &mut ps);
+                    for p in &ps {
+                        self.reset(p, now);
                     }
-                });
-            })
-            .body(|ui| {
-                for p in &g.params {
-                    self.control(ui, p, now);
-                }
-                for (i, sub) in g.groups.iter().enumerate() {
-                    self.group(ui, sub, &format!("{path}/{i}"), depth + 1, now);
                 }
             });
-        if toggle.clicked() {
+            toggle
+        });
+        if header.inner.clicked() {
             self.open.insert(path.to_string(), !open);
         }
-        let _ = body;
+        state.show_body_indented(&header.response, ui, |ui| {
+            for p in &g.params {
+                self.control(ui, p, now, nav);
+            }
+            for (i, sub) in g.groups.iter().enumerate() {
+                self.group(ui, sub, &format!("{path}/{i}"), depth + 1, now, nav);
+            }
+        });
     }
 
     fn reset(&mut self, p: &Param, now: f64) {
@@ -215,8 +227,11 @@ impl Params {
         self.pending_since = now;
     }
 
-    // One labelled control, with a reset-to-default button.
-    fn control(&mut self, ui: &mut egui::Ui, p: &Param, now: f64) {
+    // One labelled control, with a reset-to-default button: a row of the
+    // navigation (left and right along it, or moving a slider's value, or
+    // a choice's).
+    fn control(&mut self, ui: &mut egui::Ui, p: &Param, now: f64, nav: &mut Nav) {
+        nav.row();
         let enabled = !p.compile || self.can_rebuild;
         let mut v = if p.compile { self.compile.get(&p.id) } else { self.values.get(&p.id) }.cloned().unwrap_or(p.default.clone());
         let before = v.clone();
@@ -240,28 +255,39 @@ impl Params {
                         if let Some(st) = p.step {
                             s = s.step_by(st);
                         }
-                        ui.add(s);
+                        let r = ui.add(s);
+                        let steps = nav.slider(ui, &r);
+                        if steps != 0 {
+                            x = (x + steps as f64 * p.step.unwrap_or((hi - lo) / 100.0)).clamp(lo, hi);
+                        }
                         v = Value::Num(x);
                     }
                     "int" => {
                         let mut x = num(&v).round() as i64;
                         let (lo, hi) = (p.min.unwrap_or(0.0) as i64, p.max.unwrap_or(100.0) as i64);
-                        ui.add(egui::Slider::new(&mut x, lo..=hi));
+                        let r = ui.add(egui::Slider::new(&mut x, lo..=hi));
+                        x = (x + nav.slider(ui, &r) as i64).clamp(lo, hi);
                         v = Value::Num(x as f64);
                     }
                     "checkbox" => {
                         let mut b = matches!(v, Value::Bool(true)) || matches!(v, Value::Num(x) if x != 0.0);
-                        ui.checkbox(&mut b, "");
+                        let r = ui.checkbox(&mut b, "");
+                        nav.item(ui, &r);
                         v = Value::Bool(b);
                     }
                     "select" => {
                         let opts = p.options.clone().unwrap_or_default();
                         let mut i = num(&v).round() as usize;
-                        egui::ComboBox::from_id_salt(("select", &p.id)).selected_text(opts.get(i).cloned().unwrap_or_default()).show_ui(ui, |ui| {
+                        let r = egui::ComboBox::from_id_salt(("select", &p.id)).selected_text(opts.get(i).cloned().unwrap_or_default()).show_ui(ui, |ui| {
                             for (k, o) in opts.iter().enumerate() {
                                 ui.selectable_value(&mut i, k, o);
                             }
                         });
+                        // (left and right step through the choices)
+                        let steps = nav.slider(ui, &r.response);
+                        if steps != 0 && !opts.is_empty() {
+                            i = (i as i64 + steps as i64).clamp(0, opts.len() as i64 - 1) as usize;
+                        }
                         v = Value::Num(i as f64);
                     }
                     "flags" => {
@@ -271,7 +297,9 @@ impl Params {
                             ui.horizontal_wrapped(|ui| {
                                 for (k, o) in opts.iter().enumerate() {
                                     let mut on = bits & (1 << k) != 0;
-                                    if ui.checkbox(&mut on, o).changed() {
+                                    let r = ui.checkbox(&mut on, o);
+                                    nav.item(ui, &r);
+                                    if r.changed() {
                                         bits ^= 1 << k;
                                     }
                                 }
@@ -283,15 +311,20 @@ impl Params {
                         let c = colour(&v);
                         // (the picker works in gamma-encoded sRGB)
                         let mut rgba = egui::Rgba::from_rgb(c[0] as f32, c[1] as f32, c[2] as f32);
-                        egui::widgets::color_picker::color_edit_button_rgba(ui, &mut rgba, egui::widgets::color_picker::Alpha::Opaque);
+                        let r = egui::widgets::color_picker::color_edit_button_rgba(ui, &mut rgba, egui::widgets::color_picker::Alpha::Opaque);
+                        nav.item(ui, &r);
                         v = Value::Colour([rgba.r() as f64, rgba.g() as f64, rgba.b() as f64]);
                     }
                     _ => {
                         ui.weak(format!("({})", p.kind));
                     }
                 }
-                if v != p.default && ui.small_button("↺").on_hover_text("Reset").clicked() {
-                    v = p.default.clone();
+                if v != p.default {
+                    let r = ui.small_button("↺").on_hover_text("Reset");
+                    nav.item(ui, &r);
+                    if r.clicked() {
+                        v = p.default.clone();
+                    }
                 }
             });
         });

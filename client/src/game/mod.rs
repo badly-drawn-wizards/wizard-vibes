@@ -8,7 +8,7 @@
 //
 // The app calls, each frame: step() (input, and everything advanced by dt),
 // then the probe it asks for and apply_probe() with its answer, then ui()
-// for the HUD; mode_ui() and quality_ui() go in its top bar.
+// for the HUD; mode_ui() and quality_ui() go in its pause menu.
 
 pub mod camera;
 pub mod combat;
@@ -406,8 +406,8 @@ impl Game {
         self.combat.handle(&mut self.spells);
     }
 
-    // The mode buttons (for the top bar).
-    pub fn mode_ui(&mut self, ui: &mut egui::Ui) {
+    // The mode buttons (for the pause menu: a row of its navigation).
+    pub fn mode_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         let mut chosen = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
@@ -416,6 +416,7 @@ impl Game {
                     hud::toggle_button(ui, m.title(), m == self.mode.name, false)
                 });
                 let r = r.inner.on_hover_text(self.mode.tooltip(m)).on_disabled_hover_text(self.mode.tooltip(m));
+                nav.item(ui, &r);
                 if r.clicked() {
                     chosen = Some(m);
                 }
@@ -428,9 +429,10 @@ impl Game {
         }
     }
 
-    // The quality panel (for the top bar; nothing while it is disabled).
-    pub fn quality_ui(&mut self, ui: &mut egui::Ui) {
-        self.quality.ui(ui);
+    // The quality buttons (for the pause menu: a row of its navigation;
+    // nothing while it is disabled).
+    pub fn quality_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        self.quality.ui(ui, nav);
     }
 
     // Sets the quality panel up: `level` the level running now, if known;
