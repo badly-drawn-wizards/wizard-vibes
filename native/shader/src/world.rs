@@ -811,13 +811,25 @@ pub fn sd_broadleaf(seed: f32, q: Vec3) -> (f32, i32) {
         i += 1;
     }
     let (wood, tip) = (d, p);
-    // a clump of leaves at each tip (lumpy: the bumps have slope under 0.45,
-    // so the 0.7 keeps it a bound), and a small one over the crown's middle:
-    // small enough, and blended little, that the branches show between them
-    let bumps = 0.04 * (6.0 * q.x + 7.0 * seed).sin() * (6.0 * q.y).sin() * (6.0 * q.z + 3.0 * seed).sin();
-    let clump = sd_sphere(tip - vec(0.0, 0.08, 0.0), 0.38);
+    // a clump of leaves at each tip: misshapen, a core and four lumps of
+    // their own sizes fused tightly (so each bulges), a notch carved from
+    // its top, all in the branch's own frame (so each clump leans its own
+    // way); broadly lumpy and finely bumpy over that (in the tree's frame,
+    // so no two alike: their slopes total under 0.9, so the 0.52 keeps it a
+    // bound); and a small one over the crown's middle: small enough, and
+    // blended little, that the branches show between them
+    let lumps = 0.07 * (5.1 * q.x + 5.0 * seed).sin() * (4.7 * q.y + 1.3).sin() * (5.3 * q.z - 2.0 * seed).sin();
+    let bumps = 0.035 * (8.0 * q.x + 7.0 * seed).sin() * (8.0 * q.y).sin() * (8.0 * q.z + 3.0 * seed).sin();
+    let t = tip - vec(0.0, 0.06, 0.0);
+    let core = sd_ellipsoid(t, vec(0.33, 0.24, 0.29));
+    let a = sd_sphere(t - vec(0.27, 0.12, 0.08), 0.22);
+    let b = sd_sphere(t - vec(-0.22, 0.02, -0.17 + 0.12 * seed), 0.2);
+    let c = sd_sphere(t - vec(0.02, 0.2, -0.2), 0.17);
+    let d = sd_sphere(t - vec(-0.06, -0.1, 0.23), 0.15);
+    let clump = smin(0.06, smin(0.06, smin(0.07, core, a), smin(0.06, b, c)), d);
+    let clump = clump.maximum(-sd_sphere(t - vec(0.12, 0.33, 0.24), 0.13));
     let middle = sd_ellipsoid(q - vec(0.0, 2.6, 0.0), vec(0.5, 0.38, 0.5));
-    let leaves = 0.7 * (smin(0.15, clump, middle) + bumps);
+    let leaves = 0.52 * (smin(0.15, clump, middle) + lumps + bumps);
     if wood < leaves { (wood, part_trunk) } else { (leaves, part_leaves) }
 }
 
