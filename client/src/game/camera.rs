@@ -74,21 +74,21 @@ impl Orbit {
     // Where the camera is, in his frame, `shoulder` (0..1) over his right
     // shoulder (as camera_ray in the shader's wizard.rs).
     pub fn eye(&self, shoulder: f32) -> V3 {
-        use wizard_shader::wizard::{shoulder_right, shoulder_up};
-        let [fx, fy, fz] = self.view_dir();
-        // (right: the view crossed with up)
-        let (rx, rz) = (-fz, fx);
-        let rl = rx.hypot(rz).max(1e-6);
-        let d = self.cam.dist;
-        let s = shoulder_right * shoulder / rl;
-        [-d * fx + s * rx, (1.15 - d * fy + shoulder_up * shoulder).max(0.1), -d * fz + s * rz]
+        let (ro, _) = self.centre_ray(shoulder);
+        [ro.x, ro.y, ro.z]
     }
 
-    // The way the camera looks, in his frame (as camera_ray in fut/wizard.fut).
+    // The way the camera looks, in his frame.
     pub fn view_dir(&self) -> V3 {
-        let (sp, cp) = self.cam.pitch.sin_cos();
-        let (sy, cy) = self.cam.yaw.sin_cos();
-        [-cp * sy, -sp, -cp * cy]
+        let (_, rd) = self.centre_ray(0.0);
+        [rd.x, rd.y, rd.z]
+    }
+
+    // The ray through the view's centre (the renderer's camera_ray: kept
+    // above his platform, as it is outside picture mode).
+    fn centre_ray(&self, shoulder: f32) -> (wizard_shader::prelude::Vec3, wizard_shader::prelude::Vec3) {
+        use wizard_shader::wizard::{camera_ray, default_target};
+        camera_ray(default_target, 2, 2, self.cam.yaw, self.cam.pitch, self.cam.dist, shoulder, 0.1, 1.0, 1.0)
     }
 }
 

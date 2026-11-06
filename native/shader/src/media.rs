@@ -66,16 +66,7 @@ pub fn media(pose: Pose, g: Glow, p: Vec3) -> MediaSample {
     let od = sd_orb(q);
     let gd = if glow { glyph_dist(tm, p) } else { 1e9 };
     // in the orb: lightning arcs, flames or a whirlwind, by the spell in hand
-    let bolts = if !orb {
-        no_media
-    } else if pose.spell == 0 || pose.spell == 6 {
-        fire_media(pose.secs, q)
-    } else if pose.spell == 2 || pose.spell == 3 || pose.spell == 4 || pose.spell == 7 {
-        wind_media(pose.secs, q)
-    } else {
-        let l = lightning_media(tm, q);
-        MediaSample { radiance: scale(pose.prm.lightning, l.radiance), ..l }
-    };
+    let bolts = if !orb { no_media } else { spell_media(pose.prm, pose.spell, pose.secs, tm, q) };
     let haze = if orb && od < 0.0 { globe_haze } else { 0.0 };
     let od = if glow || orb { od } else { 1e9 }; // (no step cap near a hidden orb)
     let (ld, lm) = if glow { nearest_liquid(pose, p) } else { (1e9, m_potion) };
@@ -87,6 +78,20 @@ pub fn media(pose: Pose, g: Glow, p: Vec3) -> MediaSample {
             + bolts.radiance
             + scale(potion_glow_density(pose.prm, ld), glow_colour(pose.prm, lm)),
         extinction: 0.0,
+    }
+}
+
+// What fills a wizard's orb (his, or an enemy's), at q in its own frame
+// (round orb_pos), by the spell in hand: flames, a whirlwind, or lightning
+// arcs.
+pub fn spell_media(prm: Params, spell: i32, secs: f32, tm: f32, q: Vec3) -> MediaSample {
+    if spell == 0 || spell == 6 {
+        fire_media(secs, q)
+    } else if spell == 2 || spell == 3 || spell == 4 || spell == 7 {
+        wind_media(secs, q)
+    } else {
+        let l = lightning_media(tm, q);
+        MediaSample { radiance: scale(prm.lightning, l.radiance), ..l }
     }
 }
 

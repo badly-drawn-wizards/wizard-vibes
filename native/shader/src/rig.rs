@@ -304,6 +304,42 @@ pub fn twist_at(y: f32) -> f32 {
     smoothstep(0.7, 1.3, y)
 }
 
+// A wizard's orb's glow colour, by the spell in hand, and the tint of its
+// arcs and light (his, and the enemies' alike). The spells by number: 0
+// fire bolt, 1 lightning strike, 2 wind blade, 3 healing, 4 frost lance, 5
+// arcane missiles, 6 meteor, 7 gravity well, 8 spirit familiar.
+pub fn orb_tint_of(prm: Params, spell: i32) -> Vec3 {
+    if spell == 0 || spell == 6 {
+        vec(1.0, 0.42, 0.12)
+    } else if spell == 2 {
+        vec(0.4, 0.88, 1.0)
+    } else if spell == 3 {
+        vec(0.45, 1.0, 0.5)
+    } else if spell == 4 {
+        vec(0.6, 0.9, 1.0)
+    } else if spell == 5 || spell == 7 {
+        vec(0.75, 0.5, 1.0)
+    } else if spell == 8 {
+        vec(0.85, 0.95, 1.0)
+    } else {
+        prm.orb_glow_colour
+    }
+}
+
+pub fn bolt_tint_of(spell: i32) -> Vec3 {
+    if spell == 0 || spell == 6 {
+        vec(1.5, 0.65, 0.25)
+    } else if spell == 2 || spell == 4 {
+        vec(0.7, 1.1, 1.3)
+    } else if spell == 3 {
+        vec(0.7, 1.3, 0.75)
+    } else if spell == 5 || spell == 7 {
+        vec(1.1, 0.7, 1.4)
+    } else {
+        splat(1.0)
+    }
+}
+
 // The orb as he holds the staff (his frame), at `secs`.
 #[inline]
 pub fn held_orb(prm: Params, dr: Drive, secs: f32) -> Vec3 {
@@ -383,35 +419,8 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let l_palm = hand_at(l_elbow).0;
     // the orb takes the colour of the spell in hand, and flares as it is cast
     let spell = ftoi(round_even(dr.spell));
-    // (the spells by number: 0 fire bolt, 1 lightning strike, 2 wind
-    // blade, 3 healing, 4 frost lance, 5 arcane missiles, 6 meteor, 7
-    // gravity well, 8 spirit familiar)
-    let orb_tint = if spell == 0 || spell == 6 {
-        vec(1.0, 0.42, 0.12)
-    } else if spell == 2 {
-        vec(0.4, 0.88, 1.0)
-    } else if spell == 3 {
-        vec(0.45, 1.0, 0.5)
-    } else if spell == 4 {
-        vec(0.6, 0.9, 1.0)
-    } else if spell == 5 || spell == 7 {
-        vec(0.75, 0.5, 1.0)
-    } else if spell == 8 {
-        vec(0.85, 0.95, 1.0)
-    } else {
-        prm.orb_glow_colour
-    };
-    let bolt_tint = if spell == 0 || spell == 6 {
-        vec(1.5, 0.65, 0.25)
-    } else if spell == 2 || spell == 4 {
-        vec(0.7, 1.1, 1.3)
-    } else if spell == 3 {
-        vec(0.7, 1.3, 0.75)
-    } else if spell == 5 || spell == 7 {
-        vec(1.1, 0.7, 1.4)
-    } else {
-        splat(1.0)
-    };
+    let orb_tint = orb_tint_of(prm, spell);
+    let bolt_tint = bolt_tint_of(spell);
     let orb_boost = 1.0 + 2.0 * (-6.0 * dr.flash).exp();
     // the right hand drifts idly in front of the belly, or points into the turn
     let idle = vec(0.025 * tm.sin(), 0.018 * (2.0 * tm).sin() + 0.01 * b, 0.02 * tm.cos());

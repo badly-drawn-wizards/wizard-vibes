@@ -59,14 +59,29 @@ pub fn glyph_dist(tm: f32, p: Vec3) -> f32 {
     }
 }
 
+// The circle's two rings: radius and width.
+pub const rune_inner: f32 = 0.95;
+pub const rune_inner_w: f32 = 0.018;
+pub const rune_outer: f32 = 1.3;
+pub const rune_outer_w: f32 = 0.012;
+
 // Emission painted on the ground (before brightness): two rings and the glyphs.
 #[inline(never)]
 pub fn rune_paint(tm: f32, p: Vec3) -> f32 {
     let r = length2(vec2(p.x, p.z));
     let ring = move |w: f32, c: f32| 1.0 - smoothstep(w * 0.5, w, (r - c).abs());
-    let rings = ring(0.018, 0.95).maximum(ring(0.012, 1.3));
+    let rings = ring(rune_inner_w, rune_inner).maximum(ring(rune_outer_w, rune_outer));
     let glyph = 1.0 - smoothstep(0.0, 0.008, glyph_sdf(tm, p.x, p.z));
     rings.maximum(glyph)
+}
+
+// Distance in the ground plane to the nearest of the circle's strokes (its
+// rings and glyphs): for a glow about them (the defeat screen's).
+#[inline]
+pub fn rune_dist(tm: f32, x: f32, z: f32) -> f32 {
+    let r = length2(vec2(x, z));
+    let rings = ((r - rune_inner).abs() - 0.5 * rune_inner_w).minimum((r - rune_outer).abs() - 0.5 * rune_outer_w);
+    rings.minimum(glyph_sdf(tm, x, z)).maximum(0.0)
 }
 
 // ---------------------------------------------------------------------

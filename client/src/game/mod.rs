@@ -43,7 +43,7 @@ use mode::{Mode, ModeName, ORDER};
 use quality::Quality;
 use spells::Spells;
 use std::f32::consts::PI;
-use vec::{turn, V3};
+use vec::V3;
 use web_time::Instant;
 
 pub use quality::{Level, LEVELS};
@@ -471,12 +471,24 @@ impl Game {
         self.orb = orb;
     }
 
-    // A direction in his frame, in the world: banked, then turned to his
-    // heading (as to_world_dir in the shader's world.rs).
-    fn to_world_dir(&self, d: V3) -> V3 {
-        let heading = self.flight.place(self.time).1;
-        let (s, c) = (-self.bank).sin_cos();
-        turn(heading, [d[0] * c - d[1] * s, d[0] * s + d[1] * c, d[2]])
+    // Where the renderer has each enemy's orb (in the world, posed as it
+    // holds its staff; none for one not standing), so their spells leave
+    // from it as his do from his: from the app, each frame.
+    pub fn set_enemy_orbs(&mut self, orbs: [Option<V3>; enemies::ENEMY_SLOTS]) {
+        self.combat.enemies.orbs = orbs;
+    }
+
+    // Where he is, turned and banked, as the renderer has it (its Flight:
+    // his frame, and the camera's with it).
+    fn frame(&self) -> wizard_shader::world::Flight {
+        let ([x, y, z], heading) = self.flight.place(self.time);
+        wizard_shader::world::Flight { pos: wizard_shader::prelude::vec(x, y, z), heading, turn: self.flight.turn, bank: self.bank }
+    }
+
+    // A direction in his frame, in the world.
+    fn to_world_dir(&self, [x, y, z]: V3) -> V3 {
+        let w = wizard_shader::world::to_world_dir(self.frame(), wizard_shader::prelude::vec(x, y, z));
+        [w.x, w.y, w.z]
     }
 
     // A point in his frame, in the world.
@@ -486,10 +498,9 @@ impl Game {
 
     // A point in the world, in his frame (to_world undone).
     fn to_local(&self, p: V3) -> V3 {
-        let (pos, heading) = self.flight.place(self.time);
-        let [x, y, z] = turn(-heading, vec::sub(p, pos));
-        let (s, c) = self.bank.sin_cos();
-        [x * c - y * s, x * s + y * c, z]
+        let [x, y, z] = vec::sub(p, self.flight.place(self.time).0);
+        let l = wizard_shader::world::to_local_dir(self.frame(), wizard_shader::prelude::vec(x, y, z));
+        [l.x, l.y, l.z]
     }
 
     // The camera's eye and the way it looks, in the world.

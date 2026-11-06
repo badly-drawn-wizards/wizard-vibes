@@ -866,6 +866,16 @@ impl App {
                     let fl = wizard_shader::rig::flight_of(prm, dr, out.time);
                     let o = wizard_shader::world::roll(-fl.bank, wizard_shader::rig::held_orb(prm, dr, out.time));
                     self.game.set_orb([o.x, o.y, o.z]);
+                    // and the enemies', the same way (enemy_orb_at, as
+                    // the renderer draws them)
+                    let fs = wizard_shader::rig::foes_of(prm, dr);
+                    let orbs = std::array::from_fn(|i| {
+                        wizard_shader::enemies::enemy_orb_at(prm, fs, i as i32, out.time, fl).map(|(local, _, _)| {
+                            let w = wizard_shader::world::to_world(fl, local);
+                            [w.x, w.y, w.z]
+                        })
+                    });
+                    self.game.set_enemy_orbs(orbs);
                 }
             }
             // the collision probe, on the CPU (the shader crate's code)

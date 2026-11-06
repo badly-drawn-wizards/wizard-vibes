@@ -43,15 +43,10 @@ pub struct Held {
     pub boost: bool,
 }
 
-// The automatic flight path (as in fut/world.fut), to take off from.
-const SPEED: f32 = 3.0;
-const ALTITUDE: f32 = 12.0;
-pub fn path_x(s: f32) -> f32 {
-    14.0 * (0.12 * s).sin() + 6.0 * (0.27 * s + 1.0).sin()
-}
-pub fn path_dx(s: f32) -> f32 {
-    14.0 * 0.12 * (0.12 * s).cos() + 6.0 * 0.27 * (0.27 * s + 1.0).cos()
-}
+// The automatic flight path (the renderer's own), to take off from.
+const SPEED: f32 = wizard_shader::world::forward_speed;
+const ALTITUDE: f32 = wizard_shader::world::altitude;
+pub use wizard_shader::world::{path_dx, path_x};
 
 const THRUST: f32 = 9.0; // units/s², forward
 const SIDE: f32 = 7.0; // sideways

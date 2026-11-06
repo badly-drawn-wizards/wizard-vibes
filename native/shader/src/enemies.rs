@@ -653,7 +653,7 @@ pub fn enemy_orb_at(prm: Params, fs: Foes, i: i32, secs: f32, fl: Flight) -> Opt
     let s = secs + lk.phase;
     let q = staff_hold(prm, dr, flight_of(prm, dr, s)).at(orb_pos());
     let world = e.pos + yaw(e.yaw, scale(e.size, q));
-    let tint = if lk.spell == 0 { vec(1.0, 0.42, 0.12) } else if lk.spell == 2 { vec(0.4, 0.88, 1.0) } else { vec(0.7, 0.78, 1.0) };
+    let tint = orb_tint_of(prm, lk.spell);
     Some((to_local_dir(fl, world - fl.pos), orb_radius * e.size, tint))
 }
 
@@ -668,15 +668,8 @@ pub fn enemy_orb_media(prm: Params, fs: Foes, i: i32, secs: f32, tm: f32, fl: Fl
     let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
     let lk = looks_in(prm, fs, e.r#gen, i);
     let q = orb_pos() + scale(1.0 / e.size.maximum(0.05), yaw_inv(e.yaw, to_world_dir(fl, p - centre)));
-    let fx = if lk.spell == 0 {
-        fire_media(secs, q)
-    } else if lk.spell == 2 {
-        wind_media(secs, q)
-    } else {
-        let l = lightning_media(tm, q);
-        MediaSample { radiance: scale(prm.lightning, l.radiance), ..l }
-    };
-    let tint = if lk.spell == 0 { vec(1.0, 0.42, 0.12) } else if lk.spell == 2 { vec(0.4, 0.88, 1.0) } else { prm.orb_glow_colour };
+    let fx = spell_media(prm, lk.spell, secs, tm, q);
+    let tint = orb_tint_of(prm, lk.spell);
     // (brighter than his haze: his orb is lit the more by its glow and light)
     MediaSample { radiance: fx.radiance + scale(ENEMY_HAZE * globe_haze, tint), ..fx }
 }

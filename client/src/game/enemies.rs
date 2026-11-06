@@ -22,7 +22,7 @@ use std::f32::consts::PI;
 pub const ENEMY_SLOTS: usize = 6;
 pub const WIZARD_SLOTS: usize = ENEMY_SLOTS + 1;
 const HP: i32 = 3;
-const APPEAR: f32 = 1.5; // seconds (appear_time in fut/enemies.fut)
+const APPEAR: f32 = wizard_shader::enemies::appear_time; // seconds
 const RESPAWN: f32 = 5.0; // seconds after a defeat until the next one appears
 const RANGE: f32 = 40.0; // they only cast at him from nearer than this
 // The arena, the point they circle, stays where the fight began unless he
@@ -73,23 +73,10 @@ fn damage(kind: u32) -> i32 {
     }
 }
 
-// JavaScript's ToInt32 (as Math.imul takes its arguments), as u32 bits.
-fn bits(x: i64) -> u32 {
-    x as u32
-}
-
-// hash3 in fut/hash.fut.
-pub fn hash3(x: i64, y: i64, z: i64) -> f32 {
-    let mut h = bits(x).wrapping_mul(73856093) ^ bits(y).wrapping_mul(19349663) ^ bits(z).wrapping_mul(83492791);
-    h = (h ^ (h >> 16)).wrapping_mul(0x7feb352d);
-    h = (h ^ (h >> 15)).wrapping_mul(0x846ca68b);
-    h ^= h >> 16;
-    (h >> 8) as f32 / 16777216.0
-}
-
-// enemy_rnd in fut/enemies.fut.
+// Random number k of enemy i, generation `generation` (the renderer's own:
+// its looks are rolled the same way).
 pub fn rnd(seed: i64, generation: i64, i: usize, k: i64) -> f32 {
-    hash3(seed + 7919 * generation, i as i64 + 17, k + 101)
+    wizard_shader::enemies::enemy_rnd(seed as i32, generation as i32, i as i32, k as i32)
 }
 
 // Where enemy i (of generation generation) would like to be: circling
@@ -107,8 +94,11 @@ pub fn home(seed: i64, generation: i64, i: usize, secs: f32, arena: V3) -> V3 {
 // Which spell enemy i (of generation generation) casts, always (its orb
 // shows it: the renderer picks it the same way, see looks_of).
 pub fn spell_of(seed: i64, generation: i64, i: usize) -> u32 {
-    let r = rnd(seed, generation, i, 29);
-    if r < 0.5 { FIRE } else if r < 0.8 { WIND } else { STRIKE }
+    match wizard_shader::enemies::looks_of(seed as i32, generation as i32, i as i32).spell {
+        0 => FIRE,
+        2 => WIND,
+        _ => STRIKE,
+    }
 }
 
 // Which way one at `pos` faces him (a yaw), as the renderer turns it.
@@ -116,14 +106,18 @@ pub fn facing(pos: V3, him: V3) -> f32 {
     (him[0] - pos[0]).atan2(him[2] - pos[2])
 }
 
-// Its orb, where it casts from.
+// Its orb, where it casts from, until the renderer's pose of it is known
+// (see Enemies::orbs): about where its staff holds it.
 fn orb_of(pos: V3, him: V3) -> V3 {
     add(pos, turn(facing(pos, him), [0.45, 2.05, 0.2]))
 }
 
-// His shield, raised (shield_centre and shield_radius in fut/shading.fut).
-const SHIELD_C: V3 = [0.0, 0.85, 0.0];
-const SHIELD_R: f32 = 1.85;
+// His shield, raised (as the renderer draws it).
+const SHIELD_C: V3 = {
+    let c = wizard_shader::shading::shield_centre;
+    [c.x, c.y, c.z]
+};
+const SHIELD_R: f32 = wizard_shader::shading::shield_radius;
 
 // The spheres that stand for a wizard on his platform at `pos` (the
 // platform's top): his body, and the platform.
@@ -251,6 +245,10 @@ pub struct Enemies {
     pub his_end: Option<(u32, Option<Cut>)>,
     pub his_deaths: i64,
     pub max_hp: i32, // his health, full (his skills raise it)
+    // each one's orb in the world, as the renderer poses it (the shader
+    // crate's enemy_orb_at, on the CPU: set each frame), where it casts
+    // from
+    pub orbs: [Option<V3>; ENEMY_SLOTS],
 }
 
 impl Default for Enemies {
@@ -272,6 +270,7 @@ impl Default for Enemies {
             his_end: None,
             his_deaths: 0,
             max_hp: PLAYER_HP,
+            orbs: [None; ENEMY_SLOTS],
         }
     }
 }
@@ -550,7 +549,7 @@ impl Enemies {
             }
             // it casts: its own spell, telegraphed as his are, at him (or,
             // free for all, at whoever it chose)
-            let orb = orb_of(s.pos, him);
+            let orb = self.orbs[i].unwrap_or_else(|| orb_of(s.pos, him));
             if let Some(id) = s.telegraph {
                 spells.place(id, orb);
             }
@@ -686,9 +685,9 @@ mod tests {
 
     #[test]
     fn hash_matches_js() {
-        // the TS's hash3, run in node
+        // (the renderer's hash3, which the enemies' rolls use: as the TS one, run in node)
         for ((x, y, z), v) in [((1, 17, 101), 0.4066948890686035), ((-5, 3, 9), 0.4896174669265747), ((7919 * 40 + 3, 22, 130), 0.46717369556427)] {
-            assert_eq!(hash3(x, y, z), v as f32);
+            assert_eq!(wizard_shader::hash::hash3(x, y, z), v as f32);
         }
     }
 

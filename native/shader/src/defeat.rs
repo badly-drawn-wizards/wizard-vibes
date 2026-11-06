@@ -1,6 +1,7 @@
 // The defeat screen's magic, drawn over the scene (the overlay entry
 // point: at the window's own resolution, apart from the scene's dynamic
-// scale, with alpha): an arcane circle turning round where the title goes,
+// scale, with alpha): the platforms' magic circle (see platform.rs) turning
+// behind where the title goes,
 // a quarter of the way down, the edges tinted; and by what defeated him,
 // fire (embers rising, a glow from below), lightning (forked bolts striking
 // down now and then, flashes) or wind (gusts swirling round the screen).
@@ -41,25 +42,21 @@ pub fn defeat_overlay(kind: i32, t: f32, vw: i32, h: i32, x: f32, y: f32) -> Vec
     let edge = smoothstep(0.55, 1.6, vec2(p.x * 0.75, p.y).length());
     let mut cover = 0.55 * fade * edge;
     let mut light = scale(0.12 * fade * edge, tint);
-    // the arcane circle behind the title (round: screen space is square), two rings, runes between them
-    // turning one way, and ticks outside turning the other, growing in
+    // the magic circle behind the title: the one on the wizards' platforms
+    // (its rings and runes, turning as theirs do, rune_paint's), seen from
+    // above, growing in, a glow about its strokes
     let c = p - vec2(0.0, -0.5);
     let grow = smoothstep(0.3, 2.0, t);
-    let r = c.length() / (0.42 + 0.05 * grow);
+    // (screen to the platform's ground: its outer ring to 0.4 of the height)
+    let k = rune_outer / (0.36 + 0.04 * grow);
+    let q = vec(c.x * k, 0.0, -c.y * k);
+    let tm = loop_angle(t);
+    let paint = rune_paint(tm, q);
+    let halo = (-rune_dist(tm, q.x, q.z) / 0.05).exp();
+    let pulse = rune_pulse(0.15, tm);
+    let r = c.length() * k / rune_outer;
     let a = c.y.atan2(c.x);
-    let ring = glow(r - 1.0, 0.012) + 0.7 * glow(r - 0.82, 0.008) + 0.4 * glow(r - 1.18, 0.006);
-    let runes = {
-        let s = fract((a + 0.25 * t) * 24.0 / (2.0 * PI));
-        let cell = ((a + 0.25 * t) * 24.0 / (2.0 * PI)).floor() as i32;
-        let on = hash2(cell, 7) > 0.35;
-        if on { smoothstep(0.3, 0.2, (s - 0.5).abs()) * smoothstep(0.08, 0.0, (r - 0.91).abs()) } else { 0.0 }
-    };
-    let ticks = {
-        let s = fract((a - 0.4 * t) * 72.0 / (2.0 * PI));
-        smoothstep(0.2, 0.0, (s - 0.5).abs()) * smoothstep(0.05, 0.0, (r - 1.1).abs())
-    };
-    let pulse = 0.85 + 0.15 * (3.0 * t).sin();
-    light = light + scale(1.6 * grow * pulse * (ring + 0.8 * runes + 0.6 * ticks), tint);
+    light = light + scale(grow * pulse * (1.6 * paint + 0.5 * halo), tint);
     // a soft light behind the title
     light = light + scale(0.25 * grow * (-(r * r) * 1.3).exp(), tint);
     // by what defeated him
