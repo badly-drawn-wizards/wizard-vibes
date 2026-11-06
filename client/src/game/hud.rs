@@ -59,6 +59,14 @@ pub fn focus_ring(ui: &Ui, r: &Response) {
     }
 }
 
+// The ring round a slider the menu's cursor has taken hold of (its value
+// moving with left and right): thicker, and tinted inside.
+pub fn held_ring(ui: &Ui, r: &Response) {
+    let rect = r.rect.expand(2.5);
+    ui.painter().rect_filled(rect, 5, FOCUS.gamma_multiply(0.18));
+    ui.painter().rect_stroke(rect, 5, Stroke::new(3.0, FOCUS), egui::StrokeKind::Outside);
+}
+
 // (the focus ring's colour)
 pub const FOCUS: Color32 = Color32::from_rgb(0xff, 0xc8, 0x57);
 
@@ -196,6 +204,8 @@ pub enum Chip {
     ShoulderIcon(Icon),
     // a stick
     Stick(char),
+    // a direction of the D-pad (up, down, left, right)
+    DPad(u8),
 }
 
 // A row of chips, laid out left to right.
@@ -222,18 +232,15 @@ pub fn chip(ui: &mut Ui, c: Chip) {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w + 2.0, 17.0), Sense::hover());
             let r = Rect::from_min_max(Pos2::new(rect.left() + 2.0, rect.top()), rect.max);
             let p = ui.painter();
+            // (dark, to read on the menu's light panels too)
+            p.rect_filled(r, 4, bg(0.85));
             p.rect_stroke(r, 4, Stroke::new(1.0, KBD_BORDER), StrokeKind::Inside);
             // (its bottom edge thicker)
             p.line_segment([r.left_bottom() + Vec2::new(3.0, -1.5), r.right_bottom() + Vec2::new(-3.0, -1.5)], Stroke::new(1.0, KBD_BORDER));
             p.galley(Align2::CENTER_CENTER.anchor_size(r.center() - Vec2::new(0.0, 0.5), g.size()).min, g, FG);
         }
         Chip::Face(b) => {
-            let (fill, ink) = match b {
-                'A' => (Color32::from_rgb(0x3f, 0x9c, 0x35), Color32::WHITE),
-                'B' => (Color32::from_rgb(0xc8, 0x35, 0x2e), Color32::WHITE),
-                'X' => (Color32::from_rgb(0x2c, 0x6f, 0xd1), Color32::WHITE),
-                _ => (Color32::from_rgb(0xc9, 0xa2, 0x27), Color32::from_rgb(0x22, 0x22, 0x22)),
-            };
+            let (fill, ink) = face_colours(b);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 18.0), Sense::hover());
             let c = Pos2::new(rect.left() + 11.0, rect.center().y);
             ui.painter().circle_filled(c, 9.0, fill);
@@ -255,6 +262,10 @@ pub fn chip(ui: &mut Ui, c: Chip) {
             let radius = CornerRadius { nw: 9, ne: 9, sw: 4, se: 4 };
             ui.painter().rect_filled(r, radius, Color32::from_rgb(0x3a, 0x37, 0x60));
             paint_icon(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(10.0)), which, Color32::WHITE);
+        }
+        Chip::DPad(d) => {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 18.0), Sense::hover());
+            paint_dpad(ui.painter(), Pos2::new(rect.left() + 11.0, rect.center().y), 9.0, d);
         }
         Chip::Stick(s) => {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 18.0), Sense::hover());
@@ -329,6 +340,153 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, which: Icon, colour: Color32) {
             let front = back.translate(Vec2::splat(0.45 * s));
             p.rect_stroke(back, 1, st, StrokeKind::Inside);
             p.rect_stroke(front, 1, st, StrokeKind::Inside);
+        }
+    }
+}
+
+// The D-pad (a cross `r` from its centre to its arms' ends), direction `d`
+// (up, down, left, right) lit.
+pub fn paint_dpad(p: &egui::Painter, c: Pos2, r: f32, d: u8) {
+    let w = 0.36 * r;
+    let dim = Color32::from_rgb(0x3a, 0x37, 0x60);
+    p.rect_filled(Rect::from_center_size(c, Vec2::new(2.0 * r, 2.0 * w)), 1, dim);
+    p.rect_filled(Rect::from_center_size(c, Vec2::new(2.0 * w, 2.0 * r)), 1, dim);
+    let arm = match d {
+        0 => Vec2::new(0.0, -1.0),
+        1 => Vec2::new(0.0, 1.0),
+        2 => Vec2::new(-1.0, 0.0),
+        _ => Vec2::new(1.0, 0.0),
+    };
+    let size = if arm.x == 0.0 { Vec2::new(2.0 * w, r - w) } else { Vec2::new(r - w, 2.0 * w) };
+    p.rect_filled(Rect::from_center_size(c + arm * (0.5 * (r + w)), size), 1, Color32::WHITE);
+}
+
+// A controller's button glyph (a chip's), drawn at `c`, `r` its radius (a
+// face button's; the others to match).
+pub fn paint_pad_glyph(p: &egui::Painter, c: Pos2, r: f32, chip: Chip) {
+    let font = FontId::proportional(1.1 * r);
+    let label = |s: &str, ink: Color32| {
+        let g = p.layout_no_wrap(s.to_string(), font.clone(), ink);
+        p.galley(Align2::CENTER_CENTER.anchor_size(c, g.size()).min, g, ink);
+    };
+    let shoulder = Color32::from_rgb(0x3a, 0x37, 0x60);
+    match chip {
+        Chip::Face(b) => {
+            let (fill, ink) = face_colours(b);
+            p.circle_filled(c, r, fill);
+            label(&b.to_string(), ink);
+        }
+        Chip::Shoulder(s) => {
+            let w = p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x + 0.9 * r;
+            let rect = Rect::from_center_size(c, Vec2::new(w.max(2.0 * r), 2.0 * r));
+            let k = r as u8;
+            p.rect_filled(rect, CornerRadius { nw: k, ne: k, sw: k / 2, se: k / 2 }, shoulder);
+            label(s, Color32::WHITE);
+        }
+        Chip::ShoulderIcon(which) => {
+            let rect = Rect::from_center_size(c, Vec2::new(2.6 * r, 2.0 * r));
+            let k = r as u8;
+            p.rect_filled(rect, CornerRadius { nw: k, ne: k, sw: k / 2, se: k / 2 }, shoulder);
+            paint_icon(p, Rect::from_center_size(c, Vec2::splat(1.1 * r)), which, Color32::WHITE);
+        }
+        Chip::Stick(s) => {
+            p.circle_filled(c, r, shoulder);
+            p.circle_stroke(c, 0.8 * r, Stroke::new(0.3 * r, Color32::from_rgb(0x26, 0x24, 0x4a)));
+            label(&s.to_string(), Color32::WHITE);
+        }
+        Chip::DPad(d) => {
+            p.circle_filled(c, 1.1 * r, bg(0.85));
+            paint_dpad(p, c, r, d);
+        }
+        Chip::Key(k) => paint_key_glyph(p, c, 2.0 * r, k),
+        Chip::Text(s) => label(s, DIM),
+    }
+}
+
+// A key's glyph, `h` high, centred on `c`.
+pub fn paint_key_glyph(p: &egui::Painter, c: Pos2, h: f32, k: &str) {
+    let g = p.layout_no_wrap(k.to_string(), mono(0.62 * h), FG);
+    let rect = Rect::from_center_size(c, Vec2::new((g.size().x + 0.5 * h).max(h), h));
+    p.rect_filled(rect, 3, bg(0.9));
+    p.rect_stroke(rect, 3, Stroke::new(1.0, KBD_BORDER), StrokeKind::Inside);
+    p.galley(Align2::CENTER_CENTER.anchor_size(c, g.size()).min, g, FG);
+}
+
+// A face button's fill and its letter's colour.
+fn face_colours(b: char) -> (Color32, Color32) {
+    match b {
+        'A' => (Color32::from_rgb(0x3f, 0x9c, 0x35), Color32::WHITE),
+        'B' => (Color32::from_rgb(0xc8, 0x35, 0x2e), Color32::WHITE),
+        'X' => (Color32::from_rgb(0x2c, 0x6f, 0xd1), Color32::WHITE),
+        _ => (Color32::from_rgb(0xc9, 0xa2, 0x27), Color32::from_rgb(0x22, 0x22, 0x22)),
+    }
+}
+
+// The spells' colours: fire, lightning, wind (cyan), healing (green).
+pub const SPELL_COLOURS: [Color32; 4] = [
+    Color32::from_rgb(0xff, 0x8a, 0x3a),
+    Color32::from_rgb(0xff, 0xe2, 0x6a),
+    Color32::from_rgb(0x6a, 0xe8, 0xff),
+    Color32::from_rgb(0x6a, 0xff, 0x8a),
+];
+
+// Spell `i`'s glyph in a circle of radius `r` round `c`: a flame, a
+// lightning bolt, gusts of wind, a cross.
+pub fn paint_spell(p: &egui::Painter, c: Pos2, r: f32, i: usize, colour: Color32) {
+    let v = |x: f32, y: f32| c + Vec2::new(x, y) * r;
+    match i {
+        0 => {
+            // a flame: a round base drawn up to a point, a brighter one inside
+            let flame = |s: f32, col: Color32| {
+                let base = v(0.0, 0.26 * s + 0.08);
+                let rad = 0.5 * s * r;
+                p.circle_filled(base, rad, col);
+                let tip = v(0.1 * s, -0.8 * s + 0.08);
+                // (the tangents from the tip to the base)
+                let d = base - tip;
+                let a = (rad / d.length()).asin();
+                let dir = d.normalized();
+                let side = |t: f32| {
+                    let rot = Vec2::new(dir.x * t.cos() - dir.y * t.sin(), dir.x * t.sin() + dir.y * t.cos());
+                    tip + rot * (d.length() * a.cos())
+                };
+                p.add(Shape::convex_polygon(vec![tip, side(a), side(-a)], col, Stroke::NONE));
+            };
+            flame(1.0, colour);
+            flame(0.5, Color32::from_rgb(0xff, 0xe8, 0xa0).gamma_multiply(colour.a() as f32 / 255.0));
+        }
+        1 => {
+            // a bolt: a zigzag, thick
+            let pts = vec![v(0.22, -0.66), v(-0.18, 0.02), v(0.14, 0.02), v(-0.2, 0.66)];
+            p.add(Shape::line(pts, Stroke::new(0.17 * r, colour)));
+            p.circle_filled(v(-0.2, 0.66), 0.085 * r, colour);
+        }
+        2 => {
+            // gusts: three swept lines, curling at their ends
+            for (k, (y, len)) in [(-0.34, 1.0), (0.0, 0.8), (0.34, 0.6)].into_iter().enumerate() {
+                let n = 12;
+                let x0 = -0.55 + 0.1 * k as f32;
+                let mut pts: Vec<Pos2> = (0..=n)
+                    .map(|j| {
+                        let t = j as f32 / n as f32;
+                        v(x0 + t * len, y + 0.06 * (t * std::f32::consts::PI).sin())
+                    })
+                    .collect();
+                // (a curl back at the end)
+                let end = x0 + len;
+                for j in 1..=6 {
+                    let a = j as f32 / 6.0 * 1.4 * std::f32::consts::PI;
+                    pts.push(v(end + 0.12 * a.sin(), y - 0.12 + 0.12 * a.cos()));
+                }
+                p.add(Shape::line(pts, Stroke::new(0.1 * r, colour)));
+            }
+        }
+        _ => {
+            // a cross, rounded
+            let w = 0.3 * r;
+            let l = 1.25 * r;
+            p.rect_filled(Rect::from_center_size(c, Vec2::new(w, l)), (0.3 * w) as u8, colour);
+            p.rect_filled(Rect::from_center_size(c, Vec2::new(l, w)), (0.3 * w) as u8, colour);
         }
     }
 }

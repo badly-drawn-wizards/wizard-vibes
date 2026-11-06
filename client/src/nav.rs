@@ -2,10 +2,11 @@
 // are laid out as rows (a row a group: a set of choices, a slider, an
 // accordion's header and its reset), up and down move between rows (past a
 // whole group at once, to the next row's start), left and right along a row
-// (in order, however its controls wrap on screen); on a slider, left and
-// right change its value. Controls that cannot be used are passed over.
-// The control under the cursor has egui's focus, so Enter (or the
-// controller's A) clicks it, and a ring shows it.
+// (in order, however its controls wrap on screen). Controls that cannot be
+// used are passed over. The control under the cursor has egui's focus, so
+// Enter (or the controller's A) clicks it, and a ring shows it; on a slider
+// (or a choice of several), Enter takes hold of it instead: left and right
+// then change its value, until Enter, Escape (B) or up or down lets go.
 //
 // Each frame the menu registers its controls as it draws them (row, then
 // its items); moves made since the last frame are applied, against the
@@ -20,6 +21,10 @@ pub enum Move {
     Down,
     Left,
     Right,
+    // Enter on a slider: take hold of it, or let go
+    Press,
+    // Escape (B): let go of a slider
+    Release,
 }
 
 #[derive(Default)]
@@ -35,6 +40,8 @@ pub struct Nav {
     // 1)
     pending: Vec<Move>,
     adjust: i32,
+    // a slider held (left and right move its value)
+    held: bool,
     // in use (the keys or the controller moved it): it holds the focus
     pub active: bool,
 }
@@ -49,6 +56,18 @@ impl Nav {
     // The mouse was used: the cursor lets go of the focus.
     pub fn mouse(&mut self) {
         self.active = false;
+        self.held = false;
+    }
+
+    // Whether the cursor is on a slider (as last drawn): Enter is the
+    // cursor's, to take hold of it.
+    pub fn on_slider(&self) -> bool {
+        self.active && self.rows.get(self.row).and_then(|r| r.get(self.col)).copied().unwrap_or(false)
+    }
+
+    // Whether a slider is held (Escape, or B, is the cursor's, to let go).
+    pub fn held(&self) -> bool {
+        self.active && self.held
     }
 
     // The cursor to row `row`, column `col` (a menu opening, or its tab
@@ -66,17 +85,21 @@ impl Nav {
         for m in std::mem::take(&mut self.pending) {
             let Some(row) = self.rows.get(self.row) else { break };
             let on_slider = row.get(self.col).copied().unwrap_or(false);
+            let held = self.held && on_slider;
             match m {
                 Move::Up => self.row = self.row.saturating_sub(1),
                 Move::Down => self.row = (self.row + 1).min(self.rows.len().saturating_sub(1)),
-                Move::Left if on_slider => self.adjust -= 1,
-                Move::Right if on_slider => self.adjust += 1,
+                Move::Left if held => self.adjust -= 1,
+                Move::Right if held => self.adjust += 1,
                 Move::Left => self.col = self.col.saturating_sub(1),
                 Move::Right => self.col = (self.col + 1).min(row.len().saturating_sub(1)),
+                Move::Press => self.held = on_slider && !self.held,
+                Move::Release => self.held = false,
             }
-            // (a new row, from its start)
+            // (a new row, from its start; a slider let go)
             if matches!(m, Move::Up | Move::Down) {
                 self.col = 0;
+                self.held = false;
             }
         }
     }
@@ -92,8 +115,8 @@ impl Nav {
         self.add(ui, r, false)
     }
 
-    // A slider in the current row: as item, and the steps to move its value
-    // this frame (left and right on it).
+    // A slider in the current row (or a choice of several): as item, and
+    // the steps to move its value this frame (left and right, held).
     pub fn slider(&mut self, ui: &Ui, r: &Response) -> i32 {
         if self.add(ui, r, true) { self.adjust } else { 0 }
     }
@@ -115,7 +138,11 @@ impl Nav {
                 r.request_focus();
                 r.scroll_to_me(None);
             }
-            crate::game::hud::focus_ring(ui, r);
+            if self.held && slider {
+                crate::game::hud::held_ring(ui, r);
+            } else {
+                crate::game::hud::focus_ring(ui, r);
+            }
         }
         here
     }
@@ -172,15 +199,21 @@ mod tests {
         n.push(Move::Down);
         n.begin();
         drawn(&mut n, layout);
+        // (a slider moves once held)
+        n.push(Move::Right);
+        n.begin();
+        assert_eq!((n.row, n.col, n.adjust), (2, 0, 0));
+        drawn(&mut n, layout);
+        n.push(Move::Press);
         n.push(Move::Right);
         n.push(Move::Right);
         n.begin();
         assert_eq!((n.row, n.col, n.adjust), (2, 0, 2));
         drawn(&mut n, layout);
-        // down and down: the last row, and no further
+        // down and down: let go, the last row, and no further
         n.push(Move::Down);
         n.push(Move::Down);
         n.begin();
-        assert_eq!((n.row, n.col), (3, 0));
+        assert_eq!((n.row, n.col, n.held), (3, 0, false));
     }
 }

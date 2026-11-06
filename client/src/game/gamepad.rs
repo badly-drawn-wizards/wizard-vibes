@@ -1,24 +1,18 @@
 // Game controller input (web/gamepad.ts), in an Xbox controller's layout:
-//
-//   left stick     fly along / across the camera's view
-//   right stick    turn the camera
-//   RT / LT        climb / descend (by how far they are pulled)
-//   L3             boost
-//   X / A / B / Y  choose a spell: fire bolt, lightning strike, wind blade,
-//                  healing
-//   RB             cast it (held: again as soon as it can; the lightning
-//                  locks on while it is held)
-//   LB             raise the shield (held)
-//   D-pad up/down  zoom in / out
-//   A              (defeated) try again
-//   View / Back    cycle the mode
-//   Start          pause (the pause menu: the D-pad moves, A chooses, B
-//                  goes back, LB / RB change tabs)
+// the sticks fly (the left, along / across the camera's view) and turn the
+// camera (the right); the buttons as bound (binds.rs: by default RT / LT
+// climb / descend, by how far they are pulled, L3 boosts, X A B Y choose a
+// spell, RB casts it, LB raises the shield, the D-pad's up / down zoom,
+// View cycles the mode, Start pauses). Fixed: A tries again once he is
+// defeated; in the pause menu the D-pad moves, A chooses, B goes back, the
+// shoulders or the triggers change tabs.
 //
 // Natively, through gilrs, as its mapping has the buttons. In the browser, straight from the Gamepad API: its "standard"
 // layout where the browser gives one, else an Xbox controller's own order,
 // as Firefox on Linux reports one (which gilrs's web backend read as the
 // standard layout: Back as a trigger, LT as the right stick...).
+
+use super::binds::{Action, Binds, PadButton, PAD_BUTTONS};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Pad {
@@ -26,16 +20,17 @@ pub struct Pad {
     pub look: [f32; 2], // x right, y up
     pub up: f32,        // -1..1
     pub boost: bool,
-    pub mode: bool,           // View / Back pressed since the last read
-    pub pause: bool,          // Start pressed since the last read
+    pub mode: bool,           // the mode's button pressed since the last read
+    pub pause: bool,          // pause's button pressed since the last read
     pub back: bool,           // B pressed since the last read
     pub nav: [bool; 4],       // the D-pad (up, down, left, right) pressed since the last read
-    pub tab: i32,             // LB (-1) or RB (1) pressed since the last read
+    pub tab: i32,             // LB / LT (-1) or RB / RT (1) pressed since the last read
     pub spell: Option<usize>, // a spell chosen since the last read
     pub cast: bool,           // held
     pub shield: bool,         // held
     pub zoom: f32,            // -1 in .. 1 out (held)
     pub confirm: bool,        // A pressed since the last read
+    pub pressed: Option<PadButton>, // a button pressed since the last read (for binding it)
     pub active: bool,         // anything pressed or pushed (for showing its glyphs)
 }
 
@@ -64,6 +59,7 @@ pub struct Raw {
     pub back: bool,
     pub start: bool,
     pub ls: bool,
+    pub rs: bool,
     pub up: bool,
     pub down: bool,
     pub dleft: bool,
@@ -72,6 +68,39 @@ pub struct Raw {
     pub right: [f32; 2],
     pub lt: f32,
     pub rt: f32,
+}
+
+impl Raw {
+    // How far button `b` is pressed, 0..1 (a trigger by how far it is
+    // pulled).
+    pub fn value(&self, b: PadButton) -> f32 {
+        match b {
+            PadButton::LT => self.lt,
+            PadButton::RT => self.rt,
+            b => self.down(b) as i32 as f32,
+        }
+    }
+
+    pub fn down(&self, b: PadButton) -> bool {
+        match b {
+            PadButton::A => self.a,
+            PadButton::B => self.b,
+            PadButton::X => self.x,
+            PadButton::Y => self.y,
+            PadButton::LB => self.lb,
+            PadButton::RB => self.rb,
+            PadButton::LT => self.lt > 0.5,
+            PadButton::RT => self.rt > 0.5,
+            PadButton::View => self.back,
+            PadButton::Start => self.start,
+            PadButton::LS => self.ls,
+            PadButton::RS => self.rs,
+            PadButton::Up => self.up,
+            PadButton::Down => self.down,
+            PadButton::DLeft => self.dleft,
+            PadButton::DRight => self.dright,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -90,45 +119,41 @@ pub struct Pads {
 }
 
 impl Pads {
-    // The first connected controller's state, if there is one.
-    pub fn read(&mut self) -> Option<Pad> {
+    // The first connected controller's state, if there is one, its
+    // buttons as bound.
+    pub fn read(&mut self, binds: &Binds) -> Option<Pad> {
         let raw = self.raw()?;
-        Some(self.pad(raw))
+        Some(self.pad(raw, binds))
     }
 
-    fn pad(&mut self, r: Raw) -> Pad {
+    fn pad(&mut self, r: Raw, binds: &Binds) -> Pad {
         let last = self.last;
         self.last = r;
         let [mx, my] = stick(r.left[0], r.left[1]);
         let [lx, ly] = stick(r.right[0], r.right[1]);
-        // (a spell button, as it goes down)
-        let spell = if r.x && !last.x {
-            Some(0)
-        } else if r.a && !last.a {
-            Some(1)
-        } else if r.b && !last.b {
-            Some(2)
-        } else if r.y && !last.y {
-            Some(3)
-        } else {
-            None
-        };
+        let value = |a: Action| binds.pad(a).map_or(0.0, |b| r.value(b));
+        let held = |a: Action| binds.pad(a).is_some_and(|b| r.down(b));
+        let hit = |b: PadButton| r.down(b) && !last.down(b);
+        let pressed = |a: Action| binds.pad(a).is_some_and(hit);
+        // (a spell's button, as it goes down)
+        let spell = (0..4).find(|&i| pressed(Action::Spell(i)));
         Pad {
             mov: [mx, my],
             look: [lx, ly],
-            up: (r.rt - r.lt).clamp(-1.0, 1.0),
-            boost: r.ls,
-            mode: r.back && !last.back,
-            pause: r.start && !last.start,
-            back: r.b && !last.b,
-            nav: [r.up && !last.up, r.down && !last.down, r.dleft && !last.dleft, r.dright && !last.dright],
-            tab: (r.rb && !last.rb) as i32 - (r.lb && !last.lb) as i32,
+            up: (value(Action::Climb) - value(Action::Descend)).clamp(-1.0, 1.0),
+            boost: held(Action::Boost),
+            mode: pressed(Action::Mode),
+            pause: pressed(Action::Pause),
+            back: hit(PadButton::B),
+            nav: [hit(PadButton::Up), hit(PadButton::Down), hit(PadButton::DLeft), hit(PadButton::DRight)],
+            tab: (hit(PadButton::RB) || hit(PadButton::RT)) as i32 - (hit(PadButton::LB) || hit(PadButton::LT)) as i32,
             spell,
-            cast: r.rb,
-            shield: r.lb,
-            zoom: (r.down as i32 - r.up as i32) as f32,
-            confirm: r.a && !last.a,
-            active: r.a || r.b || r.x || r.y || r.lb || r.rb || r.back || r.start || r.ls || r.up || r.down || r.dleft || r.dright
+            cast: held(Action::Cast),
+            shield: held(Action::Shield),
+            zoom: (held(Action::ZoomOut) as i32 - held(Action::ZoomIn) as i32) as f32,
+            confirm: hit(PadButton::A),
+            pressed: PAD_BUTTONS.into_iter().find(|&b| hit(b)),
+            active: r.a || r.b || r.x || r.y || r.lb || r.rb || r.back || r.start || r.ls || r.rs || r.up || r.down || r.dleft || r.dright
                 || mx != 0.0
                 || my != 0.0
                 || lx != 0.0
@@ -183,6 +208,7 @@ impl Pads {
             back: pressed(Button::Select),
             start: pressed(Button::Start),
             ls: pressed(Button::LeftThumb),
+            rs: pressed(Button::RightThumb),
             // (the D-pad as buttons, or as a hat's axis)
             up: pressed(Button::DPadUp) || g.value(Axis::DPadY) > 0.5,
             down: pressed(Button::DPadDown) || g.value(Axis::DPadY) < -0.5,
@@ -223,6 +249,7 @@ impl Pads {
                 back: button(8),
                 start: button(9),
                 ls: button(10),
+                rs: button(11),
                 up: button(12),
                 down: button(13),
                 dleft: button(14),
@@ -254,6 +281,7 @@ impl Pads {
                 back: button(6),
                 start: button(7),
                 ls: button(9),
+                rs: button(10),
                 up: axis(7) < -0.5,
                 down: axis(7) > 0.5,
                 dleft: axis(6) < -0.5,
@@ -285,19 +313,20 @@ mod tests {
     #[test]
     fn presses_and_holds() {
         let mut p = Pads::default();
-        let pad = p.pad(Raw { y: true, start: true, back: true, up: true, rb: true, ..Default::default() });
+        let b = Binds::default();
+        let pad = p.pad(Raw { y: true, start: true, back: true, up: true, rb: true, ..Default::default() }, &b);
         assert_eq!(pad.spell, Some(3));
         assert!(pad.pause && pad.mode);
         assert_eq!(pad.zoom, -1.0);
         assert_eq!(pad.nav, [true, false, false, false]);
         assert_eq!(pad.tab, 1);
         // (held: not again)
-        let pad = p.pad(Raw { y: true, start: true, back: true, up: true, rb: true, ..Default::default() });
+        let pad = p.pad(Raw { y: true, start: true, back: true, up: true, rb: true, ..Default::default() }, &b);
         assert_eq!(pad.spell, None);
         assert!(!pad.pause && !pad.mode);
         assert_eq!(pad.nav, [false; 4]);
         assert_eq!(pad.tab, 0);
-        let pad = p.pad(Raw { x: true, rb: true, ..Default::default() });
+        let pad = p.pad(Raw { x: true, rb: true, ..Default::default() }, &b);
         assert_eq!(pad.spell, Some(0));
         assert!(pad.cast);
     }

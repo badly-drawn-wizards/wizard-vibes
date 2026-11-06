@@ -50,12 +50,14 @@ pub struct App {
     // the render scale (by hand, or dynamic: see scale.rs)
     scale: crate::scale::RenderScale,
     // the top bar open (else just the frame rate), the pause menu's tab (0
-    // settings, 1 parameters), whether it was open last frame (to focus
-    // Resume as it opens), its focus navigation (see nav.rs), and the key
+    // settings, 1 controls, 2 parameters) and its tabs' width (last frame,
+    // to centre them), whether it was open last frame (to put the cursor on
+    // its tab as it opens), its focus navigation (see nav.rs), and the key
     // events the controller's A makes for it (fed to egui before the next
     // frame)
     bar_open: bool,
     menu_tab: usize,
+    tabs_width: f32,
     menu_was_open: bool,
     nav: crate::nav::Nav,
     menu_events: Vec<egui::Event>,
@@ -153,6 +155,7 @@ impl App {
             menu_tab: 0,
             menu_was_open: false,
             nav: Default::default(),
+            tabs_width: 0.0,
             menu_events: Vec::new(),
             device_error,
             device_errors_shown: 0,
@@ -375,10 +378,11 @@ impl App {
         });
     }
 
-    // The pause menu (while paused): tabs of settings and of parameters,
-    // navigable by keyboard (arrows, Enter) and controller (the D-pad, A;
-    // LB / RB the tabs; B or Start resumes): rows of controls (see nav.rs),
-    // the first the tabs and Resume, where the cursor starts.
+    // The pause menu (while paused): tabs of settings, controls and
+    // parameters, navigable by keyboard (arrows, Enter; Escape resumes) and
+    // controller (the D-pad, A; LT / RT, or LB / RB, the tabs, whose glyphs
+    // flank them while it is in use; B or Start resumes): rows of controls
+    // (see nav.rs), the first the tabs, where the cursor starts.
     fn pause_menu(&mut self, ctx: &egui::Context, secs: f64) {
         let open = self.game.paused();
         let opening = open && !self.menu_was_open;
@@ -387,49 +391,64 @@ impl App {
             return;
         }
         if opening {
-            self.nav.go(0, 2);
+            self.nav.go(0, self.menu_tab);
             self.nav.active = true;
         }
         self.nav.begin();
         let nav = &mut self.nav;
-        let names = ["Settings", "Parameters"];
+        let names = ["Settings", "Controls", "Parameters"];
+        let pad = self.game.device() == crate::game::spellbar::Device::Pad;
         egui::Window::new("Paused")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .default_width(460.0)
             .show(ctx, |ui| {
-                nav.row();
+                // (centred: by their width last frame)
                 ui.horizontal(|ui| {
-                    for (k, name) in names.iter().enumerate() {
-                        let r = crate::game::hud::fill_toggle(ui, name, self.menu_tab == k);
-                        nav.item(ui, &r);
-                        if r.clicked() {
-                            self.menu_tab = k;
+                    ui.add_space(((ui.available_width() - self.tabs_width) / 2.0).max(0.0));
+                    let tabs = ui.horizontal(|ui| {
+                        if pad {
+                            crate::game::hud::chip(ui, crate::game::hud::Chip::Shoulder("LT"));
+                            ui.add_space(4.0);
                         }
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let r = ui.button("Resume");
-                        nav.item(ui, &r);
-                        if r.clicked() {
-                            self.game.set_paused(false);
+                        nav.row();
+                        for (k, name) in names.iter().enumerate() {
+                            let r = crate::game::hud::fill_toggle(ui, name, self.menu_tab == k);
+                            nav.item(ui, &r);
+                            if r.clicked() {
+                                self.menu_tab = k;
+                            }
+                        }
+                        if pad {
+                            ui.add_space(4.0);
+                            crate::game::hud::chip(ui, crate::game::hud::Chip::Shoulder("RT"));
                         }
                     });
+                    self.tabs_width = tabs.response.rect.width();
                 });
                 ui.separator();
-                if self.menu_tab == 0 {
-                    Self::settings(&mut self.game, &mut self.params, &mut self.audio, &mut self.scale, nav, ui);
-                } else if let Some(p) = self.params.as_mut() {
-                    egui::ScrollArea::vertical().max_height(ctx.content_rect().height() * 0.7).show(ui, |ui| p.ui(ui, secs, nav));
-                } else {
-                    ui.label("(the parameters come with the shader)");
+                let tall = ctx.content_rect().height() * 0.7;
+                match self.menu_tab {
+                    0 => Self::settings(&mut self.game, &mut self.params, &mut self.audio, &mut self.scale, nav, ui),
+                    1 => {
+                        egui::ScrollArea::vertical().max_height(tall).auto_shrink([false, true]).show(ui, |ui| self.game.controls_ui(ui, nav));
+                    }
+                    _ => match self.params.as_mut() {
+                        Some(p) => {
+                            egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| p.ui(ui, secs, nav));
+                        }
+                        None => {
+                            ui.label("(the parameters come with the shader)");
+                        }
+                    },
                 }
             });
         self.nav.end();
+        self.game.menu_holds = self.nav.held();
     }
 
-    // The settings tab: a row of the navigation for each setting (the
-    // render scale's switch and slider apart).
+    // The settings tab: a row of the navigation for each setting.
     fn settings(game: &mut Game, params: &mut Option<Params>, audio: &mut Audio, scale: &mut crate::scale::RenderScale, nav: &mut crate::nav::Nav, ui: &mut egui::Ui) {
         egui::Grid::new("settings").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
             ui.label("Mode");
@@ -466,8 +485,8 @@ impl App {
             // the render scale: dynamic, or a slider by hand (which shows
             // the dynamic scale too, and moved, takes over)
             ui.label("Render scale");
+            nav.row();
             ui.horizontal(|ui| {
-                nav.row();
                 let r = crate::game::hud::fill_toggle(ui, "dynamic", scale.dynamic).on_hover_text("Scale the resolution to keep the target frame rate");
                 nav.item(ui, &r);
                 if r.clicked() {
@@ -475,10 +494,8 @@ impl App {
                     scale.set_dynamic(on);
                 }
                 let mut s = scale.get();
-                nav.row();
                 let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(&mut s, crate::scale::MIN..=crate::scale::MAX).show_value(false));
                 let steps = nav.slider(ui, &r);
-                crate::game::hud::focus_ring(ui, &r);
                 ui.monospace(format!("{:>3.0}%", 100.0 * scale.get()));
                 if r.changed() || steps != 0 {
                     scale.set_manual((s + 0.05 * steps as f32).clamp(crate::scale::MIN, crate::scale::MAX));
@@ -492,7 +509,6 @@ impl App {
                 let mut fps = scale.target_fps;
                 let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(&mut fps, crate::scale::TARGET_MIN..=crate::scale::TARGET_MAX).step_by(1.0).show_value(false));
                 let steps = nav.slider(ui, &r);
-                crate::game::hud::focus_ring(ui, &r);
                 ui.monospace(format!("{fps:>3.0}"));
                 if r.changed() || steps != 0 {
                     scale.set_target((fps + 5.0 * steps as f32).clamp(crate::scale::TARGET_MIN, crate::scale::TARGET_MAX));
@@ -514,11 +530,15 @@ impl App {
 
     // The controller's presses in the pause menu: the D-pad moves its
     // cursor (nav.rs), A presses what it is on (as Enter, sent before the
-    // next frame), the shoulders change tabs.
+    // next frame; on a slider, takes hold of it or lets go), B lets go of
+    // a slider, the shoulders or triggers change tabs.
     fn menu_from_pad(&mut self) {
         let Some(p) = self.game.menu_input() else { return };
+        if p.back && self.nav.held() {
+            self.nav.push(crate::nav::Move::Release);
+        }
         if p.tab != 0 {
-            self.menu_tab = (self.menu_tab as i32 + p.tab).rem_euclid(2) as usize;
+            self.menu_tab = (self.menu_tab as i32 + p.tab).rem_euclid(3) as usize;
             self.nav.go(0, self.menu_tab);
             self.nav.active = true;
         }
@@ -527,7 +547,9 @@ impl App {
                 self.nav.push(m);
             }
         }
-        if p.confirm {
+        if p.confirm && self.nav.on_slider() {
+            self.nav.push(crate::nav::Move::Press);
+        } else if p.confirm {
             for pressed in [true, false] {
                 self.menu_events.push(egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE });
             }
@@ -589,17 +611,34 @@ impl eframe::App for App {
     // (through Subsecond: under `dx serve --hotpatch` an edit to the app's
     // code patches the running app, which keeps its state; otherwise a
     // plain call)
-    // (in the pause menu: the arrow keys move its cursor, not egui's
-    // focus, and a click lets the cursor go; the controller's A, as Enter:
-    // see menu_from_pad)
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        if self.game.paused() {
+    // (a binding being taken: the keys are its; in the pause menu: the
+    // arrow keys move its cursor, not egui's focus, Enter on a slider takes
+    // hold of it, Escape lets go, and a click lets the cursor go; the
+    // controller's A, as Enter: see menu_from_pad)
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.game.capturing() {
+            // (the modifiers as of the last frame)
+            let mods = ctx.input(|i| i.modifiers);
+            self.game.capture_keys(&mut raw_input.events, mods);
+        } else if self.game.paused() {
             let keys = [egui::Key::ArrowUp, egui::Key::ArrowDown, egui::Key::ArrowLeft, egui::Key::ArrowRight];
             let nav = &mut self.nav;
             raw_input.events.retain(|e| match e {
                 egui::Event::Key { key, pressed, .. } if keys.contains(key) => {
                     if *pressed {
                         nav.push(MOVES[keys.iter().position(|k| k == key).unwrap()]);
+                    }
+                    false
+                }
+                egui::Event::Key { key: egui::Key::Enter, pressed, .. } if nav.on_slider() => {
+                    if *pressed {
+                        nav.push(crate::nav::Move::Press);
+                    }
+                    false
+                }
+                egui::Event::Key { key: egui::Key::Escape, pressed, .. } if nav.held() => {
+                    if *pressed {
+                        nav.push(crate::nav::Move::Release);
                     }
                     false
                 }

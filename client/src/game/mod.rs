@@ -2,26 +2,29 @@
 // parts of the page): his free flight (flight.rs), the orbit camera
 // (camera.rs), the modes (mode.rs), spells (spells.rs), the fight with the
 // enemy wizards (enemies.rs, combat.rs, mana.rs, shield.rs), controller
-// input (gamepad.rs), where sounds are heard from (sfx.rs), the controls
-// panel (help.rs) and the quality panel (quality.rs), with the HUD drawn by
-// egui (hud.rs).
+// input (gamepad.rs) as bound (binds.rs), where sounds are heard from
+// (sfx.rs), the spells shown (spellbar.rs) and the quality panel
+// (quality.rs), with the HUD drawn by egui (hud.rs).
 //
 // The app calls, each frame: step() (input, and everything advanced by dt),
 // then the probe it asks for and apply_probe() with its answer, then ui()
-// for the HUD; mode_ui() and quality_ui() go in its pause menu.
+// for the HUD; mode_ui(), quality_ui() and controls_ui() go in its pause
+// menu. While a binding is being taken, the keys are given to
+// capture_keys() before egui sees them.
 
 pub mod camera;
 pub mod combat;
 pub mod enemies;
 pub mod flight;
+pub mod binds;
 pub mod gamepad;
-pub mod help;
 pub mod hud;
 pub mod mana;
 pub mod mode;
 pub mod quality;
 pub mod sfx;
 pub mod shield;
+pub mod spellbar;
 pub mod spells;
 pub mod vec;
 
@@ -30,8 +33,9 @@ use camera::Orbit;
 use combat::{Combat, Moment};
 use egui::{Align2, Key, Margin, Rect, Vec2};
 use flight::{FreeFlight, Held, Stick};
+use binds::{Action, Binds, KeyBind, ACTIONS};
 use gamepad::Pads;
-use help::{Device, Help};
+use spellbar::{Device, SpellBar};
 use mode::{Mode, ModeName, ORDER};
 use quality::Quality;
 use spells::Spells;
@@ -45,7 +49,7 @@ pub use quality::{Level, LEVELS};
 const STORE_CAMERA: &str = "wizard-camera";
 const STORE_FLIGHT: &str = "wizard-flight";
 const STORE_MODE: &str = "wizard-mode";
-const STORE_HELP: &str = "wizard-help-closed";
+const STORE_BINDS: &str = "wizard-binds";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -75,8 +79,17 @@ pub struct Game {
     mode: Mode,
     spells: Spells,
     combat: Combat,
-    help: Help,
+    spellbar: SpellBar,
     quality: Quality,
+    binds: Binds,
+    // a binding being taken (the next key, or button, pressed), and the
+    // modifiers held as it began
+    capture: Option<Capture>,
+    // the modifiers held last frame (one pressed alone can be bound)
+    mods: egui::Modifiers,
+    // the pause menu has a slider held (the controller's B lets it go,
+    // rather than resuming): set by the app
+    pub menu_holds: bool,
     pads: Pads,
     rng: Rng,
     // the scene's time (stopped while paused)
@@ -92,6 +105,17 @@ pub struct Game {
     defeat_since: Option<Instant>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct Capture {
+    action: Action,
+    device: Device,
+    since: Instant,
+    mods: egui::Modifiers,
+}
+
+// (how long a binding waits for its key, or button)
+const CAPTURE_SECS: f32 = 6.0;
+
 impl Game {
     pub fn new(storage: Option<&dyn eframe::Storage>) -> Game {
         let get = |key: &str| storage.and_then(|s| s.get_string(key));
@@ -102,7 +126,9 @@ impl Game {
             .and_then(|s| eframe::get_value::<flight::Saved>(s, STORE_FLIGHT))
             .map_or_else(FreeFlight::default, |s| FreeFlight::restore(&s));
         let mode = Mode::new(get(STORE_MODE).and_then(|m| ModeName::from_key(&m)).unwrap_or(ModeName::Fixed));
-        let help = Help::new(get(STORE_HELP).as_deref() == Some("1"));
+        let binds = storage
+            .and_then(|s| eframe::get_value::<std::collections::BTreeMap<String, (String, String)>>(s, STORE_BINDS))
+            .map_or_else(Binds::default, |b| Binds::restored(&b));
         let quality = Quality::new(get(STORE_QUALITY).and_then(|c| Level::from_key(&c)));
         let seed = web_time::SystemTime::now()
             .duration_since(web_time::SystemTime::UNIX_EPOCH)
@@ -113,8 +139,12 @@ impl Game {
             mode,
             spells: Spells::default(),
             combat: Combat::default(),
-            help,
+            spellbar: SpellBar::default(),
             quality,
+            binds,
+            capture: None,
+            mods: egui::Modifiers::NONE,
+            menu_holds: false,
             pads: Pads::default(),
             rng: Rng::new(seed),
             time: 0.0,
@@ -134,7 +164,7 @@ impl Game {
         eframe::set_value(storage, STORE_CAMERA, &self.orbit.cam);
         eframe::set_value(storage, STORE_FLIGHT, &self.flight.saved());
         storage.set_string(STORE_MODE, self.mode.name.key().to_string());
-        storage.set_string(STORE_HELP, if self.help.closed { "1" } else { "0" }.to_string());
+        eframe::set_value(storage, STORE_BINDS, &self.binds.saved());
         if let Some(c) = self.quality.choice {
             storage.set_string(STORE_QUALITY, c.key().to_string());
         }
@@ -162,6 +192,43 @@ impl Game {
     // Starts the fight again (from the pause menu).
     pub fn reset_fight(&mut self) {
         self.combat.reset(&mut self.spells);
+    }
+
+    // The device used last (whose glyphs are shown).
+    pub fn device(&self) -> Device {
+        self.spellbar.device
+    }
+
+    // Whether a binding is being taken (the keys are then capture_keys's).
+    pub fn capturing(&self) -> bool {
+        self.capture.is_some()
+    }
+
+    // While a binding is being taken: the keys pressed (taken out of
+    // `events`, so nothing else acts on them), and the modifiers held.
+    // Escape gives up; a key (or a modifier pressed alone) is taken for the
+    // keyboard's binding.
+    pub fn capture_keys(&mut self, events: &mut Vec<egui::Event>, mods: egui::Modifiers) {
+        let Some(c) = self.capture else { return };
+        let mut taken = None;
+        for e in events.iter() {
+            if let egui::Event::Key { key, pressed: true, repeat: false, .. } = e {
+                taken = Some(if *key == Key::Escape { None } else { Some(KeyBind::Key(*key)) });
+                break;
+            }
+        }
+        if taken.is_none() && c.device == Device::Keyboard {
+            if let Some(m) = KeyBind::modifier_pressed(c.mods, mods) {
+                taken = Some(Some(m));
+            }
+        }
+        events.retain(|e| !matches!(e, egui::Event::Key { .. }));
+        if let Some(k) = taken {
+            if let (Some(k), Device::Keyboard) = (k, c.device) {
+                self.binds.set_key(c.action, k);
+            }
+            self.capture = None;
+        }
     }
 
     // Whether a game controller is connected (for the status line).
@@ -240,8 +307,9 @@ impl Game {
         // the keyboard (unless a text field or the like has it)
         let mut held = Held::default();
         let mut casting = false;
+        let binds = self.binds.clone();
         if !ctx.egui_wants_keyboard_input() {
-            let (keys, typed_any) = ctx.input(|i| {
+            let (keys, typed_any, mods) = ctx.input(|i| {
                 let pressed: Vec<(Key, egui::Modifiers)> = i
                     .events
                     .iter()
@@ -251,30 +319,44 @@ impl Game {
                     })
                     .collect();
                 let any = i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. }));
+                // (as bound; the arrows fly too)
+                let down = |a: Action| binds.key(a).is_some_and(|k| k.down(i));
                 held = Held {
-                    fwd: i.key_down(Key::W) || i.key_down(Key::ArrowUp),
-                    back: i.key_down(Key::S) || i.key_down(Key::ArrowDown),
-                    left: i.key_down(Key::A) || i.key_down(Key::ArrowLeft),
-                    right: i.key_down(Key::D) || i.key_down(Key::ArrowRight),
-                    up: i.key_down(Key::E),
-                    down: i.key_down(Key::Q),
-                    boost: i.modifiers.shift,
+                    fwd: down(Action::Forward) || i.key_down(Key::ArrowUp),
+                    back: down(Action::Back) || i.key_down(Key::ArrowDown),
+                    left: down(Action::Left) || i.key_down(Key::ArrowLeft),
+                    right: down(Action::Right) || i.key_down(Key::ArrowRight),
+                    up: down(Action::Climb),
+                    down: down(Action::Descend),
+                    boost: down(Action::Boost),
                 };
-                casting = i.key_down(Key::Space);
-                self.combat.shield.wanted = i.key_down(Key::R);
-                (pressed, any)
+                casting = down(Action::Cast);
+                self.combat.shield.wanted = down(Action::Shield);
+                (pressed, any, i.modifiers)
             });
             if typed_any {
-                self.help.device = Device::Keyboard;
+                self.spellbar.device = Device::Keyboard;
             }
-            for (key, mods) in keys {
+            // (the actions pressed: their keys, without Ctrl, Alt or
+            // Command, or a modifier bound alone)
+            let mut acts: Vec<Action> = keys
+                .iter()
+                .filter(|(_, m)| !m.ctrl && !m.command && !m.alt && !m.mac_cmd)
+                .filter_map(|(k, _)| binds.key_action(KeyBind::Key(*k)))
+                .collect();
+            acts.extend(KeyBind::modifier_pressed(self.mods, mods).and_then(|m| binds.key_action(m)));
+            self.mods = mods;
+            for a in acts {
+                match a {
+                    Action::Mode => self.cycle_mode(),
+                    Action::Pause => self.paused = !self.paused,
+                    Action::Spell(s) => self.spells.select(s),
+                    _ => {}
+                }
+            }
+            for (key, _) in keys {
                 match key {
-                    Key::F if !mods.ctrl && !mods.command && !mods.alt && !mods.mac_cmd => self.cycle_mode(),
-                    Key::P | Key::Escape => self.paused = !self.paused,
-                    Key::Num1 => self.spells.select(0),
-                    Key::Num2 => self.spells.select(1),
-                    Key::Num3 => self.spells.select(2),
-                    Key::Num4 => self.spells.select(3),
+                    Key::Escape => self.paused = !self.paused,
                     Key::Enter if self.combat.enemies.down >= 0.0 && !self.paused => self.combat.reset(&mut self.spells),
                     _ => {}
                 }
@@ -287,18 +369,31 @@ impl Game {
             self.time += dt;
         }
         self.orbit.idle(dt);
-        let pad = self.pads.read();
+        let pad = self.pads.read(&self.binds);
         self.pad_connected = pad.is_some();
-        if let Some(p) = &pad {
-            // (View / Back cycles the mode; Start pauses, B resumes)
+        // (a binding being taken: the button pressed, if it is the
+        // controller's; nothing else acts on the controller meanwhile, nor
+        // on the press that ends it)
+        let capturing = self.capture.is_some();
+        if let Some(c) = self.capture {
+            if c.since.elapsed().as_secs_f32() > CAPTURE_SECS {
+                self.capture = None;
+            } else if let (Some(b), Device::Pad) = (pad.and_then(|p| p.pressed), c.device) {
+                self.binds.set_pad(c.action, b);
+                self.capture = None;
+            }
+        }
+        if let Some(p) = pad.as_ref().filter(|_| !capturing) {
+            // (the mode's button cycles the mode; pause's pauses, B resumes,
+            // unless the menu has a slider held)
             if p.mode {
                 self.cycle_mode();
             }
-            if p.pause || (p.back && self.paused) {
+            if p.pause || (p.back && self.paused && !self.menu_holds) {
                 self.paused = !self.paused;
             }
             if p.active {
-                self.help.device = Device::Pad;
+                self.spellbar.device = Device::Pad;
             }
             if self.paused {
                 // (in the pause menu, the rest is its navigation)
@@ -333,7 +428,7 @@ impl Game {
         self.combat.update(&moment, &mut self.spells, &mut self.rng);
         self.spells.update(game_dt, casting || pad_cast);
         self.combat.handle(&mut self.spells);
-        self.help.spell = self.spells.selected;
+        self.spellbar.spell = self.spells.selected;
         // right stick: look right turns the view right (the camera's yaw is its
         // azimuth round him, so it decreases), up raises the view
         // (and the D-pad zooms)
@@ -587,7 +682,66 @@ impl Game {
             self.combat.reset(&mut self.spells);
         }
 
-        self.help.ui(ctx, rect);
+        self.spellbar.ui(ctx, rect, &self.binds);
+    }
+
+    // The controls tab of the pause menu: each action's key and controller
+    // button, either of which can be chosen (a row of the navigation each)
+    // and then bound to the next key, or button, pressed; and the controls
+    // that are fixed.
+    pub fn controls_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        use hud::Chip;
+        let now_mods = ui.input(|i| i.modifiers);
+        egui::Grid::new("controls").num_columns(3).min_col_width(130.0).spacing([24.0, 6.0]).show(ui, |ui| {
+            ui.label("");
+            ui.label(hud::text("Keyboard", 12.0, hud::DIM));
+            ui.label(hud::text("Controller", 12.0, hud::DIM));
+            ui.end_row();
+            for a in ACTIONS {
+                ui.label(a.label());
+                nav.row();
+                for device in [Device::Keyboard, Device::Pad] {
+                    let waiting = self.capture.is_some_and(|c| c.action == a && c.device == device);
+                    let chip = match device {
+                        Device::Keyboard => self.binds.key(a).map(|k| Chip::Key(k.name())),
+                        Device::Pad => self.binds.pad(a).map(|b| b.chip()),
+                    };
+                    let r = bind_cell(ui, (a, device), chip, waiting);
+                    nav.item(ui, &r);
+                    if r.clicked() {
+                        self.capture = if waiting { None } else { Some(Capture { action: a, device, since: Instant::now(), mods: now_mods }) };
+                    }
+                }
+                ui.end_row();
+            }
+            // (fixed)
+            for (what, key, pad) in [
+                ("Fly (controller)", Chip::Text("—"), Chip::Stick('L')),
+                ("Camera", Chip::Text("drag · wheel"), Chip::Stick('R')),
+                ("Try again (defeated)", Chip::Key("Enter"), Chip::Face('A')),
+                ("Music", Chip::Key("M"), Chip::Text("—")),
+            ] {
+                ui.label(hud::text(what, 12.5, hud::DIM));
+                for c in [key, pad] {
+                    ui.horizontal(|ui| {
+                        ui.add_space(7.0);
+                        hud::chip(ui, c);
+                    });
+                }
+                ui.end_row();
+            }
+        });
+        ui.add_space(6.0);
+        nav.row();
+        let r = ui.button("Reset to defaults");
+        nav.item(ui, &r);
+        if r.clicked() {
+            self.binds = Binds::default();
+            self.capture = None;
+        }
+        if self.capture.is_some() {
+            ui.ctx().request_repaint();
+        }
     }
 }
 
@@ -665,4 +819,30 @@ mod tests {
         assert!(o.paused);
         assert_eq!(o.time, t);
     }
+}
+
+// A binding's cell in the controls tab: its glyph (or a prompt while it
+// waits for a key or button), clickable.
+fn bind_cell(ui: &mut egui::Ui, id: (Action, Device), chip: Option<hud::Chip>, waiting: bool) -> egui::Response {
+    let stroke = egui::Stroke::new(1.0, if waiting { hud::FOCUS } else { hud::BORDER });
+    let inner = egui::Frame::new().stroke(stroke).corner_radius(4).inner_margin(Margin::symmetric(6, 2)).show(ui, |ui| {
+        ui.set_min_width(84.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            match (waiting, chip) {
+                (true, _) => {
+                    ui.label(hud::text("press…", 12.0, hud::FOCUS));
+                }
+                (false, Some(c)) => hud::chip(ui, c),
+                (false, None) => {
+                    ui.label(hud::text("—", 12.0, hud::DIM));
+                }
+            }
+        });
+    });
+    let r = ui.interact(inner.response.rect, ui.scope_id().with(("bind", format!("{:?}", id.0), id.1 == Device::Pad)), egui::Sense::click());
+    if r.hovered() && !waiting {
+        ui.painter().rect_stroke(inner.response.rect, 4, egui::Stroke::new(1.0, hud::DIM), egui::StrokeKind::Inside);
+    }
+    r.on_hover_text(if waiting { "Press a key, or a button (Escape gives up)" } else { "Choose, then press the key or button to bind" })
 }
