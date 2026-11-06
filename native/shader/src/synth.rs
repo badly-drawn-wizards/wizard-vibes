@@ -51,6 +51,59 @@ pub fn formant(f: f32, u: f32, f1: f32, f2: f32, n: i32) -> f32 {
     s
 }
 
+// The note sounding at step i of a tune written out with melody!() (its
+// code function, and how many steps the tune has): (its code, its first
+// step, its last); code 0 if none (a rest, or the release after a note:
+// the note it releases is given, so it can ring out).
+#[inline]
+pub fn tune_note(code: impl Fn(i32) -> i32, i: i32, steps: i32) -> (i32, i32, i32) {
+    let k = if code(i) == 0 { i - 1 } else { i };
+    if k < 0 || code(k) == 0 {
+        return (0, 0, 0);
+    }
+    let (mut j, mut go) = (k, true);
+    while go && j > 0 {
+        if code(j) == 15 {
+            j -= 1;
+        } else {
+            go = false;
+        }
+    }
+    let (mut e, mut go) = (k, true);
+    while go && e < steps - 1 {
+        if code(e + 1) == 15 {
+            e += 1;
+        } else {
+            go = false;
+        }
+    }
+    (code(j), j, e)
+}
+
+// A degree of a minor scale (1 = the tonic `root`, a MIDI note; natural
+// minor: 0 2 3 5 7 8 10), as a MIDI note.
+#[inline]
+pub fn minor_degree(root: f32, d: i32) -> f32 {
+    let o = idiv(d - 1, 7);
+    let k = imod(d - 1, 7);
+    let step = if k == 0 {
+        0
+    } else if k == 1 {
+        2
+    } else if k == 2 {
+        3
+    } else if k == 3 {
+        5
+    } else if k == 4 {
+        7
+    } else if k == 5 {
+        8
+    } else {
+        10
+    };
+    root + (12 * o + step) as f32
+}
+
 // Drive into a soft clipper, normalised so a full-scale sine stays near 1.
 #[inline]
 pub fn drive(x: f32, amount: f32) -> f32 {

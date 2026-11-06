@@ -5,6 +5,10 @@
 // wobbles in eighths, over a sub; vocal chops (a formant voice going "ah"
 // to "oh"); a pad, pumped by the kick; and a pulse arpeggio.
 //
+// A hook rides over sections 2 and 4 on a glitchy square lead, laser zaps
+// in the second half, reverse cymbals swelling into each section's end,
+// and in the last section a bass run closing each four bars.
+//
 // The glitches are edits of the song's own time, which every voice here is
 // a pure function of: a stutter replays a slice of it (the last beat of
 // each four bars: eighths, then sixteenths, then thirty-seconds); a tape
@@ -21,7 +25,7 @@
 use crate::chip::pulse;
 use crate::music::{bright_noise, freq, noise};
 use crate::prelude::*;
-use crate::synth::{drive, formant, pump};
+use crate::synth::{drive, formant, minor_degree, pump, tune_note};
 
 pub const bpm: f32 = 105.0;
 pub const beat: f32 = 60.0 / bpm;
@@ -147,11 +151,20 @@ fn growl(t: f32) -> f32 {
         }
         j += 1;
     }
-    if found < 0 {
+    // (in the last section, the second half of each four bars' last bar is
+    // a run instead: sixteenths down from the octave, 12 10 7 5 3 0 -2 0)
+    let run = section(t) == 3 && imod(idiv(k, 16), 4) == 3 && imod(k, 16) >= 8;
+    if found < 0 && !run {
         return 0.0;
     }
-    let len = if found == 0 || found == 8 { 3.0 } else { 2.0 };
-    let semis = if found == 3 || found == 11 { 12.0 } else if found == 6 { 7.0 } else if found == 14 { 10.0 } else { 0.0 };
+    let (start, len, semis) = if run {
+        let r = imod(k, 16) - 8;
+        let semis = if r == 0 { 12.0 } else if r == 1 { 10.0 } else if r == 2 { 7.0 } else if r == 3 { 5.0 } else if r == 4 { 3.0 } else if r == 6 { -2.0 } else { 0.0 };
+        (k, 1.0, semis)
+    } else {
+        let len = if found == 0 || found == 8 { 3.0 } else { 2.0 };
+        (start, len, if found == 3 || found == 11 { 12.0 } else if found == 6 { 7.0 } else if found == 14 { 10.0 } else { 0.0 })
+    };
     let t0 = step_start(start);
     let u = t - t0;
     let held = len * sixteenth - 0.015;
@@ -213,6 +226,65 @@ fn arp(rate: f32, t: f32) -> f32 {
     (-u * 14.0).exp() * smoothstep(0.0, 0.002, u) * pulse(f * u, 0.25, f / rate)
 }
 
+// The hook: eight bars of eighths, each a degree of F minor (1 = F4), -
+// holding the note before, . a rest; played in sections 2 and 4.
+wizard_shader_macros::melody!(
+    hook_code,
+    8,
+    "8 - 6 . 5 4 5 . | 3 - 4 . 5 - . . | 6 - 5 . 3 1 3 . | 2 - 3 . 4 - - . |
+     8 - 9 . 10 9 8 . | 6 - 5 . 4 - . . | 3 - 4 5 6 5 3 . | 2 - - 1 - - - ."
+);
+
+// The lead playing it: a square wave, its width wobbling, sliding into
+// each note joined to the one before (over 40 ms), a little vibrato once
+// it is held, bitcrushed a touch (16 levels): glitchy, chippy.
+#[inline]
+fn lead(rate: f32, t: f32) -> f32 {
+    let i = imod(ftoi((t / (0.5 * beat)).floor()), 64);
+    let u = t - 0.5 * beat * (t / (0.5 * beat)).floor();
+    let (d, j, e) = tune_note(hook_code, i, 64);
+    if d == 0 {
+        return 0.0;
+    }
+    let tau_ = (i - j) as f32 * 0.5 * beat + u;
+    let dur = (e - j + 1) as f32 * 0.5 * beat - 0.03;
+    let (pd, _, pe) = if j > 0 { tune_note(hook_code, j - 1, 64) } else { (0, 0, 0) };
+    let joined = pd != 0 && pe == j - 1;
+    let f = freq(minor_degree(65.0, d));
+    let pf = if joined { freq(minor_degree(65.0, pd)) } else { f };
+    let g = 0.04f32;
+    let slid = (pf / f - 1.0) * if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g };
+    let wob = 0.004 * smoothstep(0.2, 0.4, tau_) / (tau * 6.0) * (1.0 - (tau * 6.0 * tau_).cos());
+    let width = 0.5 + 0.15 * (tau * 0.7 * t).sin();
+    let env = smoothstep(0.0, 0.006, tau_) * (0.75 + 0.25 * (-8.0 * tau_).exp()) * if tau_ < dur { 1.0 } else { (-(tau_ - dur) * 30.0).exp() };
+    let v = env * pulse(f * (tau_ + slid + wob), width, f / rate);
+    (v * 8.0).round() / 8.0
+}
+
+// A laser zap: a sine diving from 2.4 kHz to 120 Hz over 90 ms, on the
+// bar's last step every other bar.
+#[inline]
+fn zap(t: f32) -> f32 {
+    let (k, u) = step_at(t);
+    if imod(k, 32) != 31 {
+        return 0.0;
+    }
+    let ph = tau * (120.0 * u + 2280.0 / 33.0 * (1.0 - (-33.0 * u).exp()));
+    (-u * 18.0).exp() * smoothstep(0.0, 0.002, u) * ph.sin()
+}
+
+// A reverse cymbal: bright noise swelling over the two beats before each
+// section's last (which the tape stop takes).
+#[inline]
+fn swell(rate: f32, t: f32) -> f32 {
+    let into = t - (t / (8.0 * bar)).floor() * 8.0 * bar - (7.0 * bar + beat);
+    if !(into >= 0.0 && into < 2.0 * beat) {
+        return 0.0;
+    }
+    let x = into / (2.0 * beat);
+    x * x * x * bright_noise(rate, t)
+}
+
 // ---------------------------------------------------------------------
 
 // The song at time t, before the edits: (left, right, the room's send).
@@ -228,9 +300,14 @@ fn dry(rate: f32, t: f32) -> (f32, f32, f32) {
     let pg = if k == 2 { 0.0 } else { 0.035 * duck };
     let a = if k == 1 || k == 3 { 0.05 * arp(rate, t) } else { 0.0 };
     let low = 0.32 * duck * g;
-    let l = 0.6 * dl + low + 0.11 * ch + pg * pl + 0.6 * a;
-    let r = 0.6 * dr + low + 0.11 * ch + pg * pr + 0.4 * a;
-    (l, r, 0.25 * (dl + dr) + 0.5 * ch + 0.5 * pg * (pl + pr) + 0.5 * a)
+    // the hook (sections 2 and 4), the zaps (3 and 4), the swells into
+    // each section's end
+    let hook = if k == 1 || k == 3 { 0.9 * lead(rate, t) } else { 0.0 };
+    let z = if k >= 2 { 0.3 * zap(t) } else { 0.0 };
+    let sw = 0.25 * swell(rate, t);
+    let l = 0.6 * dl + low + 0.11 * ch + pg * pl + 0.6 * a + 0.55 * hook + 0.7 * z + sw;
+    let r = 0.6 * dr + low + 0.11 * ch + pg * pr + 0.4 * a + 0.45 * hook + 0.3 * z + sw;
+    (l, r, 0.25 * (dl + dr) + 0.5 * ch + 0.5 * pg * (pl + pr) + 0.5 * a + 0.6 * hook + 0.5 * z + 0.5 * sw)
 }
 
 // The edits: the time to read the song at, and whether it is bitcrushed.
@@ -268,5 +345,22 @@ pub fn parts(rate: f32, t: f32) -> (f32, f32, f32) {
         (q(l), q(r), s)
     } else {
         dry(rate, te)
+    }
+}
+
+#[cfg(all(test, not(target_arch = "spirv")))]
+mod tests {
+    #[test]
+    fn the_hook_sounds() {
+        let rate = 48000.0;
+        let t0 = 8.0 * super::bar;
+        let (mut peak, mut zaps) = (0f32, 0f32);
+        for i in 0..(8.0 * super::bar * rate) as usize {
+            let t = t0 + i as f32 / rate;
+            peak = peak.max(super::lead(rate, t).abs());
+            zaps = zaps.max(super::zap(t + 8.0 * super::bar).abs());
+        }
+        eprintln!("hook peak {peak}, zap peak {zaps}");
+        assert!(peak > 0.3 && zaps > 0.3);
     }
 }

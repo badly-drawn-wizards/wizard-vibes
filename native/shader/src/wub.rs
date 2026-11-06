@@ -10,6 +10,10 @@
 // bar); the talking bass (its harmonics weighted by formants that an LFO
 // moves between "o" and "i": yoi); and a sub under both.
 //
+// The theme rings out on a bell in the intro and screeches over the second
+// drop; each drop lands with an impact (a crash, a diving sub), and each of
+// its four bars ends in a fill (the bass sliding down, snares swelling).
+//
 // In four sections of eight bars:
 //   1  intro: the pad and the arpeggio, hats; the kick from bar 5;
 //   2  build: the roll and the riser, the pad fading; a beat of silence;
@@ -18,7 +22,7 @@
 
 use crate::music::{bright_noise, freq, noise};
 use crate::prelude::*;
-use crate::synth::{drive, formant, pump, saw_lp};
+use crate::synth::{drive, formant, minor_degree, pump, saw_lp, tune_note};
 
 pub const bpm: f32 = 140.0;
 pub const beat: f32 = 60.0 / bpm;
@@ -182,6 +186,68 @@ fn talk(f: f32, u: f32, lfo: f32) -> f32 {
     drive(0.5 * formant(f, u, f1, f2, 40), 2.5)
 }
 
+// The theme: four bars of eighths, each a degree of G minor (1 = G4), -
+// holding the note before, . a rest; on a bell in the intro, and on a
+// screeching lead in the second drop.
+wizard_shader_macros::melody!(
+    theme_code,
+    8,
+    "5 - 4 3 4 - 1 . | 3 - 2 1 2 - . . | 3 - 4 5 6 - 5 . | 4 - 3 2 1 - - ."
+);
+
+// The theme at t: the note sounding (MIDI, an octave shifted by `octave`),
+// the time into it, and how long it is held; or none.
+#[inline]
+fn theme_at(t: f32, octave: f32) -> (bool, f32, f32, f32) {
+    let e = 0.5 * beat;
+    let i = imod(ftoi((t / e).floor()), 32);
+    let u = t - e * (t / e).floor();
+    let (d, j, last) = tune_note(theme_code, i, 32);
+    if d == 0 {
+        return (false, 0.0, 0.0, 0.0);
+    }
+    (true, minor_degree(67.0, d) + 12.0 * octave, (i - j) as f32 * e + u, (last - j + 1) as f32 * e - 0.03)
+}
+
+// A bell (a struck bar's partials) playing the theme.
+#[inline]
+fn bell_theme(t: f32) -> f32 {
+    let (on, note, u, _) = theme_at(t, 0.0);
+    if !on {
+        return 0.0;
+    }
+    let p = tau * freq(note) * u;
+    smoothstep(0.0, 0.002, u) * ((-u * 2.5).exp() * p.sin() + 0.35 * (-u * 6.0).exp() * (2.76 * p).sin() + 0.15 * (-u * 12.0).exp() * (5.4 * p).sin())
+}
+
+// A screech playing it an octave up: FM, the modulator a fifth up, its
+// index swinging fast, driven hard, with vibrato.
+#[inline]
+fn screech(t: f32) -> f32 {
+    let (on, note, u, held) = theme_at(t, 1.0);
+    if !on {
+        return 0.0;
+    }
+    let f = freq(note);
+    let vib = 0.006 / (tau * 6.5) * (1.0 - (tau * 6.5 * u).cos());
+    let p = tau * f * (u + vib);
+    let index = 2.0 + 1.5 * (tau * 7.0 * u).sin();
+    let env = smoothstep(0.0, 0.01, u) * if u < held { 1.0 } else { (-(u - held) * 25.0).exp() };
+    env * drive((p + index * (1.5 * p).sin()).sin(), 3.0)
+}
+
+// The impact as a drop lands: a crash (bright noise ringing out) and a sub
+// sine diving from 90 to 35 Hz.
+#[inline]
+fn impact(rate: f32, u: f32, t: f32) -> f32 {
+    if u < 0.0 || u > 2.5 {
+        return 0.0;
+    }
+    let crash = (-u * 1.6).exp() * smoothstep(0.0, 0.002, u) * (0.4 * noise(rate, t) + bright_noise(rate, t));
+    let dive = (tau * (35.0 * u + 55.0 / 2.0 * (1.0 - (-2.0 * u).exp()))).sin() * (-u * 1.4).exp();
+    0.35 * crash + 0.9 * dive
+}
+
 // ---------------------------------------------------------------------
 
 // The mix (left, right) before the limit, and what is sent to the room.
@@ -212,9 +278,11 @@ pub fn parts(rate: f32, t: f32) -> (f32, f32, f32) {
         } else {
             (0.0, 0.0)
         };
-        let l = pg * pl + 0.6 * pk + kick + hats + rl + riser;
-        let r = pg * pr + 0.4 * pk + kick + hats + rl + riser;
-        return (l, r, 0.6 * pg * (pl + pr) + 0.5 * pk + 0.6 * rl + 0.4 * riser);
+        // (the theme on a bell in the intro)
+        let bell = if k == 0 { 0.33 * bell_theme(t) } else { 0.0 };
+        let l = pg * pl + 0.6 * pk + kick + hats + rl + riser + 0.45 * bell;
+        let r = pg * pr + 0.4 * pk + kick + hats + rl + riser + 0.55 * bell;
+        return (l, r, 0.6 * pg * (pl + pr) + 0.5 * pk + 0.6 * rl + 0.4 * riser + 0.7 * bell);
     }
     // the drops
     let (dk, since) = drop_kit(rate, t);
@@ -231,11 +299,47 @@ pub fn parts(rate: f32, t: f32) -> (f32, f32, f32) {
         let h = imod(ftoi((t / (2.0 * beat)).floor()), 2);
         if h == 0 { (talk(f, u, lfo), 0.0) } else { (wobble(f, u, lfo), 0.2) }
     };
+    // (each four bars' last half bar in the drops: a fill: the bass sliding
+    // down an octave, snares in sixteenths swelling)
+    let fill = imod(ftoi((t / (2.0 * beat)).floor()), 8) == 7;
+    let (bass, sub) = if fill {
+        let slide = (0.5f32).powf(saturate(u / (2.0 * beat)));
+        let fu = f * u * (1.0 + slide) * 0.5;
+        (wobble(f, fu / f, 0.25 * beat), (tau * 0.5 * fu).sin())
+    } else {
+        (bass, sub)
+    };
     let low = duck * env * (0.45 * bass + 0.16 * sub);
+    let snares = if fill {
+        let s = 0.25 * beat;
+        let su = u - s * (u / s).floor();
+        (0.4 + 0.6 * u / (2.0 * beat)) * 0.5 * (-su * 20.0).exp() * bright_noise(rate, t)
+    } else {
+        0.0
+    };
+    // (the impact as each drop lands; the theme screeching over the second)
+    let into = t - 8.0 * bar * (t / (8.0 * bar)).floor();
+    let hit = 0.5 * impact(rate, into, t);
+    let lead = if k == 3 && !fill { 0.4 * screech(t) } else { 0.0 };
     // (a little stereo: the bass leaning left and right by the half bar,
     // the answering wobble further)
     let wide = 1.0 + (0.1 + sw) * if imod(ftoi((t / (2.0 * beat)).floor()), 2) == 0 { 1.0 } else { -1.0 };
-    let l = 0.55 * dk + 0.7 * low * wide;
-    let r = 0.55 * dk + 0.7 * low * (2.0 - wide);
-    (l, r, 0.25 * dk + 0.07 * low)
+    let l = 0.55 * dk + 0.7 * low * wide + snares + hit + 0.6 * lead;
+    let r = 0.55 * dk + 0.7 * low * (2.0 - wide) + snares + hit + 0.4 * lead;
+    (l, r, 0.25 * dk + 0.07 * low + 0.6 * snares + 0.4 * hit + 0.5 * lead)
+}
+
+#[cfg(all(test, not(target_arch = "spirv")))]
+mod tests {
+    // (the theme's voices' levels over four bars, for the mix)
+    #[test]
+    fn the_theme_voices() {
+        let rate = 48000.0;
+        let n = (4.0 * super::bar * rate) as usize;
+        let rms = |f: &dyn Fn(f32) -> f32| ((0..n).map(|i| f(i as f32 / rate).powi(2)).sum::<f32>() / n as f32).sqrt();
+        let bell = rms(&|t| super::bell_theme(t));
+        let screech = rms(&|t| super::screech(t));
+        eprintln!("bell {:.1} dB, screech {:.1} dB", 20.0 * bell.log10(), 20.0 * screech.log10());
+        assert!(bell > 0.01 && screech > 0.01);
+    }
 }
