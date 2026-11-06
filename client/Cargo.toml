@@ -40,6 +40,6 @@ env_logger = "0.11"
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "HtmlCanvasElement", "Location", "EventSource", "MessageEvent", "Request", "RequestInit", "Response", "Headers", "Navigator", "Gamepad", "GamepadButton", "GamepadMappingType"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "HtmlCanvasElement", "Location", "EventSource", "MessageEvent", "Request", "RequestInit", "Response", "Headers", "Navigator", "Gamepad", "GamepadButton", "GamepadMappingType", "MouseEvent"] }
 console_error_panic_hook = "0.1"
 cpal = { version = "0.18", features = ["wasm-bindgen"] }

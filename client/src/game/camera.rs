@@ -1,5 +1,5 @@
-// The orbit camera (web/camera.ts), turned by dragging the view and zoomed
-// by the wheel; kept between runs.
+// The orbit camera (web/camera.ts), turned by the mouse (taken: see
+// look.rs) and zoomed by the wheel; kept between runs.
 
 use super::vec::V3;
 use crate::types::{Camera, PAGE_CAMERA};
@@ -20,6 +20,7 @@ impl Default for Orbit {
 
 const PITCH_MIN: f32 = -0.9; // (looking up: see camera_ray in wizard.rs)
 const PITCH_MAX: f32 = 1.2;
+const LOOK: f32 = 0.0035; // radians the mouse turns the view a pixel
 
 impl Orbit {
     // As restored from storage (it counts as touched).
@@ -27,11 +28,12 @@ impl Orbit {
         Orbit { cam, interacted: true }
     }
 
-    // A drag over the view by (dx, dy) points.
-    pub fn drag(&mut self, dx: f32, dy: f32) {
+    // The mouse moved by (dx, dy) (pixels, or the device's units): right
+    // turns the view right, up raises it.
+    pub fn look(&mut self, dx: f32, dy: f32) {
         self.interacted = true;
-        self.cam.yaw -= dx * 0.006;
-        self.cam.pitch = (self.cam.pitch + dy * 0.006).clamp(PITCH_MIN, PITCH_MAX);
+        self.cam.yaw -= dx * LOOK;
+        self.cam.pitch = (self.cam.pitch + dy * LOOK).clamp(PITCH_MIN, PITCH_MAX);
     }
 
     // The wheel, `delta_y` as a browser's deltaY (pixels, positive away
@@ -99,7 +101,7 @@ mod tests {
         let mut o = Orbit::default();
         o.idle(1.0);
         assert!((o.cam.yaw - (0.5 + PI / 18.0)).abs() < 1e-6);
-        o.drag(0.0, 1000.0);
+        o.look(0.0, 1000.0);
         assert_eq!(o.cam.pitch, PITCH_MAX);
         assert!(o.interacted);
         o.wheel(1e5);

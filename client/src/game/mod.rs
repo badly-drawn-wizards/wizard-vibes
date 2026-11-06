@@ -19,6 +19,7 @@ pub mod flight;
 pub mod binds;
 pub mod gamepad;
 pub mod hud;
+pub mod look;
 pub mod mana;
 pub mod mode;
 pub mod quality;
@@ -91,6 +92,7 @@ pub struct Game {
     // rather than resuming): set by the app
     pub menu_holds: bool,
     pads: Pads,
+    look: look::MouseLook,
     rng: Rng,
     // the scene's time (stopped while paused)
     time: f32,
@@ -154,6 +156,7 @@ impl Game {
             mods: egui::Modifiers::NONE,
             menu_holds: false,
             pads: Pads::default(),
+            look: look::MouseLook::default(),
             rng: Rng::new(seed),
             time: 0.0,
             paused: false,
@@ -316,11 +319,17 @@ impl Game {
             });
             self.orbit.interacted = true;
         }
-        if view.dragged() {
-            let d = view.drag_delta();
-            self.orbit.drag(d.x, d.y);
+        // the mouse: a click on the view takes it (not while paused, nor
+        // defeated), and it then turns the camera
+        let defeated = self.combat.hud.lost.is_some();
+        if view.clicked() && !self.paused && !defeated && !self.look.held() {
+            self.look.grab(ctx);
         }
-        if view.hovered() {
+        let (dx, dy) = self.look.take(ctx);
+        if dx != 0.0 || dy != 0.0 {
+            self.orbit.look(dx, dy);
+        }
+        if view.hovered() || self.look.held() {
             // (egui's wheel is points up; the TS's deltaY is pixels down,
             // about 100 a notch to egui's 50)
             let dy = ctx.input(|i| i.smooth_scroll_delta.y);
@@ -390,6 +399,14 @@ impl Game {
             self.combat.shield.wanted = false;
         }
 
+        // (let go of by the browser, Escape: paused; paused, or defeated,
+        // or the window left: let go of)
+        if self.look.lost() {
+            self.paused = true;
+        }
+        if self.paused || defeated || !ctx.input(|i| i.focused) {
+            self.look.release(ctx);
+        }
         if !self.paused {
             self.time += dt;
         }
@@ -754,7 +771,7 @@ impl Game {
             // (fixed)
             for (what, key, pad) in [
                 ("Fly (controller)", Chip::Text("—"), Chip::Stick('L')),
-                ("Camera", Chip::Text("drag · wheel"), Chip::Stick('R')),
+                ("Camera (click to take the mouse)", Chip::Text("mouse · wheel"), Chip::Stick('R')),
                 ("Try again (defeated)", Chip::Key("Enter"), Chip::Face('A')),
                 ("Music", Chip::Key("M"), Chip::Text("—")),
             ] {
