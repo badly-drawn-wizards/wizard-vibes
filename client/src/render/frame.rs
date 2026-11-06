@@ -121,7 +121,9 @@ impl Frame {
 
         let read = device.create_buffer(&wgpu::BufferDescriptor { label: Some("music read"), size: n, usage: U::MAP_READ | U::COPY_DST, mapped_at_creation: false });
         let mut enc = device.create_command_encoder(&Default::default());
-        dispatch(device, &mut enc, shader, m, "music", req.frames);
+        // (each song its own kernel: music0 .. ; older builds, one for all)
+        let kernel = format!("music{}", req.song);
+        dispatch(device, &mut enc, shader, m, if shader.has(&kernel) { &kernel } else { "music" }, req.frames);
         dispatch(device, &mut enc, shader, m, "soundboard", wizard_shader::soundboard::modes as u32);
 
         dispatch(device, &mut enc, shader, m, "music_mix", req.frames);

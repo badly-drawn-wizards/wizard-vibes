@@ -80,10 +80,10 @@ pub fn tune_note(code: impl Fn(i32) -> i32, i: i32, steps: i32) -> (i32, i32, i3
     (code(j), j, e)
 }
 
-// A degree of a minor scale (1 = the tonic `root`, a MIDI note; natural
-// minor: 0 2 3 5 7 8 10), as a MIDI note.
+// Degree d of a scale (1 = the tonic `root`, a MIDI note), as a MIDI note:
+// major (0 2 4 5 7 9 11) or natural minor (0 2 3 5 7 8 10).
 #[inline]
-pub fn minor_degree(root: f32, d: i32) -> f32 {
+pub fn scale_degree(root: f32, d: i32, major: bool) -> f32 {
     let o = idiv(d - 1, 7);
     let k = imod(d - 1, 7);
     let step = if k == 0 {
@@ -91,17 +91,37 @@ pub fn minor_degree(root: f32, d: i32) -> f32 {
     } else if k == 1 {
         2
     } else if k == 2 {
-        3
+        if major { 4 } else { 3 }
     } else if k == 3 {
         5
     } else if k == 4 {
         7
     } else if k == 5 {
-        8
+        if major { 9 } else { 8 }
+    } else if major {
+        11
     } else {
         10
     };
     root + (12 * o + step) as f32
+}
+
+#[inline]
+pub fn minor_degree(root: f32, d: i32) -> f32 {
+    scale_degree(root, d, false)
+}
+
+// The time to read a sung (or played) note's oscillator at, u seconds into
+// a note of frequency f: slid into from frequency pf over `glide` seconds
+// (the frequency moving linearly, as a phase offset: the integral of the
+// difference), with vibrato of `depth` (a fraction) at `rate` Hz coming in
+// between `from` and `to` seconds into the note.
+#[inline]
+pub fn sung_time(f: f32, pf: f32, u: f32, glide: f32, depth: f32, rate: f32, from: f32, to: f32) -> f32 {
+    let slid = (pf / f - 1.0) * if u < glide { u - u * u / (2.0 * glide) } else { 0.5 * glide };
+    let w = 2.0 * PI * rate;
+    let wob = depth * smoothstep(from, to, u) / w * (1.0 - (w * u).cos());
+    u + slid + wob
 }
 
 // Drive into a soft clipper, normalised so a full-scale sine stays near 1.

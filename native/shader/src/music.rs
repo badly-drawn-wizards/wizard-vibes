@@ -449,58 +449,17 @@ wizard_shader_macros::melody!(
      10 - 10 11 10 9 8 - | 8 - 7 8 - - . . | 9 - 13 - 5 - 13 9 | 12 - - - 11 10 9 13"
 );
 
+// Degree d of D natural minor (1 = D4), or 13: C#5 (the leading note).
 #[inline]
 pub fn degree_midi(d: i32) -> f32 {
-    (if d == 13 {
-        73
-    } else {
-        let o = idiv(d - 1, 7);
-        let k = imod(d - 1, 7);
-        // D natural minor: D E F G A Bb C
-        let step = if k == 0 {
-            0
-        } else if k == 1 {
-            2
-        } else if k == 2 {
-            3
-        } else if k == 3 {
-            5
-        } else if k == 4 {
-            7
-        } else if k == 5 {
-            8
-        } else {
-            10
-        };
-        62 + 12 * o + step
-    }) as f32
+    if d == 13 { 73.0 } else { crate::synth::minor_degree(62.0, d) }
 }
 
 // The note sounding at eighth i (or the one it is releasing from, after
 // it): (degree, its first eighth, its last eighth); degree 0 if none.
 #[inline]
 pub fn note_at(i: i32) -> (i32, i32, i32) {
-    let k = if melody_code(i) == 0 { i - 1 } else { i };
-    if k < 0 || melody_code(k) == 0 {
-        return (0, 0, 0);
-    }
-    let (mut j, mut go) = (k, true);
-    while go && j > 0 {
-        if melody_code(j) == 15 {
-            j -= 1;
-        } else {
-            go = false;
-        }
-    }
-    let (mut e, mut go) = (k, true);
-    while go && e < 63 {
-        if melody_code(e + 1) == 15 {
-            e += 1;
-        } else {
-            go = false;
-        }
-    }
-    (melody_code(j), j, e)
+    crate::synth::tune_note(melody_code, i, 64)
 }
 
 // A synth lead: near a sine, its octave 8 dB down and its twelfth 22 dB
@@ -513,14 +472,9 @@ pub fn lead_tone(f: f32, pf: f32, tau_: f32, dur: f32) -> f32 {
     let env = (1.0 - (-tau_ * 120.0).exp())
         * (0.75 + 0.25 * (-tau_ * 6.0).exp())
         * (if tau_ < dur { 1.0 } else { (-(tau_ - dur) * 30.0).exp() });
-    let depth = 0.005 * smoothstep(0.15, 0.45, tau_);
-    let wob = depth / (2.0 * PI * 5.5) * (1.0 - (2.0 * PI * 5.5 * tau_).cos());
-    // (the glide: frequency from pf to f linearly over g seconds, as a
-    // phase offset, the integral of the difference)
-    let g = 0.04f32;
-    let slid = (pf / f - 1.0) * (if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g });
+    let at = crate::synth::sung_time(f, pf, tau_, 0.04, 0.005, 5.5, 0.15, 0.45);
     let osc = |h: f32| {
-        let p = tau * h * (tau_ + wob + slid);
+        let p = tau * h * at;
         p.sin() + 0.4 * (2.0 * p).sin() + 0.08 * (3.0 * p).sin()
     };
     env * (osc(f) + 0.6 * osc(f * 1.003))

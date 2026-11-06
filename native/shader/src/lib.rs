@@ -275,27 +275,82 @@ pub fn pack_pixels(
 }
 
 // ---------------------------------------------------------------------
-// The music (fut/music.fut sound_chunk): a thread per value, 2 * a_m_n
-// values: a_m_n stereo samples (interleaved left, right) from time a_m_t0
-// within the loop, at a_m_rate samples a second.
-#[spirv(compute(threads(256)))]
-pub fn music(
-    #[spirv(global_invocation_id)] gid: UVec3,
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
-) {
-    // (a thread a frame: the mix before the limit, the harpsichord, and
-    // the room's send)
+// The music (fut/music.fut sound_chunk), an entry point a song (music0 ..
+// music4, as music::songs numbers them: each kernel holds its own song
+// alone, so it is a fraction of the size, and quicker): a thread a frame,
+// a_m_n frames from time a_m_t0 within the loop, at a_m_rate a second;
+// each frame's mix before the limit (left, right), the harpsichord in it,
+// and the room's send.
+#[inline]
+fn music_into(gid: UVec3, u: &Uniforms, dry: &mut [f32], period: f32, parts: impl Fn(f32, f32) -> (f32, f32, f32, f32)) {
     let i = gid.x as i32;
     if i >= u.a_m_n {
         return;
     }
-    let (l, r, h, s) = music::song_parts(u.a_m_song, u.a_m_rate, music::song_wrap(u.a_m_song, u.a_m_t0 + i as f32 / u.a_m_rate));
+    let t = u.a_m_t0 + i as f32 / u.a_m_rate;
+    let (l, r, h, s) = parts(u.a_m_rate, t - period * (t / period).floor());
     let k = 4 * i as usize;
     dry[k] = l;
     dry[k + 1] = r;
     dry[k + 2] = h;
     dry[k + 3] = s;
+}
+
+#[spirv(compute(threads(256)))]
+pub fn music0(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+) {
+    music_into(gid, u, dry, music::period, music::music_parts);
+}
+
+#[spirv(compute(threads(256)))]
+pub fn music1(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+) {
+    music_into(gid, u, dry, chip::period, |rate, t| {
+        let (l, r, s) = chip::parts(rate, t);
+        (l, r, 0.0, s)
+    });
+}
+
+#[spirv(compute(threads(256)))]
+pub fn music2(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+) {
+    music_into(gid, u, dry, stars::period, |rate, t| {
+        let (l, r, s) = stars::parts(rate, t);
+        (l, r, 0.0, s)
+    });
+}
+
+#[spirv(compute(threads(256)))]
+pub fn music3(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+) {
+    music_into(gid, u, dry, glitch::period, |rate, t| {
+        let (l, r, s) = glitch::parts(rate, t);
+        (l, r, 0.0, s)
+    });
+}
+
+#[spirv(compute(threads(256)))]
+pub fn music4(
+    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] u: &Uniforms,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)] dry: &mut [f32],
+) {
+    music_into(gid, u, dry, wub::period, |rate, t| {
+        let (l, r, s) = wub::parts(rate, t);
+        (l, r, 0.0, s)
+    });
 }
 
 // The soundboard over a chunk: a thread a mode, through the chunk's

@@ -308,57 +308,17 @@ fn melody_code(i: i32, counter: bool) -> i32 {
     if counter { counter_code(i) } else { tune_code(i) }
 }
 
+// Degree d of D major (1 = D5), or 13: G#5 (the Lydian's sharp fourth).
 #[inline]
 fn degree_midi(d: i32) -> f32 {
-    if d == 13 {
-        return 80.0; // G#5
-    }
-    let o = idiv(d - 1, 7);
-    let k = imod(d - 1, 7);
-    // D major: D E F# G A B C#
-    let step = if k == 0 {
-        0
-    } else if k == 1 {
-        2
-    } else if k == 2 {
-        4
-    } else if k == 3 {
-        5
-    } else if k == 4 {
-        7
-    } else if k == 5 {
-        9
-    } else {
-        11
-    };
-    (74 + 12 * o + step) as f32
+    if d == 13 { 80.0 } else { crate::synth::scale_degree(74.0, d, true) }
 }
 
 // The note at eighth i (of 48): (degree, its first eighth, its last); 0 if
 // none.
 #[inline]
 fn note_at(i: i32, counter: bool) -> (i32, i32, i32) {
-    let k = if melody_code(i, counter) == 0 { i - 1 } else { i };
-    if k < 0 || melody_code(k, counter) == 0 {
-        return (0, 0, 0);
-    }
-    let (mut j, mut go) = (k, true);
-    while go && j > 0 {
-        if melody_code(j, counter) == 15 {
-            j -= 1;
-        } else {
-            go = false;
-        }
-    }
-    let (mut e, mut go) = (k, true);
-    while go && e < 47 {
-        if melody_code(e + 1, counter) == 15 {
-            e += 1;
-        } else {
-            go = false;
-        }
-    }
-    (melody_code(j, counter), j, e)
+    crate::synth::tune_note(move |k| melody_code(k, counter), i, 48)
 }
 
 // The flute: near a sine (its octave 12 dB down, its twelfth 22), breath
@@ -368,11 +328,7 @@ fn note_at(i: i32, counter: bool) -> (i32, i32, i32) {
 fn flute_tone(rate: f32, t: f32, f: f32, pf: f32, tau_: f32, dur: f32, joined: bool) -> f32 {
     let attack = if joined { 1.0 } else { smoothstep(0.0, 0.05, tau_) };
     let env = attack * (if tau_ < dur { 1.0 } else { (-(tau_ - dur) * 18.0).exp() });
-    let depth = 0.006 * smoothstep(0.25, 0.6, tau_);
-    let wob = depth / (tau * 5.0) * (1.0 - (tau * 5.0 * tau_).cos());
-    let g = 0.04f32;
-    let slid = (pf / f - 1.0) * (if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g });
-    let p = tau * f * (tau_ + wob + slid);
+    let p = tau * f * crate::synth::sung_time(f, pf, tau_, 0.04, 0.006, 5.0, 0.25, 0.6);
     let tone_ = p.sin() + 0.25 * (2.0 * p).sin() + 0.08 * (3.0 * p).sin();
     let breath = 0.06 * bright_noise(rate, t) * (0.6 + 0.4 * p.sin());
     let chiff = if joined { 0.0 } else { 0.35 * (-tau_ * 40.0).exp() * bright_noise(rate, t) };

@@ -252,12 +252,9 @@ fn lead(rate: f32, t: f32) -> f32 {
     let joined = pd != 0 && pe == j - 1;
     let f = freq(minor_degree(65.0, d));
     let pf = if joined { freq(minor_degree(65.0, pd)) } else { f };
-    let g = 0.04f32;
-    let slid = (pf / f - 1.0) * if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g };
-    let wob = 0.004 * smoothstep(0.2, 0.4, tau_) / (tau * 6.0) * (1.0 - (tau * 6.0 * tau_).cos());
     let width = 0.5 + 0.15 * (tau * 0.7 * t).sin();
     let env = smoothstep(0.0, 0.006, tau_) * (0.75 + 0.25 * (-8.0 * tau_).exp()) * if tau_ < dur { 1.0 } else { (-(tau_ - dur) * 30.0).exp() };
-    let v = env * pulse(f * (tau_ + slid + wob), width, f / rate);
+    let v = env * pulse(f * crate::synth::sung_time(f, pf, tau_, 0.04, 0.004, 6.0, 0.2, 0.4), width, f / rate);
     (v * 8.0).round() / 8.0
 }
 

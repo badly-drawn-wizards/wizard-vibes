@@ -232,53 +232,16 @@ wizard_shader_macros::melody!(
      5 - - 8 - 9 10 - | 8 - - - 10 - 8 - | 7 - - 5 - - 3 - | 4 - - 2 - - - ."
 );
 
+// Degree d of A natural minor (1 = A4).
 #[inline]
 fn degree_midi(d: i32) -> f32 {
-    let o = idiv(d - 1, 7);
-    let k = imod(d - 1, 7);
-    // A natural minor: A B C D E F G
-    let step = if k == 0 {
-        0
-    } else if k == 1 {
-        2
-    } else if k == 2 {
-        3
-    } else if k == 3 {
-        5
-    } else if k == 4 {
-        7
-    } else if k == 5 {
-        8
-    } else {
-        10
-    };
-    (69 + 12 * o + step) as f32
+    crate::synth::minor_degree(69.0, d)
 }
 
 // The note at eighth i: (degree, its first eighth, its last); 0 if none.
 #[inline]
 fn note_at(i: i32) -> (i32, i32, i32) {
-    let k = if melody_code(i) == 0 { i - 1 } else { i };
-    if k < 0 || melody_code(k) == 0 {
-        return (0, 0, 0);
-    }
-    let (mut j, mut go) = (k, true);
-    while go && j > 0 {
-        if melody_code(j) == 15 {
-            j -= 1;
-        } else {
-            go = false;
-        }
-    }
-    let (mut e, mut go) = (k, true);
-    while go && e < 63 {
-        if melody_code(e + 1) == 15 {
-            e += 1;
-        } else {
-            go = false;
-        }
-    }
-    (melody_code(j), j, e)
+    crate::synth::tune_note(melody_code, i, 64)
 }
 
 // The lead's tone: a quarter-width pulse, sliding from the note before
@@ -287,11 +250,7 @@ fn note_at(i: i32) -> (i32, i32, i32) {
 #[inline]
 fn lead_tone(rate: f32, f: f32, pf: f32, tau_: f32, dur: f32) -> f32 {
     let env = (1.0 - (-tau_ * 800.0).exp()) * (0.7 + 0.3 * (-tau_ * 8.0).exp()) * (if tau_ < dur { 1.0 } else { (-(tau_ - dur) * 40.0).exp() });
-    let depth = 0.012 * smoothstep(0.2, 0.4, tau_);
-    let wob = depth / (tau * 6.0) * (1.0 - (tau * 6.0 * tau_).cos());
-    let g = 0.03f32;
-    let slid = (pf / f - 1.0) * (if tau_ < g { tau_ - tau_ * tau_ / (2.0 * g) } else { 0.5 * g });
-    env * pulse(f * (tau_ + wob + slid), 0.25, f / rate)
+    env * pulse(f * crate::synth::sung_time(f, pf, tau_, 0.03, 0.012, 6.0, 0.2, 0.4), 0.25, f / rate)
 }
 
 // The tune in sections 2-4 (an octave down in the breakdown), and in 4 a

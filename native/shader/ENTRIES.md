@@ -42,7 +42,7 @@ the music when no frame buffers exist yet). Binding 4 is atomic in edge_mark
 | `edge_rays`    | `4 * edges` (indirect `args[0..3]`) | 0, 3, 4         | 5 |
 | `edge_resolve` | `edges` (indirect `args[3..6]`)     | 2, 4, 5         | 2 (edge pixels' colour: the mean of their 5 samples) |
 | `pack_pixels`  | `a_w * a_h`                | 0, 2                     | 1 (colour packed, and padding) |
-| `music`        | `a_m_n`                    | 0                        | 8 |
+| `music0` .. `music4` | `a_m_n`              | 0                        | 8 |
 | `soundboard`   | `modes` (64)               | 0, 8, 10 (slot (a_m_chunk - 1) % 2; none for chunk 0) | 9, 10 (slot a_m_chunk % 2) |
 | `music_mix`    | `a_m_n`                    | 0, 8, 9                  | 7 |
 
@@ -77,7 +77,7 @@ wrapped into [0, period) on the host in double precision), `a_m_rate`,
     Typical frames have 1-5% edge pixels.
 - Music (independent of the frame), a chunk at a time and in order
   (`a_m_chunk` counting them from 0: the soundboard's state carries over):
-  `music`, `soundboard`, `music_mix`, then read back binding 7 and finish
+  `music<song>` (the song's own kernel), `soundboard`, `music_mix`, then read back binding 7 and finish
   it on the host with `music::finish_chunk` (the room reverb, room.rs, whose
   state carries over there; sequential through its delay lines, it took 30
   ms a half-second chunk as GPU threads).
