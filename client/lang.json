@@ -173,7 +173,12 @@
     "loadout": {
       "title": "Loadout",
       "empty": "(empty)",
-      "back": "Back"
+      "back": "Back",
+      "assign": "Assign",
+      "clear": "Clear",
+      "press": "press a spell button…",
+      "full": "No slot free: clear a button first",
+      "used": "{used} of {slots} slots used"
     },
     "skill": {
       "soul": {
@@ -595,7 +600,12 @@
     "loadout": {
       "title": "Equipo de hechizos",
       "empty": "(vacío)",
-      "back": "Volver"
+      "back": "Volver",
+      "assign": "Asignar",
+      "clear": "Quitar",
+      "press": "pulsa un botón de hechizo…",
+      "full": "No hay ranuras libres: quita un botón primero",
+      "used": "{used} de {slots} ranuras en uso"
     },
     "skill": {
       "soul": {

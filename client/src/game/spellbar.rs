@@ -29,14 +29,15 @@ pub struct SpellBar {
     pub overheated: bool,
     // the spells he has (the others shown locked)
     pub unlocked: [bool; N_SPELLS],
-    // the spell in each of his slots (slot k cast by Spell(k)'s binding;
-    // none: an empty slot)
+    // the spell on each spell button (Spell(k)'s binding; none: empty), and
+    // how many may have one (his slots: those empty past it, locked)
     pub loadout: Vec<Option<usize>>,
+    pub slots: usize,
 }
 
 impl Default for SpellBar {
     fn default() -> Self {
-        SpellBar { device: Device::Keyboard, spell: 0, cooling: [0.0; N_SPELLS], heat: 0.0, overheated: false, unlocked: [true; N_SPELLS], loadout: vec![Some(0)] }
+        SpellBar { device: Device::Keyboard, spell: 0, cooling: [0.0; N_SPELLS], heat: 0.0, overheated: false, unlocked: [true; N_SPELLS], loadout: vec![Some(0)], slots: 1 }
     }
 }
 
@@ -48,8 +49,9 @@ impl SpellBar {
     // The glyphs, at the bottom right of `rect` (the view).
     pub fn ui(&self, ctx: &egui::Context, rect: Rect, binds: &Binds) {
         let pad = self.device == Device::Pad;
-        // (all four slots: those he has not yet, locked)
+        // (all four buttons: empty ones he has no slot for, locked)
         let n = 4;
+        let used = self.loadout.iter().flatten().count();
         // (the circles' centres, from the area's top left)
         let centres: Vec<Vec2> = if pad {
             let d = 1.5 * R + 5.0;
@@ -90,8 +92,8 @@ impl SpellBar {
                 let p = ui.painter();
                 for (slot, off) in centres.iter().enumerate() {
                     let c = area.min + *off;
-                    if slot >= self.loadout.len() {
-                        // (a slot he has yet to unlock: a padlock)
+                    if self.loadout.get(slot).copied().flatten().is_none() && used >= self.slots {
+                        // (a button he has no slot for: a padlock)
                         p.circle_filled(c, R, hud::bg(0.35));
                         p.circle_stroke(c, R, Stroke::new(1.0, hud::BORDER));
                         hud::paint_lock(p, c, 0.45 * R, hud::DIM);

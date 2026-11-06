@@ -187,6 +187,11 @@ pub trait Text: Sync {
     // loadout
     fn loadout_title(&self) -> &'static str; // Loadout
     fn loadout_empty(&self) -> &'static str; // (empty)
+    fn loadout_assign(&self) -> &'static str; // Assign
+    fn loadout_clear(&self) -> &'static str; // Clear
+    fn loadout_press(&self) -> &'static str; // press a spell button…
+    fn loadout_full(&self) -> &'static str; // No slot free: clear a button first
+    fn loadout_used(&self, used: usize, slots: usize) -> String; // {used} of {slots} slots used
     fn loadout_back(&self) -> &'static str; // Back
 
     // skill
