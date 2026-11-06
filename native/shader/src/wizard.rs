@@ -73,8 +73,9 @@ pub fn sample(prm: Params, dr: Drive, spells: &[f32], n_spells: i32, target: Vec
     let fl = flight_of(prm, dr, tm);
     let orb = to_world(fl, held_orb(prm, dr, tm));
     let c = c + spell_glow(prm, spells, n_spells, tm, to_world(fl, ro), to_world_dir(fl, rd), seen, orb);
-    // and round each enemy's orb, the glow his has (see enemy_orb_glow)
-    let c = c + enemy_orb_glow(prm, dr, tm, fl, ro, rd, seen);
+    // and round each enemy's orb, the glow his has; and every orb, small on
+    // screen, as a glow (see enemy_orb_glow)
+    let c = c + enemy_orb_glow(prm, dr, tm, fl, ro, rd, seen, 2.0 / (h as f32 * 2.414));
     (finish_pixel(prm, vw, h, x, y, c), seen)
 }
 
@@ -166,23 +167,47 @@ pub fn edge_offset(k: i32) -> (f32, f32) {
 // their spells' colours), along the ray ro + t rd (his space) in front of
 // what it sees: the density's integral along the ray, near enough (the
 // ray passing at distance d from a centre, the glass's radius r: e^-(d-r)/k
-// times sqrt(2 pi k d), k the glow's extent).
+// times sqrt(2 pi k d), k the glow's extent). And any orb, his too, so
+// small on screen (`pix` the angle a pixel spans) that its bright inside is
+// lost among its dark rim: a glow a pixel or two wide in its colour,
+// fading in as it shrinks, in its stead.
 #[inline(never)]
-pub fn enemy_orb_glow(prm: Params, dr: Drive, tm: f32, fl: Flight, ro: Vec3, rd: Vec3, seen: f32) -> Vec3 {
-    if !(has(prm.layers, layers_enemies)) || !(has(prm.layers, layers_glow)) {
+pub fn enemy_orb_glow(prm: Params, dr: Drive, tm: f32, fl: Flight, ro: Vec3, rd: Vec3, seen: f32, pix: f32) -> Vec3 {
+    if !(has(prm.layers, layers_glow)) {
         return splat(0.0);
     }
     let fs = foes_of(prm, dr);
     let level = glow_now(loop_angle(tm)).level;
     let mut c = splat(0.0);
+    // (a far orb's glow, at the ray's distance d from it, t along the ray)
+    let far = move |r: f32, t: f32, d: f32, tint: Vec3| {
+        let size = pix * t; // a pixel, there
+        let k = smoothstep(0.25 * r, 1.0 * r, size);
+        let w = 1.5 * size.maximum(r);
+        scale(1.4 * level * k * (-((d - r).maximum(0.0)) / w).exp(), tint)
+    };
+    // (his: by the spell in hand, as his orb's tint; not once defeated)
+    if has(prm.layers, layers_orb) && !him_dying(fs) {
+        let p = held_orb(prm, dr, tm);
+        let s = ftoi(round_even(dr.spell));
+        let tint = if s == 0 { vec(1.0, 0.42, 0.12) } else if s == 2 { vec(0.4, 0.88, 1.0) } else if s == 3 { vec(0.45, 1.0, 0.5) } else { prm.orb_glow_colour };
+        let t = dot(p - ro, rd);
+        if t > 0.0 && t < seen + orb_radius {
+            c = c + far(orb_radius, t, length(p - (ro + scale(t, rd))), tint);
+        }
+    }
+    if !(has(prm.layers, layers_enemies)) {
+        return c;
+    }
     let mut i = 0;
     while i < prm.enemies.min(max_enemies) {
         if let Some((p, r, tint)) = enemy_orb_at(prm, fs, i, tm, fl) {
             let t = dot(p - ro, rd);
-            if t > 0.0 && t < seen {
-                let d = length(p - (ro + scale(t, rd))).maximum(r);
+            if t > 0.0 && t < seen + r {
+                let d = length(p - (ro + scale(t, rd)));
                 let k = prm.orb_glow_extent * (r / orb_radius);
-                c = c + scale(prm.orb_glow * level * (-(d - r) / k).exp() * (2.0 * PI * k * d).sqrt(), tint);
+                c = c + scale(prm.orb_glow * level * (-(d.maximum(r) - r) / k).exp() * (2.0 * PI * k * d.maximum(r)).sqrt(), tint)
+                    + far(r, t, d, tint);
             }
         }
         i += 1;
