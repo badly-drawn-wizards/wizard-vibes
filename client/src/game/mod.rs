@@ -190,16 +190,15 @@ struct Death {
 
 const DEATH_SLOW: f32 = 2.0;
 
-// The skill tree, open (over everything, the game paused): the skill
-// picked, and where the view is (the tree's space, points, its middle at
-// the root), easing to the one picked unless being dragged; and whether it
-// was opened from the pause menu (it goes back there) or the defeat screen.
+// The skill tree, open (from the defeat screen, the only way to it: over
+// everything, the game paused): the skill picked, and where the view is
+// (the tree's space, points, its middle at the root), easing to the one
+// picked unless being dragged.
 #[derive(Clone, Copy, Debug)]
 struct Tree {
     sel: usize,
     pan: Vec2,
     dragging: bool,
-    from_menu: bool,
 }
 
 // (the tree's cells, points)
@@ -633,8 +632,12 @@ impl Game {
             self.time += dt * self.time_scale();
         }
         self.orbit.idle(dt);
-        let pad = self.pads.read(&self.binds);
-        self.pad_connected = pad.is_some();
+        // (read every frame, so nothing held seems newly pressed later; but
+        // only heeded while the window has the focus: natively a controller
+        // reaches every window)
+        let read = self.pads.read(&self.binds);
+        self.pad_connected = read.is_some();
+        let pad = read.filter(|_| ctx.input(|i| i.focused));
         // (a binding being taken: the button pressed, if it is the
         // controller's; nothing else acts on the controller meanwhile, nor
         // on the press that ends it)
@@ -887,22 +890,17 @@ impl Game {
     }
 
     // The skill tree, asked for from the defeat screen.
+    // (at the skill last looked at)
     fn ask_skills(&mut self) {
-        self.open_tree(false);
-    }
-
-    // Opens the skill tree (from the pause menu, or the defeat screen),
-    // at the skill last looked at.
-    pub fn open_tree(&mut self, from_menu: bool) {
         let sel = self.skill_shown.min(skills::SKILLS.len() - 1);
         self.paused = true;
-        self.tree = Some(Tree { sel, pan: tree_at(sel), dragging: false, from_menu });
+        self.tree = Some(Tree { sel, pan: tree_at(sel), dragging: false });
     }
 
-    // Back to where it was opened from.
+    // Back to the defeat screen.
     fn close_tree(&mut self) {
-        if let Some(t) = self.tree.take() {
-            self.paused = t.from_menu;
+        if self.tree.take().is_some() {
+            self.paused = false;
         }
     }
 
@@ -1365,7 +1363,7 @@ impl Game {
                     });
                 });
             if self.tree.is_some() {
-                self.tree = Some(Tree { sel: t.sel, pan: t.pan, dragging: t.dragging, from_menu: t.from_menu });
+                self.tree = Some(Tree { sel: t.sel, pan: t.pan, dragging: t.dragging });
             }
             if buy {
                 self.tree_buy();

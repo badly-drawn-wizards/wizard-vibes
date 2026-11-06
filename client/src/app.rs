@@ -404,7 +404,6 @@ impl App {
         let nav = &mut self.nav;
         let names = ["Settings", "Controls", "Parameters"].map(tr);
         let pad = self.game.device() == crate::game::spellbar::Device::Pad;
-        let mut open_tree = false;
         egui::Window::new(tr("Paused"))
             .id(egui::Id::unique("pause-menu"))
             .order(egui::Order::Foreground)
@@ -433,13 +432,6 @@ impl App {
                             ui.add_space(4.0);
                             crate::game::hud::chip(ui, crate::game::hud::Chip::Shoulder("RT"));
                         }
-                        // (and the skill tree, a screen of its own)
-                        ui.add_space(12.0);
-                        let r = crate::game::hud::fill_toggle(ui, tr("Skill tree"), false);
-                        nav.item(ui, &r);
-                        if r.clicked() {
-                            open_tree = true;
-                        }
                     });
                     self.tabs_width = tabs.response.rect.width();
                 });
@@ -462,9 +454,6 @@ impl App {
             });
         self.nav.end();
         self.game.menu_holds = self.nav.held();
-        if open_tree {
-            self.game.open_tree(true);
-        }
     }
 
     // The settings tab: a row of the navigation for each setting.
