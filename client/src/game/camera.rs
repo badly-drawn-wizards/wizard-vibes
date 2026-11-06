@@ -18,7 +18,7 @@ impl Default for Orbit {
     }
 }
 
-const PITCH_MIN: f32 = -0.05;
+const PITCH_MIN: f32 = -0.9; // (looking up: see camera_ray in wizard.rs)
 const PITCH_MAX: f32 = 1.2;
 
 impl Orbit {
@@ -39,6 +39,16 @@ impl Orbit {
     pub fn wheel(&mut self, delta_y: f32) {
         self.interacted = true;
         self.cam.dist = (self.cam.dist * (delta_y * 0.001).exp()).clamp(2.5, 12.0);
+    }
+
+    // Zooms by `amount` (positive out: the distance grows by e^amount), e.g.
+    // from a controller's D-pad held.
+    pub fn zoom(&mut self, amount: f32) {
+        if amount == 0.0 {
+            return;
+        }
+        self.interacted = true;
+        self.cam.dist = (self.cam.dist * amount.exp()).clamp(2.5, 12.0);
     }
 
     // Turns the camera by (dyaw, dpitch), e.g. from a controller's stick.

@@ -197,6 +197,15 @@ impl FreeFlight {
         self.climb += (self.vel[1] - self.climb) * (1.0 - (-dt / 0.3).exp());
     }
 
+    // Brings him to a stop (quickly: over a few tenths of a second), e.g.
+    // while channelling.
+    pub fn brake(&mut self, dt: f32) {
+        let k = (-dt * 8.0).exp();
+        for v in &mut self.vel {
+            *v *= k;
+        }
+    }
+
     // Pushes the rock out of the land the probe found it in: per sphere,
     // [distance to the land (negative inside), normal x, y, z].
     pub fn collide(&mut self, probe: &[f32]) {

@@ -254,6 +254,7 @@ impl Game {
                     Key::Num1 => self.spells.select(0),
                     Key::Num2 => self.spells.select(1),
                     Key::Num3 => self.spells.select(2),
+                    Key::Num4 => self.spells.select(3),
                     Key::Enter if self.combat.enemies.down >= 0.0 => self.combat.reset(&mut self.spells),
                     _ => {}
                 }
@@ -306,8 +307,10 @@ impl Game {
         self.help.spell = self.spells.selected;
         // right stick: look right turns the view right (the camera's yaw is its
         // azimuth round him, so it decreases), up raises the view
+        // (and the D-pad zooms)
         if let Some(p) = &pad {
             self.orbit.nudge(-2.5 * p.look[0] * dt, -1.5 * p.look[1] * dt);
+            self.orbit.zoom(1.5 * p.zoom * dt);
         }
         // The camera orbits in his frame, which turns with him; in free flight
         // keep it still in the world instead, so W (along the camera) does not
@@ -315,7 +318,14 @@ impl Game {
         // in fut/wizard.fut looks along -(sin yaw, cos yaw) in his frame.)
         let heading = self.flight.heading;
         let stick = pad.map(|p| Stick { fwd: p.mov[1], side: p.mov[0], up: p.up, boost: p.boost });
+        // (channelling healing, he cannot move: no input, and he is brought
+        // to a stop)
+        let channelling = self.spells.channel >= 0.0;
+        let (held, stick) = if channelling { (flight::Held::default(), None) } else { (held, stick) };
         self.flight.update(game_dt, self.time, heading + self.orbit.cam.yaw + PI, &held, stick.as_ref());
+        if channelling {
+            self.flight.brake(game_dt);
+        }
         if self.flight.active {
             self.orbit.cam.yaw -= self.flight.heading - heading;
         }

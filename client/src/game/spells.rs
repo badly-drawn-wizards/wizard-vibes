@@ -1,5 +1,6 @@
 // Spells (web/spells.ts): fire bolt, lightning strike and wind blade, cast
-// from the orb along the camera's view. Their state lives here; each frame
+// from the orb along the camera's view; and healing, channelled (see
+// combat.rs: while it is held he heals, and cannot move). Their state lives here; each frame
 // it goes to the renderer as a flat array (see fut/spells.fut), and the
 // collision probe (fut/collide.fut) reports the land at each one: a fire
 // bolt bursts where it hits, a wind blade breaks up, and a lightning strike
@@ -17,7 +18,8 @@
 use super::vec::{dist, dot, len, sub, V3};
 use super::Rng;
 
-pub const SPELL_NAMES: [&str; 3] = ["Fire bolt", "Lightning strike", "Wind blade"];
+pub const SPELL_NAMES: [&str; 4] = ["Fire bolt", "Lightning strike", "Wind blade", "Healing"];
+pub const HEALING: usize = 3; // (the spell number: channelled, not cast)
 
 // kinds, as in fut/spells.fut
 pub const FIRE: u32 = 0;
@@ -26,11 +28,12 @@ pub const WIND: u32 = 2;
 pub const BURST: u32 = 3;
 pub const GUST: u32 = 4; // a wind blade's burst into small blades
 pub const MARK: u32 = 5; // where a strike is about to land
+pub const HEAL: u32 = 6; // healing being channelled, round him
 pub const STRIDE: usize = 10;
 
-const LIFE: [f32; 6] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1]; // seconds, by kind
-const SPEED: [f32; 3] = [30.0, 0.0, 24.0]; // units/s
-const COOLDOWN: [f32; 3] = [0.25, 0.5, 0.3]; // seconds before the next cast
+const LIFE: [f32; 7] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3]; // seconds, by kind
+const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s
+const COOLDOWN: [f32; 4] = [0.25, 0.5, 0.3, 0.0]; // seconds before the next cast
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
 const STRIKE_HEIGHT: f32 = 25.0; // it comes down from this far above the orb
 const PROBE_HEIGHT: f32 = 60.0; // a strike's ground is probed from up here
@@ -86,6 +89,9 @@ pub struct Spells {
     pub since_cast: f32, // seconds
     pub targets: Vec<Target>,
     pub events: Vec<SpellEvent>,
+    // seconds he has been channelling healing (or -1), and where he is
+    pub channel: f32,
+    pub here: V3,
     items: Vec<Spell>,
     cooldown: f32,
     next_id: u32,
@@ -100,6 +106,8 @@ impl Default for Spells {
             since_cast: 10.0,
             targets: Vec::new(),
             events: Vec::new(),
+            channel: -1.0,
+            here: [0.0; 3],
             items: Vec::new(),
             cooldown: 0.0,
             next_id: 1,
@@ -340,6 +348,14 @@ impl Spells {
             let slot = [
                 s.kind as f32, s.pos[0], s.pos[1], s.pos[2], extra[0], extra[1], extra[2], s.age, s.life, s.seed,
             ];
+            out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
+        }
+        // (channelling, the healing round him: in the first free slot, or
+        // the last)
+        if self.channel >= 0.0 && self.limit > 0 {
+            let i = self.items.len().min(self.limit - 1);
+            let [x, y, z] = self.here;
+            let slot = [HEAL as f32, x, y, z, 0.0, 0.0, 0.0, self.channel, LIFE[HEAL as usize], 7.0];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
         out

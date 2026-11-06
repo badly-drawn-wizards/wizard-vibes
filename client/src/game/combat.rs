@@ -8,15 +8,16 @@
 // until he tries again (its button, Enter, or the reset button).
 
 use super::enemies::{EnemyEvent, Enemies, PLAYER_HP};
-use super::mana::{Mana, MANA, SPELL_COST};
+use super::mana::{Mana, HEAL_DRAIN, MANA, SPELL_COST};
 use super::shield::Shield;
 use super::sfx;
-use super::spells::{Sound, SpellEvent, Spells, FIRE, MARK, STRIKE};
+use super::spells::{Sound, SpellEvent, Spells, FIRE, HEALING, MARK, STRIKE};
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
 
-const CAST_SOUND: [usize; 3] = [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND];
+const CAST_SOUND: [usize; 4] = [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP];
+const HEAL_RATE: f32 = 1.4; // health a second, channelling
 
 // What the fight needs to know of the frame.
 #[derive(Clone, Copy, Debug)]
@@ -56,6 +57,7 @@ pub struct Combat {
     pub mana: Mana,
     pub shield: Shield,
     fizzled: f32, // when the last fizzle sounded (holding the key does not drone)
+    healed: f32,  // healing channelled towards the next point of health
     here: (V3, V3), // him, and the way he looks
     started: bool,  // the fight has an arena (it starts with the first enemies)
     // sounds to play
@@ -70,6 +72,7 @@ impl Default for Combat {
             mana: Mana::default(),
             shield: Shield::default(),
             fizzled: -1.0,
+            healed: 0.0,
             here: ([0.0; 3], [0.0, 0.0, 1.0]),
             started: false,
             sfx: Vec::new(),
@@ -111,7 +114,30 @@ impl Combat {
         self.shield.update(m.dt, m.shielding, able, &mut self.mana);
         self.shield_sounds();
         self.enemies.shielded = self.shield.up();
-        if able && !self.shield.raised_now() && m.casting && spells.ready() {
+        // healing: channelled while held (with the mana for it), health
+        // coming back steadily; he cannot move meanwhile (see Game::step)
+        if spells.selected == HEALING {
+            let channel = able && !self.shield.raised_now() && m.casting && self.mana.drain(HEAL_DRAIN * m.dt);
+            if channel {
+                if spells.channel < 0.0 {
+                    spells.channel = 0.0;
+                    self.sfx.push(sfx::here(CAST_SOUND[HEALING]));
+                }
+                spells.channel += m.dt;
+                spells.since_cast = 0.0;
+                self.healed += HEAL_RATE * m.dt;
+                while self.healed >= 1.0 {
+                    self.healed -= 1.0;
+                    self.enemies.hp = (self.enemies.hp + 1).min(PLAYER_HP);
+                }
+            } else {
+                spells.channel = -1.0;
+            }
+        } else {
+            spells.channel = -1.0;
+        }
+        spells.here = m.him;
+        if spells.selected != HEALING && able && !self.shield.raised_now() && m.casting && spells.ready() {
             if self.mana.spend(SPELL_COST[spells.selected]) {
                 spells.cast(m.origin, m.dir, rng);
                 self.sfx.push(sfx::here(CAST_SOUND[spells.selected]));
@@ -235,6 +261,28 @@ mod tests {
             casting: false,
             shielding: false,
         }
+    }
+
+    #[test]
+    fn healing_is_channelled() {
+        let mut c = Combat::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(1);
+        spells.select(HEALING);
+        c.enemies.hp = 4;
+        // two seconds held: health back, mana drawn, no spell cast
+        let m = Moment { casting: true, n: 0, ..moment() };
+        for _ in 0..120 {
+            c.update(&m, &mut spells, &mut rng);
+        }
+        assert!(c.enemies.hp >= 6, "{}", c.enemies.hp);
+        assert!(c.mana.value < MANA - 20.0);
+        assert!(spells.channel > 1.9);
+        assert_eq!(spells.count(), 0);
+        // let go: it stops
+        let m = Moment { casting: false, n: 0, ..moment() };
+        c.update(&m, &mut spells, &mut rng);
+        assert!(spells.channel < 0.0);
     }
 
     #[test]

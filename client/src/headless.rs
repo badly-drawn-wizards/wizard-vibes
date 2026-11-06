@@ -22,6 +22,8 @@ pub struct Options {
     pub drive: Vec<(String, f32)>,
     // --camera YAW,PITCH,DIST: the shot's camera, for the page's
     pub camera: Option<crate::types::Camera>,
+    // --spell KIND,X,Y,Z,AGE: spells in the shot (world space; see spells.rs)
+    pub spells: Vec<f32>,
     pub wgsl: bool,
     // --music N: N frames of music from t0 on the GPU, checked against the
     // shader crate's own on the CPU
@@ -91,7 +93,8 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     eprintln!("shader: {} in {:.1} s", if shader.spirv { "SPIR-V" } else { "WGSL" }, t.elapsed().as_secs_f32());
     let (vw, h) = o.size;
     let mut frame = Frame::default();
-    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells: 0, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
+    let n_spells = (o.spells.len() / 10) as u32;
+    let args = |tm: f32, cam| Args { vw, h, tm, camera: cam, n_spells, m_t0: 0.0, m_rate: 0.0, m_n: 0, m_chunk: 0, m_song: 0 };
     let timer = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
         (
             device.create_query_set(&wgpu::QuerySetDescriptor { label: None, ty: wgpu::QueryType::Timestamp, count: 2 }),
@@ -137,7 +140,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
     }
     if let Some(path) = &o.shot {
         let mut enc = device.create_command_encoder(&Default::default());
-        frame.record(&device, &queue, &mut enc, &shader, &values, drive, &args(o.t0, o.camera.unwrap_or(PAGE_CAMERA)), &[]);
+        frame.record(&device, &queue, &mut enc, &shader, &values, drive, &args(o.t0, o.camera.unwrap_or(PAGE_CAMERA)), &o.spells);
         let w = padded(vw);
         let size = w as u64 * h as u64 * 4;
         let read = device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });

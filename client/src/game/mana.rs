@@ -5,8 +5,10 @@ pub const MANA: f32 = 100.0;
 const REGEN: f32 = 14.0; // per second
 const PAUSE: f32 = 0.6; // seconds after spending before it refills
 
-// What each spell costs (fire bolt, lightning strike, wind blade).
-pub const SPELL_COST: [f32; 3] = [12.0, 25.0, 8.0];
+// What each spell costs (fire bolt, lightning strike, wind blade; healing
+// costs by the second instead: HEAL_DRAIN).
+pub const SPELL_COST: [f32; 4] = [12.0, 25.0, 8.0, 0.0];
+pub const HEAL_DRAIN: f32 = 16.0; // a second, while channelling healing
 
 #[derive(Clone, Debug)]
 pub struct Mana {

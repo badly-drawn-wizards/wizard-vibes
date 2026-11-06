@@ -69,7 +69,7 @@ pub fn media(pose: Pose, g: Glow, p: Vec3) -> MediaSample {
         no_media
     } else if pose.spell == 0 {
         fire_media(pose.secs, q)
-    } else if pose.spell == 2 {
+    } else if pose.spell == 2 || pose.spell == 3 {
         wind_media(pose.secs, q)
     } else {
         let l = lightning_media(tm, q);

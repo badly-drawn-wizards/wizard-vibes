@@ -14,11 +14,11 @@ pub enum Device {
 }
 
 const KEYBOARD: &[(&str, &[Chip])] = &[
-    ("Mode: fixed · flight · fight", &[Key("F")]),
+    ("Mode", &[Key("F")]),
     ("Fly", &[Key("W"), Key("A"), Key("S"), Key("D")]),
     ("Climb / descend", &[Key("E"), Text(" / "), Key("Q")]),
     ("Boost", &[Key("Shift")]),
-    ("Spell", &[Key("1"), Key("2"), Key("3")]),
+    ("Spell", &[Key("1"), Key("2"), Key("3"), Key("4")]),
     ("Cast", &[Key("Space")]),
     ("Shield", &[Key("R"), Text(" (hold)")]),
     ("Try again (defeated)", &[Key("Enter")]),
@@ -28,15 +28,15 @@ const KEYBOARD: &[(&str, &[Chip])] = &[
 ];
 
 const PAD: &[(&str, &[Chip])] = &[
-    ("Mode: fixed · flight · fight", &[Face('Y'), Text(" / "), Shoulder("≡")]),
+    ("Mode", &[Shoulder("≡")]),
     ("Fly", &[Stick('L')]),
     ("Camera", &[Stick('R')]),
+    ("Zoom in / out", &[Text("D-pad ↑ / ↓")]),
     ("Climb / descend", &[Shoulder("RT"), Text(" / "), Shoulder("LT")]),
     ("Boost", &[Stick('L'), Text("↓")]),
-    ("Spell", &[Face('X'), Face('A'), Face('B')]),
+    ("Spell", &[Face('X'), Face('A'), Face('B'), Face('Y')]),
     ("Cast", &[Shoulder("RB")]),
     ("Shield", &[Shoulder("LB"), Text(" (hold)")]),
-    ("Try again (defeated)", &[Face('A')]),
     ("Reset the fight", &[ShoulderIcon(hud::Icon::View)]),
 ];
 
@@ -109,8 +109,11 @@ impl Help {
                     let (line, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), egui::Sense::hover());
                     ui.painter().rect_filled(line, 0, hud::BORDER);
                     ui.add_space(4.0);
-                    let keys: [Chip; 3] =
-                        if self.device == Device::Pad { [Face('X'), Face('A'), Face('B')] } else { [Key("1"), Key("2"), Key("3")] };
+                    let keys: [Chip; 4] = if self.device == Device::Pad {
+                        [Face('X'), Face('A'), Face('B'), Face('Y')]
+                    } else {
+                        [Key("1"), Key("2"), Key("3"), Key("4")]
+                    };
                     ui.spacing_mut().item_spacing.y = 3.0;
                     for (i, name) in SPELL_NAMES.iter().enumerate() {
                         let on = i == self.spell;

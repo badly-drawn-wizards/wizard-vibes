@@ -13,9 +13,12 @@ pub const default_target: Vec3 = Vec3::new(0.0, 1.15, 0.0);
 // Camera orbiting a target: the ray through image point (x, y), in pixels
 // from its top left.
 pub fn camera_ray(target: Vec3, vw: i32, h: i32, yaw: f32, pitch: f32, dst: f32, x: f32, y: f32) -> (Vec3, Vec3) {
-    let ro = target + scale(dst, vec(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos()));
+    // (orbiting the target; kept above his platform, but still looking the
+    // orbit's way: below the horizon, it looks up past him, as he aims)
+    let back = vec(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
+    let ro = target + scale(dst, back);
     let ro = vec(ro.x, ro.y.maximum(0.1), ro.z);
-    let fw = normalise(target - ro);
+    let fw = scale(-1.0, back);
     let rt = normalise(cross(fw, vec(0.0, 1.0, 0.0)));
     let up = cross(rt, fw);
     let fh = h as f32;

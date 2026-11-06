@@ -27,6 +27,7 @@ pub const spell_wind: i32 = 2;
 pub const spell_burst: i32 = 3;
 pub const spell_gust: i32 = 4;
 pub const spell_mark: i32 = 5;
+pub const spell_heal: i32 = 6;
 
 // Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 // (distance, t, and how far beyond tmax the nearest point of the segment
@@ -178,7 +179,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             let centre = p - scale(0.035 * k as f32, q);
             let (core, halo, t, behind) = crescent(o, d, tmax, centre, f, s, width, bend, 0.07 - 0.012 * k as f32);
             let k_gain = (0.45f32).powf(k as f32);
-            c = c + scale(k_gain * fade * seen(t, behind, 0.2), scale(3.2 * core, vec(0.85, 1.0, 0.95)) + scale(0.4 * halo, vec(0.4, 0.85, 0.75)));
+            c = c + scale(k_gain * fade * seen(t, behind, 0.2), scale(3.2 * core, vec(0.8, 0.97, 1.0)) + scale(0.4 * halo, vec(0.3, 0.8, 1.0)));
             k += 1;
         }
         c
@@ -201,7 +202,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             let s = scale(roll.cos(), side) + scale(roll.sin(), up);
             let size = 0.5 * (1.0 - 0.5 * age / life);
             let (core, halo, t, behind) = crescent(o, d, tmax, centre, dir, s, size, 0.45 * size, 0.05);
-            blades = blades + scale(seen(t, behind, 0.2), scale(3.5 * core, vec(0.85, 1.0, 0.95)) + scale(0.45 * halo, vec(0.4, 0.85, 0.75)));
+            blades = blades + scale(seen(t, behind, 0.2), scale(3.5 * core, vec(0.8, 0.97, 1.0)) + scale(0.45 * halo, vec(0.3, 0.8, 1.0)));
             j += 1;
         }
         let (gd, gt, gb) = ray_segment(o, d, tmax, p, p);
@@ -209,7 +210,7 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             let u = (gd - 5.0 * age) / (0.2 + 0.3 * age);
             (-(u * u)).exp() * (-4.0 * age).exp()
         };
-        scale(fade, blades + scale(0.8 * ring * seen(gt, gb, 1.0), vec(0.6, 0.95, 0.85)))
+        scale(fade, blades + scale(0.8 * ring * seen(gt, gb, 1.0), vec(0.5, 0.88, 1.0)))
     } else if kind == spell_strike {
         // a jagged bolt from the sky, re-forking several times a second,
         // flashing as it fades, with a flash on the ground
@@ -256,6 +257,32 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             scale(seen(t, behind, 0.5), scale(3.0 * core, vec(1.0, 0.25, 0.3)) + scale(0.25 * halo, vec(1.0, 0.1, 0.15)))
                 + scale(u * seen(bt, bb, 0.5), scale(1.5 * bcore, vec(1.0, 0.4, 0.4)) + scale(0.1 * bhalo, vec(1.0, 0.1, 0.1))),
         )
+    } else if kind == spell_heal {
+        // healing, channelled: green motes spiralling up round him (p his
+        // feet), each with a short trail, and a soft column of light; it
+        // comes up as the channelling starts
+        let on = smoothstep(0.0, 0.4, age);
+        let mut c = splat(0.0);
+        let mut j = 0;
+        while j < 14 {
+            let h = move |n: i32| hash2(j * 13 + n, 57);
+            let mote = move |a: f32| {
+                let rise = fract(0.45 * a + h(1));
+                let ang = 2.0 * PI * h(2) + (2.0 + 1.5 * h(3)) * a;
+                let r = 0.85 - 0.35 * rise;
+                (p + vec(r * ang.cos(), -0.2 + 2.6 * rise, r * ang.sin()), rise)
+            };
+            let (now, rise) = mote(age);
+            let (then, _) = mote((age - 0.03).maximum(0.0));
+            let (dist, t, behind) = ray_segment(o, d, tmax, if (then - now).length() < 0.5 { then } else { now }, now);
+            let (core, halo) = glow_line(0.02, 0.08, dist);
+            let life_of = smoothstep(0.0, 0.1, rise) * smoothstep(1.0, 0.6, rise);
+            c = c + scale(life_of * seen(t, behind, 0.3), scale(2.5 * core, vec(0.6, 1.0, 0.6)) + scale(0.3 * halo, vec(0.3, 1.0, 0.4)));
+            j += 1;
+        }
+        let (cd, ct, cb) = ray_segment(o, d, tmax, p, p + vec(0.0, 2.2, 0.0));
+        let column = 0.3 * 0.3 / (cd * cd + 0.3 * 0.3);
+        scale(on, c + scale(0.05 * column * seen(ct, cb, 1.0), vec(0.3, 1.0, 0.45)))
     } else {
         splat(0.0)
     }

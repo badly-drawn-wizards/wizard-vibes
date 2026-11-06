@@ -245,14 +245,18 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let orb_tint = if spell == 0 {
         vec(1.0, 0.42, 0.12)
     } else if spell == 2 {
-        vec(0.5, 1.0, 0.75)
+        vec(0.4, 0.88, 1.0)
+    } else if spell == 3 {
+        vec(0.45, 1.0, 0.5)
     } else {
         prm.orb_glow_colour
     };
     let bolt_tint = if spell == 0 {
         vec(1.5, 0.65, 0.25)
     } else if spell == 2 {
-        vec(0.75, 1.25, 0.95)
+        vec(0.7, 1.1, 1.3)
+    } else if spell == 3 {
+        vec(0.7, 1.3, 0.75)
     } else {
         splat(1.0)
     };

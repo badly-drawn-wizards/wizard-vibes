@@ -91,7 +91,7 @@ pub fn wind_media(secs: f32, q: Vec3) -> MediaSample {
     let wisp = wisps * (-(dt * dt) / 0.00015).exp();
     MediaSample {
         cap: if r < orb_radius { 0.012 } else { 0.3 * dt + 0.004 },
-        radiance: scale(13.0 * swirl, vec(0.6, 1.0, 0.8)) + scale(5.0 * wisp, vec(0.75, 1.0, 0.9)),
+        radiance: scale(13.0 * swirl, vec(0.45, 0.9, 1.0)) + scale(5.0 * wisp, vec(0.7, 0.95, 1.0)),
         extinction: 0.0,
     }
 }
