@@ -35,6 +35,12 @@ pub const SKILLS: &[Skill] = &[
     Skill { id: "reaper", name: "Reaper", what: "One more soul from each defeat", levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
 ];
 
+// Whether a skill unlocks something new (a spell, or a spell slot), rather
+// than improving: drawn as a hexagon.
+pub fn unlocks(s: &Skill) -> bool {
+    matches!(s.id, "lightning" | "wind" | "healing" | "slot2" | "slot3" | "slot4")
+}
+
 pub fn skill(id: &str) -> Option<&'static Skill> {
     SKILLS.iter().find(|s| s.id == id)
 }

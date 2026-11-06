@@ -190,6 +190,10 @@ impl App {
             game: {
                 let mut g = Game::new(storage);
                 g.set_build(&info);
+                // (?open=tree or loadout: that screen at once)
+                if let Some(w) = url_param("open") {
+                    g.open_screen(&w);
+                }
                 g
             },
             audio: Audio::new(storage),

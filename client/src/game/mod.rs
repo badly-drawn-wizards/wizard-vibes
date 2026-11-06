@@ -209,6 +209,38 @@ struct Tree {
 // (the tree's cells, points)
 const TREE_CELL: f32 = 120.0;
 
+// A way from a to b in the skill tree, bowed a little to one side: its
+// points.
+fn edge_curve(a: egui::Pos2, b: egui::Pos2, bow: f32) -> Vec<egui::Pos2> {
+    let d = b - a;
+    let side = Vec2::new(-d.y, d.x).normalized() * bow * (d.length() / (2.0 * TREE_CELL)).min(1.0);
+    let mid = a + 0.5 * d + side;
+    (0..=24)
+        .map(|j| {
+            let t = j as f32 / 24.0;
+            let u = 1.0 - t;
+            egui::pos2(u * u * a.x + 2.0 * u * t * mid.x + t * t * b.x, u * u * a.y + 2.0 * u * t * mid.y + t * t * b.y)
+        })
+        .collect()
+}
+
+// The point a fraction f of the way along pts.
+fn along(pts: &[egui::Pos2], f: f32) -> egui::Pos2 {
+    let x = f.clamp(0.0, 1.0) * (pts.len() - 1) as f32;
+    let i = (x as usize).min(pts.len() - 2);
+    pts[i] + (pts[i + 1] - pts[i]) * (x - i as f32)
+}
+
+// A hexagon round c, its corners r from it, one at the top.
+fn hexagon(c: egui::Pos2, r: f32) -> Vec<egui::Pos2> {
+    (0..6)
+        .map(|k| {
+            let a = std::f32::consts::FRAC_PI_3 * k as f32;
+            c + Vec2::new(a.sin(), -a.cos()) * r
+        })
+        .collect()
+}
+
 // Where skill k is in the tree's space (points).
 fn tree_at(k: usize) -> Vec2 {
     let s = &skills::SKILLS[k];
@@ -988,6 +1020,16 @@ impl Game {
         self.loadout[k] = next;
     }
 
+    // A screen opened as the page asks (?open=tree or ?open=loadout: for
+    // looking at them without a defeat first).
+    pub fn open_screen(&mut self, what: &str) {
+        match what {
+            "tree" => self.ask_skills(),
+            "loadout" => self.open_loadout(),
+            _ => {}
+        }
+    }
+
     // The loadout screen, from the defeat screen (paused while open), and
     // back.
     fn open_loadout(&mut self) {
@@ -1488,10 +1530,37 @@ impl Game {
             let mid = area.center() + Vec2::new(0.0, -20.0);
             let at = |k: usize| mid + tree_at(k) - t.pan;
             let blue = egui::Color32::from_rgb(0x6f, 0xb4, 0xff);
+            // the ways between them: curving a little; learnt, glowing, with
+            // sparks flowing out along them from the root; open to learn,
+            // a line that breathes; else faint and dashed
+            let now = ui.input(|i| i.time) as f32;
             for (k, s) in SKILLS.iter().enumerate() {
                 if let Some(n) = s.needs.and_then(|n| SKILLS.iter().position(|x| x.id == n)) {
-                    let lit = self.skills.level(s.id) > 0;
-                    p.line_segment([at(n), at(k)], egui::Stroke::new(if lit { 3.0 } else { 1.5 }, if lit { blue } else { hud::BORDER }));
+                    let pts = edge_curve(at(n), at(k), 32.0);
+                    if self.skills.level(s.id) > 0 {
+                        p.add(egui::Shape::line(pts.clone(), egui::Stroke::new(9.0, blue.gamma_multiply(0.12))));
+                        p.add(egui::Shape::line(pts.clone(), egui::Stroke::new(4.0, blue.gamma_multiply(0.35))));
+                        p.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.6, egui::Color32::from_rgb(0xd8, 0xec, 0xff))));
+                        for j in 0..3 {
+                            let f = (now * 0.45 + j as f32 / 3.0 + 0.13 * k as f32).fract();
+                            let q = along(&pts, f);
+                            let a = (std::f32::consts::PI * f).sin();
+                            p.circle_filled(q, 4.5, blue.gamma_multiply(0.25 * a));
+                            p.circle_filled(q, 2.0, egui::Color32::WHITE.gamma_multiply(a));
+                        }
+                        ctx.request_repaint();
+                    } else if self.skills.cost(s).is_some() {
+                        let b = 0.55 + 0.25 * (now * 2.4 + k as f32).sin();
+                        p.add(egui::Shape::line(pts.clone(), egui::Stroke::new(5.0, hud::FG.gamma_multiply(0.06 * b))));
+                        p.add(egui::Shape::line(pts, egui::Stroke::new(1.6, hud::FG.gamma_multiply(b))));
+                        ctx.request_repaint();
+                    } else {
+                        for seg in pts.chunks(2).step_by(2) {
+                            if let [a, b] = seg {
+                                p.line_segment([*a, *b], egui::Stroke::new(1.2, hud::BORDER));
+                            }
+                        }
+                    }
                 }
             }
             for (k, s) in SKILLS.iter().enumerate() {
@@ -1519,11 +1588,22 @@ impl Game {
                 } else {
                     (hud::BORDER, hud::BORDER)
                 };
-                p.circle_filled(c, r, hud::bg(1.0));
-                if level > 0 {
-                    p.circle_filled(c, r, blue.gamma_multiply(0.25));
+                // (an unlock, a spell or a slot, a hexagon; the rest round)
+                let edge = egui::Stroke::new(if k == t.sel { 3.0 } else { 1.5 }, if k == t.sel { hud::FOCUS } else { ring });
+                if skills::unlocks(s) {
+                    let hex = hexagon(c, 1.12 * r);
+                    p.add(egui::Shape::convex_polygon(hex.clone(), hud::bg(1.0), egui::Stroke::NONE));
+                    if level > 0 {
+                        p.add(egui::Shape::convex_polygon(hex.clone(), blue.gamma_multiply(0.25), egui::Stroke::NONE));
+                    }
+                    p.add(egui::Shape::closed_line(hex, edge));
+                } else {
+                    p.circle_filled(c, r, hud::bg(1.0));
+                    if level > 0 {
+                        p.circle_filled(c, r, blue.gamma_multiply(0.25));
+                    }
+                    p.circle_stroke(c, r, edge);
                 }
-                p.circle_stroke(c, r, egui::Stroke::new(if k == t.sel { 3.0 } else { 1.5 }, if k == t.sel { hud::FOCUS } else { ring }));
                 hud::paint_skill(&p, c, 0.6 * r, s.id, ink);
                 for l in 0..s.levels {
                     let x = c.x + (l as f32 - 0.5 * (s.levels - 1) as f32) * 10.0;

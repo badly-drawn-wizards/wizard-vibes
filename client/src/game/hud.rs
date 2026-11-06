@@ -691,6 +691,16 @@ pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32
                 p.add(Shape::line(pts, Stroke::new(1.6, colour)));
             }
         }
+        "slot2" | "slot3" | "slot4" => {
+            // a spell slot: a ring, and as many dots as slots it brings
+            let n = id[4..].parse::<usize>().unwrap_or(2);
+            p.circle_stroke(c, 0.55 * r, Stroke::new(1.6, colour));
+            for k in 0..n {
+                let a = std::f32::consts::TAU * k as f32 / n as f32;
+                p.circle_filled(c + Vec2::new(a.sin(), -a.cos()) * 0.85 * r, 0.14 * r, colour);
+            }
+            p.circle_filled(c, 0.18 * r, colour);
+        }
         _ => {
             p.circle_stroke(c, 0.5 * r, Stroke::new(1.5, colour));
         }
