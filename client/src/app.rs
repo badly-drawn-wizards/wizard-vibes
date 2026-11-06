@@ -384,7 +384,7 @@ impl App {
     // flank them while it is in use; B or Start resumes): rows of controls
     // (see nav.rs), the first the tabs, where the cursor starts.
     fn pause_menu(&mut self, ctx: &egui::Context, secs: f64) {
-        let open = self.game.paused();
+        let open = self.game.paused() && !self.game.picture();
         let opening = open && !self.menu_was_open;
         self.menu_was_open = open;
         if !open {
@@ -627,7 +627,7 @@ impl eframe::App for App {
             // (the modifiers as of the last frame)
             let mods = ctx.input(|i| i.modifiers);
             self.game.capture_keys(&mut raw_input.events, mods);
-        } else if self.game.paused() {
+        } else if self.game.paused() && !self.game.picture() {
             let keys = [egui::Key::ArrowUp, egui::Key::ArrowDown, egui::Key::ArrowLeft, egui::Key::ArrowRight];
             let nav = &mut self.nav;
             raw_input.events.retain(|e| match e {
@@ -722,7 +722,9 @@ impl App {
                 self.error = Some(all.join("\n\n"));
             }
         }
-        self.top_bar(&ctx);
+        if !self.game.picture() {
+            self.top_bar(&ctx);
+        }
         let rs = frame.wgpu_render_state().cloned();
         self.audio.frame(&ctx);
         self.make_sfx();

@@ -82,6 +82,10 @@ impl Nav {
     pub fn begin(&mut self) {
         self.adjust = 0;
         self.drawing.clear();
+        // (none drawn yet, as a menu opens: kept for when there are)
+        if self.rows.is_empty() {
+            return;
+        }
         for m in std::mem::take(&mut self.pending) {
             let Some(row) = self.rows.get(self.row) else { break };
             let on_slider = row.get(self.col).copied().unwrap_or(false);

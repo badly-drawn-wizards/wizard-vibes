@@ -17,15 +17,16 @@ pub const shoulder_right: f32 = 0.95;
 pub const shoulder_up: f32 = 0.35;
 
 // Camera orbiting a target: the ray through image point (x, y), in pixels
-// from its top left. `shoulder` (0..1) moves it over his right shoulder.
-pub fn camera_ray(target: Vec3, vw: i32, h: i32, yaw: f32, pitch: f32, dst: f32, shoulder: f32, x: f32, y: f32) -> (Vec3, Vec3) {
+// from its top left. `shoulder` (0..1) moves it over his right shoulder;
+// it is kept above `floor` (his frame).
+pub fn camera_ray(target: Vec3, vw: i32, h: i32, yaw: f32, pitch: f32, dst: f32, shoulder: f32, floor: f32, x: f32, y: f32) -> (Vec3, Vec3) {
     // (orbiting the target; kept above his platform, but still looking the
     // orbit's way: below the horizon, it looks up past him, as he aims)
     let back = vec(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
     let fw = scale(-1.0, back);
     let rt = normalise(cross(fw, vec(0.0, 1.0, 0.0)));
     let ro = target + scale(dst, back) + scale(shoulder_right * shoulder, rt) + vec(0.0, shoulder_up * shoulder, 0.0);
-    let ro = vec(ro.x, ro.y.maximum(0.1), ro.z);
+    let ro = vec(ro.x, ro.y.maximum(floor), ro.z);
     let up = cross(rt, fw);
     let fh = h as f32;
     let u = (x - 0.5 * vw as f32) / fh * 2.0;
@@ -34,11 +35,20 @@ pub fn camera_ray(target: Vec3, vw: i32, h: i32, yaw: f32, pitch: f32, dst: f32,
     (ro, rd)
 }
 
+// camera_ray as the drive record has the camera: its target moved by
+// (cam_x, cam_y, cam_z) (in picture mode, flown freely, close round it,
+// and anywhere: else kept above his platform).
+#[inline]
+pub fn camera_ray_of(dr: Drive, target: Vec3, vw: i32, h: i32, yaw: f32, pitch: f32, dst: f32, x: f32, y: f32) -> (Vec3, Vec3) {
+    let floor = if dr.picture > 0.5 { -1e9 } else { 0.1 };
+    camera_ray(target + vec(dr.cam_x, dr.cam_y, dr.cam_z), vw, h, yaw, pitch, dst, dr.shoulder, floor, x, y)
+}
+
 // The colour (before tone mapping) seen through image point (x, y), and
 // how far the ray sees (infinity: the sky).
 #[inline(never)]
 pub fn shade_pixel(prm: Params, dr: Drive, target: Vec3, vw: i32, h: i32, tm: f32, yaw: f32, pitch: f32, dst: f32, x: f32, y: f32) -> (Vec3, f32) {
-    let (ro, rd) = camera_ray(target, vw, h, yaw, pitch, dst, dr.shoulder, x, y);
+    let (ro, rd) = camera_ray_of(dr, target, vw, h, yaw, pitch, dst, x, y);
     shade(prm, dr, tm, 2.0 / (h as f32 * 2.414), ro, rd)
 }
 
@@ -59,7 +69,7 @@ pub fn finish_pixel(prm: Params, vw: i32, h: i32, x: f32, y: f32, c: Vec3) -> Ve
 pub fn sample(prm: Params, dr: Drive, spells: &[f32], n_spells: i32, target: Vec3, vw: i32, h: i32, tm: f32, yaw: f32, pitch: f32, dst: f32, x: f32, y: f32) -> (Vec3, f32) {
     let (c, seen) = shade_pixel(prm, dr, target, vw, h, tm, yaw, pitch, dst, x, y);
     // the spells shine in front of whatever the ray sees
-    let (ro, rd) = camera_ray(target, vw, h, yaw, pitch, dst, dr.shoulder, x, y);
+    let (ro, rd) = camera_ray_of(dr, target, vw, h, yaw, pitch, dst, x, y);
     let fl = flight_of(prm, dr, tm);
     let orb = to_world(fl, held_orb(prm, dr, tm));
     let c = c + spell_glow(prm, spells, n_spells, tm, to_world(fl, ro), to_world_dir(fl, rd), seen, orb);

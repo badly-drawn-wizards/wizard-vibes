@@ -106,6 +106,8 @@ pub struct Game {
     // he stands on the path), if so chosen (else centred on him)
     shoulder: f32,
     over_shoulder: bool,
+    // picture mode, if on (see Picture)
+    picture: Option<Picture>,
     // his orb as the renderer last posed it (his frame, before his heading:
     // see set_orb), and where he was last step and how fast he went
     orb: V3,
@@ -116,6 +118,26 @@ pub struct Game {
     // when the defeat panel appeared (it fades in)
     defeat_since: Option<Instant>,
 }
+
+// Picture mode: the scene held still (paused, without the menu) while the
+// camera flies freely (the keys or the left stick, as he would; the mouse,
+// taken, or the right stick look), to frame a picture. The camera's target
+// moves (his frame) and the camera stays close round it; the camera as it
+// was, and the view he aimed along, kept for afterwards. Escape, P, B or
+// Start go back to the menu.
+#[derive(Clone, Copy, Debug)]
+struct Picture {
+    at: V3,
+    saved: crate::types::Camera,
+    view: V3,
+    since: Instant,
+}
+
+// (how fast the picture's camera flies, units a second, and boosted)
+const PICTURE_SPEED: f32 = 4.0;
+const PICTURE_BOOST: f32 = 4.0;
+// (the camera's target at rest, his frame: default_target in the shader)
+const TARGET: V3 = [0.0, 1.15, 0.0];
 
 #[derive(Clone, Copy, Debug)]
 struct Capture {
@@ -166,6 +188,7 @@ impl Game {
             pad_connected: false,
             shoulder: 0.0,
             over_shoulder: get(STORE_SHOULDER).as_deref() != Some("0"),
+            picture: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -326,14 +349,15 @@ impl Game {
         // the mouse: a click on the view takes it (not while paused, nor
         // defeated), and it then turns the camera
         let defeated = self.combat.hud.lost.is_some();
-        if view.clicked() && !self.paused && !defeated && !self.look.held() {
+        let picture = self.picture.is_some();
+        if view.clicked() && (!self.paused || picture) && (!defeated || picture) && !self.look.held() {
             self.look.grab(ctx);
         }
         let (dx, dy) = self.look.take(ctx);
         if dx != 0.0 || dy != 0.0 {
             self.orbit.look(dx, dy);
         }
-        if view.hovered() || self.look.held() {
+        if (view.hovered() || self.look.held()) && !picture {
             // (egui's wheel is points up; the TS's deltaY is pixels down,
             // about 100 a notch to egui's 50)
             let dy = ctx.input(|i| i.smooth_scroll_delta.y);
@@ -387,14 +411,14 @@ impl Game {
             for a in acts {
                 match a {
                     Action::Mode => self.cycle_mode(),
-                    Action::Pause => self.paused = !self.paused,
+                    Action::Pause => self.pause_pressed(),
                     Action::Spell(s) => self.spells.select(s),
                     _ => {}
                 }
             }
             for (key, _) in keys {
                 match key {
-                    Key::Escape => self.paused = !self.paused,
+                    Key::Escape => self.pause_pressed(),
                     Key::Enter if self.combat.enemies.down >= 0.0 && !self.paused => self.combat.reset(&mut self.spells),
                     _ => {}
                 }
@@ -408,7 +432,8 @@ impl Game {
         if self.look.lost() {
             self.paused = true;
         }
-        if self.paused || defeated || !ctx.input(|i| i.focused) {
+        let picture = self.picture.is_some();
+        if (self.paused || defeated) && !picture || !ctx.input(|i| i.focused) {
             self.look.release(ctx);
         }
         if !self.paused {
@@ -436,12 +461,14 @@ impl Game {
                 self.cycle_mode();
             }
             if p.pause || (p.back && self.paused && !self.menu_holds) {
-                self.paused = !self.paused;
+                self.pause_pressed();
             }
             if p.active {
                 self.spellbar.device = Device::Pad;
             }
-            if self.paused {
+            if self.picture.is_some() {
+                // (in picture mode, the sticks fly the camera: below)
+            } else if self.paused {
                 // (in the pause menu, the rest is its navigation)
                 self.menu = Some(*p);
             } else {
@@ -499,6 +526,21 @@ impl Game {
         // in fut/wizard.fut looks along -(sin yaw, cos yaw) in his frame.)
         let heading = self.flight.heading;
         let stick = pad.map(|p| Stick { fwd: p.mov[1], side: p.mov[0], up: p.up, boost: p.boost });
+        // (picture mode: the keys and the left stick fly the camera, along
+        // its view, across it and up; he stays put)
+        if let Some(pic) = &mut self.picture {
+            let b = |x: bool| x as i32 as f32;
+            let s = stick.unwrap_or_default();
+            let fwd = (b(held.fwd) - b(held.back) + s.fwd).clamp(-1.0, 1.0);
+            let side = (b(held.right) - b(held.left) + s.side).clamp(-1.0, 1.0);
+            let up = (b(held.up) - b(held.down) + s.up).clamp(-1.0, 1.0);
+            let speed = PICTURE_SPEED * if held.boost || s.boost { PICTURE_BOOST } else { 1.0 };
+            let f = self.orbit.view_dir();
+            let r = vec::normalise([-f[2], 0.0, f[0]]);
+            let step = vec::add(vec::add(vec::scale(fwd, f), vec::scale(side, r)), [0.0, up, 0.0]);
+            pic.at = vec::add(pic.at, vec::scale(speed * dt, step));
+        }
+        let (held, stick) = if self.picture.is_some() { (Held::default(), None) } else { (held, stick) };
         // (channelling healing, he cannot move: no input, and he is brought
         // to a stop)
         let channelling = self.spells.channel >= 0.0;
@@ -517,7 +559,16 @@ impl Game {
         let goal = if self.flight.active && self.over_shoulder { 1.0 } else { 0.0 };
         self.shoulder += (goal - self.shoulder) * (1.0 - (-dt / 0.35).exp());
         drive.shoulder = self.shoulder;
-        let [sx, sy, sz] = self.orbit.view_dir();
+        // (picture mode: the camera's target moved, nothing keeping it above
+        // his platform; his aim as it was)
+        let [sx, sy, sz] = match &self.picture {
+            Some(p) => {
+                drive.picture = 1.0;
+                [drive.cam_x, drive.cam_y, drive.cam_z] = p.at;
+                p.view
+            }
+            None => self.orbit.view_dir(),
+        };
         drive.staff = self.spells.staff;
         drive.sx = sx;
         drive.sy = sy;
@@ -582,6 +633,40 @@ impl Game {
         }
     }
 
+    // Whether in picture mode (the scene still, the camera flown freely:
+    // the app shows no menu nor bar).
+    pub fn picture(&self) -> bool {
+        self.picture.is_some()
+    }
+
+    // Into picture mode, from the pause menu: the camera from where it is.
+    pub fn enter_picture(&mut self) {
+        let eye = self.orbit.eye(self.shoulder);
+        let saved = self.orbit.cam;
+        self.picture = Some(Picture { at: vec::sub(eye, TARGET), saved, view: self.orbit.view_dir(), since: Instant::now() });
+        self.orbit.cam.dist = 0.05;
+        self.orbit.interacted = true;
+        self.shoulder = 0.0;
+        self.paused = true;
+    }
+
+    // Back to the pause menu, the camera as it was.
+    fn leave_picture(&mut self) {
+        if let Some(p) = self.picture.take() {
+            self.orbit.cam = p.saved;
+        }
+    }
+
+    // Escape, P, B or Start: picture mode left (to the menu), or else the
+    // pause toggled.
+    fn pause_pressed(&mut self) {
+        if self.picture.is_some() {
+            self.leave_picture();
+        } else {
+            self.paused = !self.paused;
+        }
+    }
+
     // The camera's choice (for the pause menu: a row of its navigation):
     // over his shoulder as he flies, or centred on him.
     pub fn camera_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
@@ -594,6 +679,11 @@ impl Game {
             if r.clicked() {
                 self.over_shoulder = over;
             }
+        }
+        let r = hud::fill_toggle(ui, "Picture", false).on_hover_text("Hold the scene still and fly the camera freely to frame a picture (Escape to come back)");
+        nav.item(ui, &r);
+        if r.clicked() {
+            self.enter_picture();
         }
     }
 
@@ -624,6 +714,26 @@ impl Game {
     // the defeat panel and the controls panel.
     pub fn ui(&mut self, ctx: &egui::Context) {
         let rect = self.view.unwrap_or_else(|| ctx.content_rect());
+        // (picture mode: nothing in the way but a note of how to leave, a
+        // few seconds)
+        if let Some(p) = &self.picture {
+            let t = p.since.elapsed().as_secs_f32();
+            let alpha = if t < 3.0 { 1.0 } else { (1.0 - (t - 3.0) / 0.6).max(0.0) };
+            if alpha > 0.0 {
+                ctx.request_repaint();
+                egui::Area::new(egui::Id::unique("wizard-picture-note"))
+                    .pivot(Align2::CENTER_TOP)
+                    .fixed_pos(egui::pos2(rect.center().x, rect.top() + 16.0))
+                    .interactable(false)
+                    .show(ctx, |ui| {
+                        ui.set_opacity(alpha);
+                        hud::panel(0.6, 6, Margin::symmetric(14, 6)).show(ui, |ui| {
+                            ui.label(hud::text("Picture mode · click to look, fly as he would · Esc to return", hud::FONT, hud::FG));
+                        });
+                    });
+            }
+            return;
+        }
         let h = self.combat.hud.clone();
 
         // the red flash, and the crosshair at the view's centre (not in the
@@ -858,6 +968,36 @@ mod tests {
         [true, false]
             .map(|pressed| egui::Event::Key { key: k, physical_key: None, pressed, repeat: false, modifiers: Default::default() })
             .to_vec()
+    }
+
+    #[test]
+    fn picture_mode_holds_the_scene_and_flies_the_camera() {
+        let ctx = egui::Context::default();
+        let mut g = Game::new(None);
+        let p = params(0.0);
+        frame(&ctx, &mut g, &p, key(Key::P));
+        let cam = g.orbit.cam;
+        g.enter_picture();
+        let o0 = frame(&ctx, &mut g, &p, vec![]);
+        let (t, at0) = (o0.time, [o0.drive.cam_x, o0.drive.cam_y, o0.drive.cam_z]);
+        // W held: the camera's target moves along its view; the scene's
+        // time does not
+        let w = egui::Event::Key { key: Key::W, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+        let mut o = frame(&ctx, &mut g, &p, vec![w]);
+        for _ in 0..30 {
+            o = frame(&ctx, &mut g, &p, vec![]);
+        }
+        assert_eq!(o.time, t);
+        assert_eq!(o.drive.picture, 1.0);
+        let at = [o.drive.cam_x, o.drive.cam_y, o.drive.cam_z];
+        let d = vec::sub(at, at0);
+        let along = vec::dot(d, g.orbit.view_dir());
+        assert!(along > 1.5 && (vec::len(d) - along).abs() < 1e-3, "{d:?}");
+        // Escape: back to the menu (still paused), the camera as it was
+        let o = frame(&ctx, &mut g, &p, key(Key::Escape));
+        assert!(!g.picture() && g.paused() && o.paused);
+        assert_eq!(g.orbit.cam, cam);
+        assert_eq!(frame(&ctx, &mut g, &p, vec![]).drive.picture, 0.0);
     }
 
     #[test]
