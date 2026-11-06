@@ -145,6 +145,12 @@ pub const on_path: Drive = Drive {
     foe3: 0.0,
     foe4: 0.0,
     foe5: 0.0,
+    kill0: 0.0,
+    kill1: 0.0,
+    kill2: 0.0,
+    kill3: 0.0,
+    kill4: 0.0,
+    kill5: 0.0,
 };
 
 pub fn flight_of(prm: Params, dr: Drive, secs: f32) -> Flight {
@@ -333,6 +339,10 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         spell,
         shield: dr.shield,
         shield_hit: dr.shield_hit,
-        foes: Foes { states: (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5), arena: vec(dr.arena_x, dr.arena_y, dr.arena_z) },
+        foes: Foes {
+            states: (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5),
+            kills: (dr.kill0, dr.kill1, dr.kill2, dr.kill3, dr.kill4, dr.kill5),
+            arena: vec(dr.arena_x, dr.arena_y, dr.arena_z),
+        },
     }
 }

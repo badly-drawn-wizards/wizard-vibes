@@ -25,6 +25,9 @@ pub fn normalise(a: V3) -> V3 {
     let l = len(a);
     scale(1.0 / if l == 0.0 { 1.0 } else { l }, a)
 }
+pub fn cross(a: V3, b: V3) -> V3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
 // A direction turned by `a` about the vertical (yaw in fut/world.fut).
 pub fn turn(a: f32, [x, y, z]: V3) -> V3 {
     let (s, c) = a.sin_cos();

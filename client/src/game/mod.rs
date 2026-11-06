@@ -340,11 +340,12 @@ impl Game {
         drive.sz = sz;
         drive.flash = self.spells.since_cast;
         drive.spell = self.spells.selected as f32;
-        let (shield, shield_hit, arena, foes) = self.combat.drive();
+        let (shield, shield_hit, arena, foes, kills) = self.combat.drive();
         drive.shield = shield;
         drive.shield_hit = shield_hit;
         [drive.arena_x, drive.arena_y, drive.arena_z] = arena;
         drive.foe = foes;
+        drive.kill = kills;
 
 
         let probe = (self.flight.active || self.spells.count() > 0).then(|| {

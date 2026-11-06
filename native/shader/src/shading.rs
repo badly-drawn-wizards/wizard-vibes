@@ -523,13 +523,13 @@ pub fn enemy_material(prm: Params, g: Glow, fs: Foes, secs: f32, tm: f32, fl: Fl
     let lk = looks_of(prm.enemy_seed, e.r#gen, i);
     let part = imod(m - m_enemy, enemy_parts);
     let platform = !full && (part == part_top || part == part_side);
-    // (defeated, the figure's parts are on giblets: shaded where they were
-    // cut from, the normal turned back with the chunk, the cloth near a cut
-    // soaked in blood)
+    // (defeated, the figure's parts are on its remains: shaded where they
+    // came from, the normal turned back with the piece, the cloth near a
+    // cut soaked in blood)
     let (q, n, soak, figure_secs) = if e.dying >= 0.0 && !platform {
-        let (qr, cell, axis, ca, sa) = giblet_at(prm, i, lk, e.r#gen, secs, e.dying, burst_space(fl, e, p));
+        let (qr, cut, axis, ca, sa) = remains_at(prm, i, lk, e, secs, burst_space(fl, e, p));
         let nb = yaw_inv(e.yaw, to_world_dir(fl, n));
-        (qr, rotate_about(axis, ca, sa, nb), smoothstep(-0.07, -0.005, cell), secs - e.dying)
+        (qr, rotate_about(axis, ca, sa, nb), smoothstep(-0.07, -0.005, cut), secs - e.dying)
     } else {
         (enemy_space(fl, e, p), yaw_inv(e.yaw, to_world_dir(fl, n)), 0.0, secs)
     };
@@ -540,10 +540,11 @@ pub fn enemy_material(prm: Params, g: Glow, fs: Foes, secs: f32, tm: f32, fl: Fl
     };
     let mat = if soak > 0.0 { Material { albedo: mix(mat.albedo, vec(0.16, 0.008, 0.006), 0.85 * soak), ks: mat.ks + 0.3 * soak, shininess: mat.shininess.maximum(40.0 * soak), ..mat } } else { mat };
     // appearing, it flashes in its circle's colour; defeated, its platform
-    // chars and smoulders as it falls, its circle going out
+    // chars and smoulders as it falls, its circle going out (and struck by
+    // lightning, its figure too)
     if e.appear > 0.0 {
         Material { emission: mat.emission + scale(2.0 * e.appear * e.appear, lk.circle), ..mat }
-    } else if e.dying < 0.0 || !platform {
+    } else if e.dying < 0.0 || (!platform && e.kill != kill_strike) {
         mat
     } else {
         let burnt = smoothstep(0.0, 0.6, e.dying);

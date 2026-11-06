@@ -52,6 +52,8 @@ pub struct Drive {
     pub arena_y: f32,
     pub arena_z: f32,
     pub foe: [f32; 6],
+    // what defeated each (a kill code: see kill_of in the shader's enemies.rs)
+    pub kill: [f32; 6],
 }
 
 // On the flight path (fut/rig.fut's on_path).
@@ -81,6 +83,7 @@ pub const ON_PATH: Drive = Drive {
     arena_y: 12.0,
     arena_z: 12.0,
     foe: [0.0; 6],
+    kill: [0.0; 6],
 };
 
 impl Drive {
@@ -113,6 +116,7 @@ impl Drive {
             "arena_y" => self.arena_y,
             "arena_z" => self.arena_z,
             f if f.starts_with("foe") => f[3..].parse::<usize>().ok().and_then(|i| self.foe.get(i).copied()).unwrap_or(0.0),
+            f if f.starts_with("kill") => f[4..].parse::<usize>().ok().and_then(|i| self.kill.get(i).copied()).unwrap_or(0.0),
             _ => panic!("no drive field {id}"),
         }
     }
@@ -147,6 +151,10 @@ impl Drive {
             "arena_x" => &mut self.arena_x,
             "arena_y" => &mut self.arena_y,
             "arena_z" => &mut self.arena_z,
+            f if f.starts_with("kill") => match f[4..].parse::<usize>().ok().and_then(|i| self.kill.get_mut(i)) {
+                Some(x) => x,
+                None => return false,
+            },
             f if f.starts_with("foe") => match f[3..].parse::<usize>().ok().and_then(|i| self.foe.get_mut(i)) {
                 Some(x) => x,
                 None => return false,

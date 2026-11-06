@@ -53,6 +53,23 @@ pub struct Target {
     pub side: i32,
 }
 
+// The normal of a wind blade's plane, as it is drawn (spell_light in the
+// shader's spells.rs: its travel and its span, rolled by its seed and age).
+fn blade_normal(s: &Spell) -> V3 {
+    use super::vec::{cross, normalise};
+    use wizard_shader::hash::hash2;
+    let seed = s.seed as i32;
+    let rnd = |n: i32| hash2(seed.wrapping_add(n.wrapping_mul(7919)), 23);
+    let f = normalise(s.vel);
+    let side = normalise(super::vec::add(cross(f, [0.0, 1.0, 0.0]), [0.0, 0.001, 0.0]));
+    let up = cross(side, f);
+    let spin = if rnd(1) < 0.5 { -1.0 } else { 1.0 };
+    let a = s.age;
+    let roll = (rnd(2) - 0.5) * 1.2 + spin * (0.25 + 0.35 * rnd(3)) * a + 0.12 * (a * (5.0 + 4.0 * rnd(4)) + 6.283 * rnd(5)).sin();
+    let span = super::vec::add(super::vec::scale(roll.cos(), side), super::vec::scale(roll.sin(), up));
+    normalise(cross(f, span))
+}
+
 // His strike locking on: how long the cast has been held, and the target
 // (an enemy's centre and number), if there is one in his aim; else it
 // lands where he aims.
@@ -66,8 +83,9 @@ pub struct Lock {
 // What happened, for the fight to deal with.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SpellEvent {
-    // a spell of `kind` cast by `owner` hit `side`
-    Hit { side: i32, kind: u32, owner: i32 },
+    // a spell of `kind` cast by `owner` hit `side` (a wind blade: cutting
+    // along a plane, through a point with a normal, in the world)
+    Hit { side: i32, kind: u32, owner: i32, cut: Option<(V3, V3)> },
     // (for the sound: a bolt bursting, a blade breaking up, a strike landing)
     Sound { what: Sound, pos: V3 },
 }
@@ -274,7 +292,8 @@ impl Spells {
                 let Some(t) = targets.iter().find(|t| Self::opposed(s.owner, t) && dist(s.pos, t.c) < t.r) else {
                     continue;
                 };
-                events.push(SpellEvent::Hit { side: t.side, kind: s.kind, owner: s.owner });
+                let cut = if s.kind == WIND { Some((s.pos, blade_normal(s))) } else { None };
+                events.push(SpellEvent::Hit { side: t.side, kind: s.kind, owner: s.owner, cut });
                 if s.kind == FIRE {
                     Self::burst(s, events);
                 } else {
@@ -291,7 +310,7 @@ impl Spells {
                     }
                 }
                 for side in sides {
-                    events.push(SpellEvent::Hit { side, kind: s.kind, owner: s.owner });
+                    events.push(SpellEvent::Hit { side, kind: s.kind, owner: s.owner, cut: None });
                 }
             }
         }

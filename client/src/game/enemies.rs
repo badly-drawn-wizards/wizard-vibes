@@ -30,6 +30,31 @@ pub const PLAYER_HP: i32 = 10;
 
 // Damage, by kind of spell. (A fire bolt does its damage by its burst,
 // which a bolt that hits sets off.)
+// A kill code for the renderer (kill_of in the shader's enemies.rs): the
+// kind of death (0 a fire bolt's burst, 1 a strike, 2 a wind blade), and a
+// blade's cut: its plane (a point and normal in the world) in the enemy's
+// space (it at `pos`, turned by `yaw`), the normal up, moved to cut through
+// the figure if it would miss (within 0.35 of its middle), each of
+// azimuth, elevation and offset in six bits.
+pub fn kill_code(kind: u32, cut: Option<(V3, V3)>, pos: V3, yaw: f32) -> f32 {
+    let k = match kind {
+        STRIKE => 1,
+        WIND => 2,
+        _ => 0,
+    };
+    let Some((p, n)) = cut.filter(|_| k == 2) else { return k as f32 };
+    let n = normalise(turn(-yaw, n));
+    let n = if n[1] < 0.0 { scale(-1.0, n) } else { n };
+    let pb = turn(-yaw, sub(p, pos));
+    let off = super::vec::dot(n, sub(pb, [0.0, 1.0, 0.0])).clamp(-0.35, 0.35);
+    let phi = n[2].atan2(n[0]);
+    let th = n[1].clamp(0.0, 1.0).asin();
+    let a = ((phi + PI) / (2.0 * PI) * 63.0).round() as u32 % 64;
+    let e = (th / (0.5 * PI) * 63.0).round() as u32;
+    let o = ((off + 0.35) / 0.7 * 63.0).round() as u32;
+    (k + 4 * (a + 64 * (e + 64 * o))) as f32
+}
+
 fn damage(kind: u32) -> i32 {
     match kind {
         BURST | WIND => 1,
@@ -94,6 +119,7 @@ pub enum EnemyEvent {
 struct Slot {
     generation: i64,
     hp: i32,
+    kill: f32, // what defeated it (a kill code: see kill_code)
     appear: f32, // seconds still to appear
     down: f32,   // seconds since its defeat, or -1
     cast_in: f32, // seconds to its next spell
@@ -124,7 +150,7 @@ impl Default for Enemies {
             shielded: false,
             arena: [0.0, ARENA_FLOOR, 12.0],
             events: Vec::new(),
-            slots: (0..MAX).map(|i| Slot { generation: 0, hp: HP, appear: 0.0, down: -1.0, cast_in: 5.0 + i as f32 * 2.0 }).collect(),
+            slots: (0..MAX).map(|i| Slot { generation: 0, hp: HP, kill: 0.0, appear: 0.0, down: -1.0, cast_in: 5.0 + i as f32 * 2.0 }).collect(),
             seen: (0, 0.0, [0.0; 3]),
             last: None,
             vel: [0.0; 3],
@@ -139,6 +165,15 @@ impl Enemies {
         for (i, s) in self.slots.iter().enumerate() {
             let phase = if s.down >= 0.0 { 8.0 + s.down.min(7.9) } else { s.appear.min(7.9) };
             f[i] = 16.0 * s.generation as f32 + phase;
+        }
+        f
+    }
+
+    // What defeated each (kill0 .. kill5 of the drive record).
+    pub fn kills(&self) -> [f32; MAX] {
+        let mut f = [0.0; MAX];
+        for (i, s) in self.slots.iter().enumerate() {
+            f[i] = s.kill;
         }
         f
     }
@@ -172,12 +207,17 @@ impl Enemies {
         self.defeated = 0;
         self.hurt = 99.0;
         for (i, s) in self.slots.iter_mut().enumerate() {
-            *s = Slot { generation: s.generation + 1, hp: HP, appear: APPEAR, down: -1.0, cast_in: 5.0 + i as f32 * 2.0 };
+            *s = Slot { generation: s.generation + 1, hp: HP, kill: 0.0, appear: APPEAR, down: -1.0, cast_in: 5.0 + i as f32 * 2.0 };
         }
     }
 
     // A spell of `kind` hit `side`.
     pub fn hit(&mut self, side: i32, kind: u32) {
+        self.hit_with(side, kind, None);
+    }
+
+    // The same, a wind blade's cut with it (a point and normal, world).
+    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<(V3, V3)>) {
         let damage = damage(kind);
         if side == HIS {
             if self.down >= 0.0 {
@@ -207,7 +247,9 @@ impl Enemies {
                 self.defeated += 1;
                 let (seed, secs, him) = self.seen;
                 let generation = s.generation;
-                self.events.push(EnemyEvent::Defeat(enemy_at(seed, generation, side as usize, secs, self.arena, him).0));
+                let (pos, yaw) = enemy_at(seed, generation, side as usize, secs, self.arena, him);
+                s.kill = kill_code(kind, cut, pos, yaw);
+                self.events.push(EnemyEvent::Defeat(pos));
             }
         }
     }
@@ -244,7 +286,7 @@ impl Enemies {
             if s.down >= 0.0 {
                 s.down += dt;
                 if s.down >= RESPAWN {
-                    *s = Slot { generation: s.generation + 1, hp: HP, appear: APPEAR, down: -1.0, cast_in: 4.0 + 4.0 * rng.uniform() };
+                    *s = Slot { generation: s.generation + 1, hp: HP, kill: 0.0, appear: APPEAR, down: -1.0, cast_in: 4.0 + 4.0 * rng.uniform() };
                     let generation = s.generation;
                     if i < n {
                         self.events.push(EnemyEvent::Appear(enemy_at(seed, generation, i, secs, self.arena, him).0));
@@ -376,5 +418,27 @@ mod tests {
         e.arena = [0.0, 12.0, 0.0];
         e.update(1.0, 0, 1, 0.0, [100.0, 12.0, 0.0], &mut spells, &mut rng);
         assert!((e.arena[0] - 6.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_kill_code_round_trips_through_the_renderer() {
+        // a level cut (normal along the enemy's x, it turned a quarter),
+        // 0.2 above its middle: decoded as the renderer does
+        let yaw = 0.5 * PI;
+        let n = turn(yaw, [1.0, 0.0, 0.0]);
+        let pos = [3.0, 10.0, -2.0];
+        let p = add(pos, turn(yaw, [0.2, 1.0, 0.0]));
+        let code = kill_code(WIND, Some((p, n)), pos, yaw);
+        let (k, nb, o) = wizard_shader::enemies::kill_of(code);
+        assert_eq!(k, 2);
+        assert!((nb.x.abs() - 1.0).abs() < 0.02 && nb.y.abs() < 0.03, "{nb:?}");
+        assert!((o * nb.x.signum() - 0.2).abs() < 0.02, "{o}");
+        // others: just the kind
+        assert_eq!(wizard_shader::enemies::kill_of(kill_code(STRIKE, None, pos, yaw)).0, 1);
+        assert_eq!(wizard_shader::enemies::kill_of(kill_code(BURST, None, pos, yaw)).0, 0);
+        // a cut that misses the figure is moved to its edge
+        let far = add(pos, turn(yaw, [3.0, 1.0, 0.0]));
+        let (_, _, o) = wizard_shader::enemies::kill_of(kill_code(WIND, Some((far, n)), pos, yaw));
+        assert!(o.abs() <= 0.351, "{o}");
     }
 }

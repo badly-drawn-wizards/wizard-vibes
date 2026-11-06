@@ -683,6 +683,11 @@ pub fn bounded(b: f32, m: i32, exact: impl Fn() -> Hit) -> Hit {
     if b > 0.1 { (b, m) } else { exact() }
 }
 
+// (pseudo-layers in the mask: the figure without its hat, or the hat alone:
+// for an enemy's hat flying off; see enemy_figure)
+pub const no_hat: i32 = 1 << 20;
+pub const only_hat: i32 = 1 << 21;
+
 pub fn wizard(mask: i32, pose: Pose, p: Vec3) -> Hit {
     let hq = head_space(pose, p);
     let face = move || {
@@ -695,12 +700,14 @@ pub fn wizard(mask: i32, pose: Pose, p: Vec3) -> Hit {
     let beard = move || (sd_beard(pose, p), m_beard);
     let figure = if !(has(mask, layers_figure)) {
         nothing
+    } else if has(mask, only_hat) {
+        tag(layers_figure, bounded(length(hq - hat_base) - 0.8, m_hat, hat))
     } else {
         let h = (sd_collar(body_space(pose, p)).minimum(smin(0.06, sd_robe(pose, body_space(pose, p)), sd_arms(pose, p))), m_robe);
         let h = umin((sd_hands(pose, p), m_skin), h);
         let h = umin(bounded(length(hq - vec(0.0, 1.6, 0.06)) - 0.32, m_skin, face), h);
         let h = umin(bounded(sd_capsule(hq, beard_top, beard_tip, 0.3), m_beard, beard), h);
-        let h = umin(bounded(length(hq - hat_base) - 0.8, m_hat, hat), h);
+        let h = if has(mask, no_hat) { h } else { umin(bounded(length(hq - hat_base) - 0.8, m_hat, hat), h) };
         tag(layers_figure, h)
     };
     let gear = if !(has(mask, layers_gear)) { nothing } else { tag(layers_gear, waist_gear(gear_of(pose.prm), body_space(pose, p))) };

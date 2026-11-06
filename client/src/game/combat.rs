@@ -101,9 +101,9 @@ impl Combat {
         spells.clear();
     }
 
-    // The drive record's share: (shield, shield_hit, arena, foes).
-    pub fn drive(&self) -> (f32, f32, V3, [f32; 6]) {
-        (self.shield.amount, self.shield.since_hit, self.enemies.arena, self.enemies.foes())
+    // The drive record's share: (shield, shield_hit, arena, foes, kills).
+    pub fn drive(&self) -> (f32, f32, V3, [f32; 6], [f32; 6]) {
+        (self.shield.amount, self.shield.since_hit, self.enemies.arena, self.enemies.foes(), self.enemies.kills())
     }
 
     // Advances the fight; casts if he may (not while down, nor from behind
@@ -206,8 +206,8 @@ impl Combat {
     pub fn handle(&mut self, spells: &mut Spells) {
         for e in std::mem::take(&mut spells.events) {
             match e {
-                SpellEvent::Hit { side, kind, .. } => {
-                    self.enemies.hit(side, kind);
+                SpellEvent::Hit { side, kind, cut, .. } => {
+                    self.enemies.hit_with(side, kind, cut);
                     self.enemy_events();
                 }
                 SpellEvent::Sound { what, pos } => {

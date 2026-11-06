@@ -52,6 +52,10 @@ pub fn enemy_rnd(seed: i32, g: i32, i: i32, k: i32) -> f32 {
 pub struct Enemy {
     pub pos: Vec3,
     pub burst: Vec3,
+    // what defeated it (kill_*), and a wind blade's cut (see kill_of)
+    pub kill: i32,
+    pub cut_n: Vec3,
+    pub cut_o: f32,
     pub yaw: f32,
     pub r#gen: i32,
     pub appear: f32,
@@ -82,9 +86,13 @@ pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
     let size = if dying >= 0.0 { smoothstep(fall_time, fall_time - 1.0, dying) } else { 1.0 - 0.95 * appear * appear };
     let pos = fs.arena + off;
     let to_him = fl.pos - pos;
+    let (kill, cut_n, cut_o) = kill_of(foe_kill(fs, i));
     Enemy {
         pos: pos - vec(0.0, fall, 0.0),
         burst: pos,
+        kill,
+        cut_n,
+        cut_o,
         yaw: to_him.x.atan2(to_him.z),
         r#gen,
         appear,
@@ -117,22 +125,58 @@ pub fn burst_space(fl: Flight, e: Enemy, p: Vec3) -> Vec3 {
 }
 
 // ---------------------------------------------------------------------
-// Giblets. Defeated, the figure bursts: it is cut into chunks (its Voronoi
-// cells round fixed seeds: each chunk the figure intersected with its
-// cell, so at the start they fit together), and each flies off on a
-// parabola, from the chest outwards and up, falling under gravity and
-// spinning about an axis of its own; in its last half second it shrinks
-// away. Small bits of flesh fly with them, further and faster. The cut faces (where the cell, not the figure, is the surface)
-// are the flesh inside; the cloth near a cut is soaked. Each chunk is moved
-// rigidly (and the cells are half-spaces), so the distance stays a bound.
+// Remains. Defeated, an enemy's figure comes apart by what defeated it (its
+// kill code, see kill_of): a fire bolt's blast bursts it into giblets, a
+// wind blade cuts it in two on the blade's plane, a lightning strike
+// throws it off its platform smouldering (see enemy_material); in each its
+// hat pops off and its staff falls away on their own. Each piece is the
+// figure (or a part of it) cut to its own region and moved rigidly: out of
+// its rest (the figure's space, where it came from) by a translation along
+// a parabola and a turn about an axis of its own; in its last half second
+// it shrinks away. Where a cut, not the figure, is the surface, it is the
+// flesh inside; the cloth by a cut is soaked. (Rigid motions, and cuts
+// that are half-spaces, keep the distance a bound.)
+//
+// Pieces: the body's (a burst: giblets 0..7, the Voronoi cells of the body
+// round fixed seeds; a cut: halves 0 and 1; a strike: 0, whole), then the
+// hat (piece_hat) and the staff with its orb (piece_staff). Small bits of
+// flesh fly with a burst's giblets, further and faster.
 
-pub const giblets: i32 = 10;
-pub const giblet_bits: i32 = 10; // and small bits of flesh flung with them
-pub const giblet_reach: f32 = 0.85; // every chunk lies within this of its seed
+pub const kill_fire: i32 = 0;
+pub const kill_strike: i32 = 1;
+pub const kill_wind: i32 = 2;
+
+pub const giblets: i32 = 8; // a burst's body pieces
+pub const giblet_bits: i32 = 10;
+pub const piece_hat: i32 = 8;
+pub const piece_staff: i32 = 9;
+pub const pieces: i32 = 10;
 const gravity: f32 = 9.0;
 
-// Chunk k's seed, in the figure's space: the legs, the body, the arms, the
-// head, the hat and the staff, each a chunk or two.
+// The figure's parts, as enemy_figure takes them.
+pub const parts_body: i32 = 1;
+pub const parts_hat: i32 = 2; // the hat and its band
+pub const parts_staff: i32 = 4; // the staff and its orb
+pub const parts_all: i32 = 7;
+
+// A kill code (from the harness: see foes.rs): the kind (kill_*) and, for
+// a wind blade's cut, its plane in the burst's space: a unit normal (up,
+// or level) and its offset from the figure's middle (fig_middle), clamped
+// so that it cuts the figure: code = kind + 4 (azimuth + 64 (elevation +
+// 64 offset)), each six bits.
+pub const fig_middle: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+pub fn kill_of(code: f32) -> (i32, Vec3, f32) {
+    let c = ftoi(code.maximum(0.0) + 0.5);
+    let k = imod(c, 4);
+    let r = idiv(c, 4);
+    let phi = imod(r, 64) as f32 / 63.0 * 2.0 * PI - PI;
+    let th = imod(idiv(r, 64), 64) as f32 / 63.0 * 0.5 * PI;
+    let o = idiv(r, 4096) as f32 / 63.0 * 0.7 - 0.35;
+    (k, vec(th.cos() * phi.cos(), th.sin(), th.cos() * phi.sin()), o)
+}
+
+// Giblet k's seed (k < giblets), in the figure's space: the legs, the
+// body, the arms and the head, one or two each.
 #[inline]
 pub fn giblet_seed(k: i32) -> Vec3 {
     if k == 0 {
@@ -149,33 +193,12 @@ pub fn giblet_seed(k: i32) -> Vec3 {
         vec(0.22, 1.18, 0.1)
     } else if k == 6 {
         vec(-0.26, 1.28, 0.16)
-    } else if k == 7 {
-        vec(0.0, 1.5, 0.06)
-    } else if k == 8 {
-        vec(0.0, 1.95, -0.02)
     } else {
-        vec(0.45, 1.05, 0.2)
+        vec(0.0, 1.5, 0.06)
     }
 }
 
-// Chunk k's flight (enemy i, generation g): its velocity at the burst, the
-// axis it spins about and how fast (radians a second).
-#[inline]
-pub fn giblet_motion(seed: i32, g: i32, i: i32, k: i32) -> (Vec3, Vec3, f32) {
-    // (one hash, spread into four numbers: this runs at every step of a
-    // march through the burst)
-    let h = enemy_rnd(seed, g, i, 40 + k);
-    let r = move |j: i32| fract(h * (17.0 + 23.0 * j as f32) + 0.31 * j as f32);
-    let out = giblet_seed(k) - vec(0.0, 1.0, 0.0);
-    let flat = normalise(vec(out.x, 0.0, out.z) + vec(0.01 * (r(0) - 0.5), 0.0, 0.01));
-    let v = scale(2.2 + 2.4 * r(0), flat) + vec(0.0, 2.5 + 2.5 * r(1) + 1.5 * out.y, 0.0);
-    let a = 2.0 * PI * r(2);
-    let axis = normalise(vec(a.cos(), 2.0 * r(3) - 1.0, a.sin()));
-    (v, axis, (4.0 + 8.0 * r(3)) * if r(2) < 0.5 { 1.0 } else { -1.0 })
-}
-
-// Chunk k's cell at q (figure space): the distance outside it (negative
-// inside): the furthest of the half-spaces nearer its seed than another's.
+// Giblet k's cell at q (figure space): the distance outside it.
 #[inline]
 pub fn giblet_cell(k: i32, q: Vec3) -> f32 {
     let sk = giblet_seed(k);
@@ -191,63 +214,79 @@ pub fn giblet_cell(k: i32, q: Vec3) -> f32 {
     d
 }
 
-// Where chunk k is tau seconds after the burst: its seed's place, the
-// rotation (cos, sin of the angle about its axis) and its size.
+// Whether enemy e (dying) has piece k.
 #[inline]
-pub fn giblet_place(seed: i32, g: i32, i: i32, k: i32, tau: f32) -> (Vec3, Vec3, f32, f32, f32) {
-    let (v, axis, spin) = giblet_motion(seed, g, i, k);
-    let c = giblet_seed(k) + scale(tau, v) - vec(0.0, 0.5 * gravity * tau * tau, 0.0);
-    let a = -spin * tau;
-    (c, axis, a.cos(), a.sin(), smoothstep(fall_time, fall_time - 0.5, tau))
+pub fn has_piece(e: Enemy, k: i32) -> bool {
+    k >= piece_hat || (e.kill == kill_fire && k < giblets) || (e.kill == kill_wind && k < 2) || (e.kill == kill_strike && k == 0)
 }
 
-// A point of the burst's space in chunk k's rest (the figure's space, where
-// the chunk was cut from), given the chunk's place (giblet_place).
-#[inline]
-pub fn giblet_rest(k: i32, place: (Vec3, Vec3, f32, f32, f32), qb: Vec3) -> Vec3 {
-    let (c, axis, ca, sa, size) = place;
-    let r = rotate_about(axis, ca, sa, qb - c);
-    giblet_seed(k) + scale(1.0 / 0.02f32.maximum(size), r)
+// Piece k of enemy i (generation g, dying e), tau seconds after: where it
+// is (the burst's space: its pivot's place), the turn out of it into its
+// rest (an axis, cos and sin), its size, its pivot (in its rest), and how
+// far from the pivot it reaches.
+pub fn piece_place(seed: i32, g: i32, i: i32, e: Enemy, k: i32, tau: f32) -> (Vec3, Vec3, f32, f32, f32, Vec3, f32) {
+    let h = enemy_rnd(seed, g, i, 40 + k);
+    let r = move |j: i32| fract(h * (17.0 + 23.0 * j as f32) + 0.31 * j as f32);
+    let size = smoothstep(fall_time, fall_time - 0.5, tau);
+    let fall = vec(0.0, -0.5 * gravity * tau * tau, 0.0);
+    let (pivot, v, axis, angle, reach) = if k == piece_hat {
+        // (popping off, up and back, tumbling)
+        let a = 2.0 * PI * r(0);
+        (vec(0.0, 1.7, 0.0), vec(0.8 * (r(1) - 0.5), 3.2, -0.9), normalise(vec(a.cos(), 0.2, a.sin())), (5.0 + 4.0 * r(2)) * tau, 0.9)
+    } else if k == piece_staff {
+        // (tipping away and falling)
+        (vec(0.45, 1.0, 0.2), vec(1.1, 1.4, 0.3 * (r(0) - 0.5)), vec(0.1, 0.0, 1.0), -(2.5 + 1.5 * r(1)) * tau, 1.2)
+    } else if e.kill == kill_wind {
+        // the halves: sliding apart along the cut, tilting away from it,
+        // then falling
+        let s = if k == 0 { 1.0 } else { -1.0 };
+        let n = e.cut_n;
+        let tilt = normalise(cross(vec(0.0, 1.0, 0.0), n) + vec(0.0, 0.0, 1e-3));
+        (fig_middle, scale(1.3 * s, n) + vec(0.0, 0.8, 0.0), tilt, s * (1.0 + 0.8 * r(0)) * tau, 1.35)
+    } else if e.kill == kill_strike {
+        // whole: thrown up and off its platform, toppling as it falls
+        let a = 2.0 * PI * r(0);
+        (vec(0.0, 0.1, 0.0), vec(1.2 * a.cos(), 2.4, 1.2 * a.sin()), normalise(vec(-a.sin(), 0.0, a.cos())), 0.8 * tau + 0.9 * tau * tau, 1.95)
+    } else {
+        // a giblet: out from the chest and up, spinning
+        let out = giblet_seed(k) - vec(0.0, 1.0, 0.0);
+        let flat = normalise(vec(out.x, 0.0, out.z) + vec(0.01 * (r(0) - 0.5), 0.0, 0.01));
+        let a = 2.0 * PI * r(2);
+        let v = scale(2.2 + 2.4 * r(0), flat) + vec(0.0, 2.5 + 2.5 * r(1) + 1.5 * out.y, 0.0);
+        let spin = (4.0 + 8.0 * r(3)) * if r(2) < 0.5 { 1.0 } else { -1.0 };
+        (giblet_seed(k), v, normalise(vec(a.cos(), 2.0 * r(3) - 1.0, a.sin())), spin * tau, 0.85)
+    };
+    let c = pivot + scale(tau, v) + fall;
+    let a = -angle;
+    (c, axis, a.cos(), a.sin(), size, pivot, reach)
 }
 
-// The giblets of enemy i (looks lk), at qb in the burst's space, tau seconds
-// after it: (distance, material), or `best` where none is nearer.
-pub fn sd_giblets(prm: Params, i: i32, lk: Looks, g: i32, secs: f32, tau: f32, qb: Vec3, best: Hit) -> Hit {
-    let seed = prm.enemy_seed;
+// A point of the burst's space in a piece's rest, given its place.
+#[inline]
+pub fn piece_rest(place: (Vec3, Vec3, f32, f32, f32, Vec3, f32), qb: Vec3) -> Vec3 {
+    let (c, axis, ca, sa, size, pivot, _) = place;
+    pivot + scale(1.0 / 0.02f32.maximum(size), rotate_about(axis, ca, sa, qb - c))
+}
+
+// Piece k at qr (its rest): (distance there, material, how far inside its
+// cut (negative inside; near 0 by a cut; -1e9 where it has none)).
+pub fn piece_at(prm: Params, i: i32, lk: Looks, e: Enemy, secs: f32, k: i32, qr: Vec3) -> (f32, i32, f32) {
+    let parts = if k == piece_hat { parts_hat } else if k == piece_staff { parts_staff } else { parts_body };
+    let (fd, fm) = enemy_figure(prm, i, lk, secs, qr, parts);
+    let cut = if k >= piece_hat || e.kill == kill_strike {
+        -1e9
+    } else if e.kill == kill_wind {
+        let w = dot(e.cut_n, qr - fig_middle) - e.cut_o;
+        if k == 0 { -w } else { w }
+    } else {
+        giblet_cell(k, qr)
+    };
     let flesh = m_enemy + enemy_parts * i + part_flesh;
-    let mut h = best;
-    let mut k = 0;
-    while k < giblets {
-        let place = giblet_place(seed, g, i, k, tau);
-        let (c, size) = (place.0, place.4);
-        let bound = length(qb - c) - size * giblet_reach;
-        if bound < h.0 {
-            let qr = giblet_rest(k, place, qb);
-            // (the figure as it was at the burst, its casting arm still)
-            let (fd, fm) = enemy_figure(prm, i, lk, secs - tau, qr);
-            let cell = giblet_cell(k, qr);
-            let d = size * fd.maximum(cell);
-            if d < h.0 {
-                h = (d, if cell >= fd { flesh } else { fm });
-            }
-        }
-        k += 1;
-    }
-    // and bits: small drops of flesh and blood, flung further and faster
-    let mut j = 0;
-    while j < giblet_bits {
-        let (c, radius) = giblet_bit(seed, g, i, j, tau);
-        let d = length(qb - c) - radius;
-        if d < h.0 {
-            h = (d, flesh);
-        }
-        j += 1;
-    }
-    h
+    (fd.maximum(cut), if cut >= fd { flesh } else { fm }, cut)
 }
 
-// Bit j of enemy i's giblets, tau seconds after the burst: its centre (in
-// the burst's space) and radius.
+// Bit j of a burst, tau seconds after: its centre (the burst's space) and
+// radius.
 #[inline]
 pub fn giblet_bit(seed: i32, g: i32, i: i32, j: i32, tau: f32) -> (Vec3, f32) {
     let hj = enemy_rnd(seed, g, i, 100 + j);
@@ -260,54 +299,58 @@ pub fn giblet_bit(seed: i32, g: i32, i: i32, j: i32, tau: f32) -> (Vec3, f32) {
     (c, smoothstep(fall_time, fall_time - 0.5, tau) * (0.025 + 0.05 * r(3)))
 }
 
-// The stretch of a ray (in his space) that passes near enemy e's giblets:
-// through any chunk's or bit's sphere ((INF, -INF) if none): so that a ray
-// through the burst's wide bound that misses every one is not marched.
-pub fn giblets_span(prm: Params, e: Enemy, i: i32, fl: Flight, ro: Vec3, rd: Vec3) -> (f32, f32) {
+// The remains of enemy i (looks lk, dying e) at qb in the burst's space:
+// (distance, material), or `best` where none is nearer.
+pub fn sd_remains(prm: Params, i: i32, lk: Looks, e: Enemy, secs: f32, qb: Vec3, best: Hit) -> Hit {
     let (seed, g, tau) = (prm.enemy_seed, e.r#gen, e.dying);
-    let at = move |c: Vec3| to_local_dir(fl, e.burst + yaw(e.yaw, c) - fl.pos);
-    let (mut t0, mut t1) = (INF, -INF);
+    let mut h = best;
     let mut k = 0;
-    while k < giblets {
-        let place = giblet_place(seed, g, i, k, tau);
-        let (a, b) = ray_sphere(at(place.0), place.4 * giblet_reach + 0.05, ro, rd);
-        if a <= b && b >= 0.0 {
-            t0 = t0.minimum(a);
-            t1 = t1.maximum(b);
+    while k < pieces {
+        if has_piece(e, k) {
+            let place = piece_place(seed, g, i, e, k, tau);
+            let (c, size, reach) = (place.0, place.4, place.6);
+            if length(qb - c) - size * reach < h.0 {
+                // (the figure as it was at the burst, its casting arm still)
+                let (d, m, _) = piece_at(prm, i, lk, e, secs - tau, k, piece_rest(place, qb));
+                if size * d < h.0 {
+                    h = (size * d, m);
+                }
+            }
         }
         k += 1;
     }
-    let mut j = 0;
-    while j < giblet_bits {
-        let (c, radius) = giblet_bit(seed, g, i, j, tau);
-        let (a, b) = ray_sphere(at(c), radius + 0.05, ro, rd);
-        if a <= b && b >= 0.0 {
-            t0 = t0.minimum(a);
-            t1 = t1.maximum(b);
+    if e.kill == kill_fire {
+        let flesh = m_enemy + enemy_parts * i + part_flesh;
+        let mut j = 0;
+        while j < giblet_bits {
+            let (c, radius) = giblet_bit(seed, g, i, j, tau);
+            let d = length(qb - c) - radius;
+            if d < h.0 {
+                h = (d, flesh);
+            }
+            j += 1;
         }
-        j += 1;
     }
-    (t0, t1)
+    h
 }
 
-// Which chunk of enemy i a point of the burst's space is on (the nearest),
-// and where that is in its rest: (the point there, how far inside its cell
-// (negative: inside; near 0 by a cut), the chunk's axis and rotation, for
-// turning normals into its rest).
-pub fn giblet_at(prm: Params, i: i32, lk: Looks, g: i32, secs: f32, tau: f32, qb: Vec3) -> (Vec3, f32, Vec3, f32, f32) {
-    let seed = prm.enemy_seed;
-    let mut best = (1e9f32, qb, 0f32, vec(0.0, 1.0, 0.0), 1f32, 0f32);
+// Which piece of enemy i a point of the burst's space is on (the nearest),
+// and where that is in its rest: (the point there, how far inside its cut,
+// the piece's axis and turn, for turning normals into its rest).
+pub fn remains_at(prm: Params, i: i32, lk: Looks, e: Enemy, secs: f32, qb: Vec3) -> (Vec3, f32, Vec3, f32, f32) {
+    let (seed, g, tau) = (prm.enemy_seed, e.r#gen, e.dying);
+    let mut best = (1e9f32, qb, -1e9f32, vec(0.0, 1.0, 0.0), 1f32, 0f32);
     let mut k = 0;
-    while k < giblets {
-        let place = giblet_place(seed, g, i, k, tau);
-        let (c, axis, ca, sa, size) = place;
-        if length(qb - c) - size * giblet_reach < best.0 {
-            let qr = giblet_rest(k, place, qb);
-            let (fd, _) = enemy_figure(prm, i, lk, secs - tau, qr);
-            let cell = giblet_cell(k, qr);
-            let d = size * fd.maximum(cell);
-            if d < best.0 {
-                best = (d, qr, cell, axis, ca, sa);
+    while k < pieces {
+        if has_piece(e, k) {
+            let place = piece_place(seed, g, i, e, k, tau);
+            let (c, axis, ca, sa, size, _, reach) = place;
+            if length(qb - c) - size * reach < best.0 {
+                let qr = piece_rest(place, qb);
+                let (d, _, cut) = piece_at(prm, i, lk, e, secs - tau, k, qr);
+                if size * d < best.0 {
+                    best = (size * d, qr, cut, axis, ca, sa);
+                }
             }
         }
         k += 1;
@@ -315,18 +358,52 @@ pub fn giblet_at(prm: Params, i: i32, lk: Looks, g: i32, secs: f32, tau: f32, qb
     (best.1, best.2, best.3, best.4, best.5)
 }
 
-// The giblets' bounding sphere tau seconds after the burst (in the burst's
-// space): every chunk flies within it.
+// The remains' bounding sphere tau seconds after the burst (the burst's
+// space): every piece and bit flies within it.
 #[inline]
 pub fn giblets_bound(tau: f32) -> (Vec3, f32) {
-    (vec(0.0, 1.0 + 3.5 * tau - 0.5 * gravity * tau * tau, 0.0), 1.8 + 5.5 * tau)
+    (vec(0.0, 1.0 + 3.5 * tau - 0.5 * gravity * tau * tau, 0.0), 2.2 + 5.5 * tau)
+}
+
+// The stretch of a ray (in his space) that passes near enemy e's remains:
+// through any piece's or bit's sphere ((INF, -INF) if none).
+pub fn giblets_span(prm: Params, e: Enemy, i: i32, fl: Flight, ro: Vec3, rd: Vec3) -> (f32, f32) {
+    let (seed, g, tau) = (prm.enemy_seed, e.r#gen, e.dying);
+    let at = move |c: Vec3| to_local_dir(fl, e.burst + yaw(e.yaw, c) - fl.pos);
+    let (mut t0, mut t1) = (INF, -INF);
+    let mut k = 0;
+    while k < pieces {
+        if has_piece(e, k) {
+            let place = piece_place(seed, g, i, e, k, tau);
+            let (a, b) = ray_sphere(at(place.0), place.4 * place.6 + 0.05, ro, rd);
+            if a <= b && b >= 0.0 {
+                t0 = t0.minimum(a);
+                t1 = t1.maximum(b);
+            }
+        }
+        k += 1;
+    }
+    if e.kill == kill_fire {
+        let mut j = 0;
+        while j < giblet_bits {
+            let (c, radius) = giblet_bit(seed, g, i, j, tau);
+            let (a, b) = ray_sphere(at(c), radius + 0.05, ro, rd);
+            if a <= b && b >= 0.0 {
+                t0 = t0.minimum(a);
+                t1 = t1.maximum(b);
+            }
+            j += 1;
+        }
+    }
+    (t0, t1)
 }
 
 // ---------------------------------------------------------------------
-// The blood mist: where a figure bursts, a cloud of fine blood billowing
-// out from its chest, thinning as it spreads and settles. Integrated along
-// a ray (like the clouds, separately from the march): ro + t rd for t in
-// [0, tend], through each burst's sphere: (radiance, transmittance).
+// What the remains leave in the air: a blood mist where a figure bursts (a
+// cloud of fine blood billowing out from its chest, thinning as it spreads
+// and settles; a little where one is cut), and behind a burst's giblets,
+// trails of smoke. Integrated along a ray (like the clouds, separately from
+// the march): ro + t rd for t in [0, tend]: (radiance, transmittance).
 pub fn blood_mist(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Vec3, tend: f32) -> (Vec3, f32) {
     let (mut rad, mut tr) = (splat(0.0), 1f32);
     let n = prm.enemies.min(max_enemies);
@@ -334,9 +411,10 @@ pub fn blood_mist(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Ve
     while i < n {
         let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
         let tau = e.dying;
-        if tau >= 0.0 && tau < fall_time {
-            let radius = 0.35 + 2.6 * (1.0 - (-2.6 * tau).exp());
-            let thick = 9.0 * (-1.8 * tau).exp() * smoothstep(0.0, 0.05, tau) * smoothstep(fall_time, fall_time - 0.8, tau);
+        if tau >= 0.0 && tau < fall_time && e.kill != kill_strike {
+            let much = if e.kill == kill_fire { 1.0 } else { 0.35 };
+            let radius = (0.35 + 2.6 * (1.0 - (-2.6 * tau).exp())) * (0.6 + 0.4 * much);
+            let thick = much * 9.0 * (-1.8 * tau).exp() * smoothstep(0.0, 0.05, tau) * smoothstep(fall_time, fall_time - 0.8, tau);
             let centre = e.burst + vec(0.0, 1.1 - 0.3 * tau * tau, 0.0);
             let c = to_local_dir(fl, centre - fl.pos);
             let (a, b) = ray_sphere(c, radius, ro, rd);
@@ -357,6 +435,38 @@ pub fn blood_mist(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Ve
                     rad = rad + scale(tr * dens * dt, vec(0.06, 0.005, 0.004));
                     tr = tr * (-dens * dt).exp();
                     j += 1;
+                }
+            }
+            // smoke trailing each giblet of a burst: its path over the last
+            // half second, a soft dark tube, thinner and wider the older
+            // (only for rays through the remains' wide bound)
+            let (gc, gr) = giblets_bound(tau);
+            let (ga, gb) = ray_sphere(to_local_dir(fl, e.burst + yaw(e.yaw, gc) - fl.pos), gr + 0.5, ro, rd);
+            if e.kill == kill_fire && ga <= gb && gb >= 0.0 {
+                let (seed, g) = (prm.enemy_seed, e.r#gen);
+                let at = move |q: Vec3| to_local_dir(fl, e.burst + yaw(e.yaw, q) - fl.pos);
+                let mut k = 0;
+                while k < giblets {
+                    let mut s = 0;
+                    while s < 2 {
+                        let (ta, tb) = ((tau - 0.25 * (s + 1) as f32).maximum(0.0), (tau - 0.25 * s as f32).maximum(0.0));
+                        if tb > ta {
+                            let pa = at(piece_place(seed, g, i, e, k, ta).0);
+                            let pb = at(piece_place(seed, g, i, e, k, tb).0);
+                            let (dist, t, _) = crate::spells::ray_segment(ro, rd, tend, pa, pb);
+                            if t < tend {
+                                let width = 0.12 + 0.25 * (tau - tb) + 0.15 * s as f32;
+                                let dens = (2.4 - 0.8 * s as f32) * (-1.0 * tau).exp() * (-(dist * dist) / (width * width)).exp();
+                                // (the ray's way through the tube: about its width; grey,
+                                // lit a little by the burst)
+                                let depth = dens * 1.8 * width;
+                                rad = rad + scale(tr * depth, vec(0.09, 0.08, 0.075));
+                                tr = tr * (-depth).exp();
+                            }
+                        }
+                        s += 1;
+                    }
+                    k += 1;
                 }
             }
         }
@@ -427,7 +537,8 @@ pub const enemy_grip: Vec3 = Vec3::new(0.45, 1.05, 0.18);
 pub const enemy_orb: Vec3 = Vec3::new(0.45, 2.05, 0.2);
 
 // The figure, in its own space: (distance, part).
-pub fn sd_enemy_figure(lk: Looks, secs: f32, q: Vec3) -> (f32, i32) {
+// The parts in `parts` (parts_*).
+pub fn sd_enemy_figure(lk: Looks, secs: f32, q: Vec3, parts: i32) -> (f32, i32) {
     // (cut flat at the platform: the cone's rounded foot poked through the carpet)
     let robe = sd_round_cone_ab(q, vec(0.0, 0.06, 0.0), vec(0.0, 1.32, 0.0), lk.hem, 0.15).maximum(-q.y);
     // one hand on the staff, the other raised and lowered as if casting
@@ -444,13 +555,9 @@ pub fn sd_enemy_figure(lk: Looks, secs: f32, q: Vec3) -> (f32, i32) {
     let band = sd_torus(hq - vec(0.0, 0.05, 0.0), 0.2, 0.024);
     let staff = sd_capsule(q, vec(0.45, 0.0, 0.18), enemy_orb - vec(0.0, 0.08, 0.0), 0.025);
     let orb = sd_sphere(q - enemy_orb, 0.09);
-    let h = (cloth, part_robe);
-    let h = umin((skin, part_skin), h);
-    let h = umin((beard, part_beard), h);
-    let h = umin((hat, part_hat), h);
-    let h = umin((band, part_band), h);
-    let h = umin((staff, part_staff), h);
-    umin((orb, part_orb), h)
+    let h = if parts & parts_body != 0 { umin((skin, part_skin), umin((beard, part_beard), (cloth, part_robe))) } else { nothing };
+    let h = if parts & parts_hat != 0 { umin((band, part_band), umin((hat, part_hat), h)) } else { h };
+    if parts & parts_staff != 0 { umin((orb, part_orb), umin((staff, part_staff), h)) } else { h }
 }
 
 // With full_enemies: the pose of an enemy with looks lk (his, at rest,
@@ -468,15 +575,26 @@ pub fn enemy_pose(prm: Params, lk: Looks, secs: f32) -> Pose {
     pose_at(secs + lk.phase, prm, on_path)
 }
 
-// The figure of enemy i (looks lk), at q in its space: (distance, material).
-pub fn enemy_figure(prm: Params, i: i32, lk: Looks, secs: f32, q: Vec3) -> Hit {
+// The figure of enemy i (looks lk), at q in its space, its parts in `parts`
+// (parts_*): (distance, material).
+pub fn enemy_figure(prm: Params, i: i32, lk: Looks, secs: f32, q: Vec3, parts: i32) -> Hit {
     let m = m_enemy + enemy_parts * i;
     if full_enemies {
         let ep = enemy_pose(prm, lk, secs);
-        let (d, fm) = bounded_figure(figure_layers, ep, 0.1, q);
-        umin((sd_sphere(q - ep.orb, orb_radius), m + part_orb), (d, m_enemy_full + full_parts * i + hit_material(fm)))
+        // (his figure's layers: the body and gear without the hat, the hat
+        // alone, the staff)
+        let body = parts & parts_body != 0;
+        let hat = parts & parts_hat != 0;
+        let mask = (if body { layers_figure | layers_gear } else { 0 })
+            | (if hat { layers_figure } else { 0 })
+            | (if parts & parts_staff != 0 { layers_staff } else { 0 })
+            | (if body && !hat { no_hat } else { 0 })
+            | (if hat && !body { only_hat } else { 0 });
+        let (d, fm) = if mask & figure_layers != 0 { bounded_figure(mask, ep, 0.1, q) } else { nothing };
+        let h = (d, m_enemy_full + full_parts * i + hit_material(fm));
+        if parts & parts_staff != 0 { umin((sd_sphere(q - ep.orb, orb_radius), m + part_orb), h) } else { h }
     } else {
-        let (d, part) = sd_enemy_figure(lk, secs, q);
+        let (d, part) = sd_enemy_figure(lk, secs, q, parts);
         (d, m + part)
     }
 }
@@ -506,16 +624,16 @@ pub fn enemies_dist(prm: Params, fs: Foes, secs: f32, fl: Flight, p: Vec3) -> Hi
                 if e.dying >= 0.0 {
                     umin(best, ph)
                 } else {
-                    let (fd, fm) = enemy_figure(prm, i, lk, secs, q);
+                    let (fd, fm) = enemy_figure(prm, i, lk, secs, q, parts_all);
                     umin(best, if fd < pd { (e.size * fd, fm) } else { ph })
                 }
             };
-            // defeated, the giblets
+            // defeated, its remains
             if e.dying >= 0.0 {
                 let qb = burst_space(fl, e, p);
                 let (gc, gr) = giblets_bound(e.dying);
                 let gb = length(qb - gc) - gr;
-                if gb > 0.3f32.minimum(h.0) { umin(h, (gb, m)) } else { sd_giblets(prm, i, lk, e.r#gen, secs, e.dying, qb, h) }
+                if gb > 0.3f32.minimum(h.0) { umin(h, (gb, m)) } else { sd_remains(prm, i, lk, e, secs, qb, h) }
             } else {
                 h
             }
