@@ -21,8 +21,10 @@
 //                 its charge so far age / life
 //   spell_windup  wind blades warming up, likewise: gusts swirling in
 //                 round the orb, faster and brighter as age / life nears 1
-//   spell_wisp    a defeated enemy's soul at (x, y, z), flying at (a, b,
-//                 c) to him
+//   spell_wisp    a defeated enemy's soul, its head at (x, y, z), the first
+//                 of its tail's points at (a, b, c)
+//   spell_wisp_tail  a piece of a soul's tail, from (x, y, z) to (a, b, c),
+//                 as wide as age there, and life at its end
 //
 // Every spell fades out over the last part of its life; the seed makes each
 // one a little different. Any other kind is an empty slot. Positions are in
@@ -42,6 +44,10 @@ pub const spell_lock: i32 = 7; // his strike locking on: a mark, green
 pub const spell_charge: i32 = 8;
 pub const spell_windup: i32 = 9;
 pub const spell_wisp: i32 = 10;
+pub const spell_wisp_tail: i32 = 11;
+// (a soul's head's width, and its tail's at its end)
+pub const wisp_head: f32 = 0.05;
+pub const wisp_tip: f32 = 0.003;
 
 // Where the ray o + t d (t in [0, tmax]) comes closest to the segment a-b:
 // (distance, t, and how far beyond tmax the nearest point of the segment
@@ -115,6 +121,34 @@ pub fn glow_line(r: f32, h: f32, dist: f32) -> (f32, f32) {
     ((-(dist * dist) / (r * r)).exp(), h * h / (dist * dist + h * h))
 }
 
+// A piece of a soul's tail from a to b, as wide as w0 at a and w1 at b,
+// tapering, and waving across the ray (the more, the further down the tail:
+// where along it is told by its width), the wave running down it: its
+// glow along the ray o + t d.
+#[inline]
+pub fn wisp_tail(o: Vec3, d: Vec3, tmax: f32, secs: f32, seed: i32, a: Vec3, b: Vec3, w0: f32, w1: f32) -> f32 {
+    let along = b - a;
+    let across = normalise(cross(along, d) + vec(0.0, 1e-4, 0.0));
+    let down = move |w: f32| saturate((wisp_head - w) / (wisp_head - wisp_tip));
+    let (s0, s1) = (down(w0), down(w1));
+    let point = move |k: i32| {
+        let f = k as f32 / 4.0;
+        let s = s0 + (s1 - s0) * f;
+        let wave = 0.16 * s * (11.0 * s - 13.0 * secs + seed as f32 * 0.7).sin();
+        a + scale(f, along) + scale(wave, across)
+    };
+    let mut glow = 0.0f32;
+    let mut k = 0;
+    while k < 4 {
+        let (dd, _, _) = ray_segment(o, d, tmax, point(k), point(k + 1));
+        let w = w0 + (w1 - w0) * (k as f32 + 0.5) / 4.0;
+        let (core, halo) = glow_line(w, 6.0 * w, dd);
+        glow = glow.maximum(1.8 * core + 0.25 * halo);
+        k += 1;
+    }
+    glow
+}
+
 // The light one spell (in slot i) adds along the ray, taking the slot's
 // values as scalars: spell_glow sums it over the slots.
 #[inline(never)]
@@ -185,12 +219,21 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         }
         scale((0.4 + 1.6 * f) * glow * seen(tt, 0.0, 0.3), vec(0.55, 0.92, 1.0))
     } else if kind == spell_wisp {
-        // a soul: a pale, wavering light with a fading tail behind it
-        let tail = p - scale(0.08, q);
-        let (dist, t, behind) = ray_segment(o, d, tmax, tail, p);
-        let (core, halo) = glow_line(0.07, 0.5, dist);
-        let flick = 0.8 + 0.2 * (secs * 17.0 + i as f32 * 2.3).sin();
-        scale(fade * flick * seen(t, behind, 0.3), scale(2.5 * core, vec(0.8, 0.95, 1.0)) + scale(0.35 * halo, vec(0.45, 0.75, 1.0)))
+        // a soul, like a sperm: a bright oval head, and the start of its
+        // tail behind it (the rest: spell_wisp_tail)
+        let back = normalise(q - p + vec(0.0, 1e-4, 0.0));
+        let (hd, t, behind) = ray_segment(o, d, tmax, p - scale(0.04, back), p + scale(0.05, back));
+        let (core, halo) = glow_line(wisp_head, 0.45, hd);
+        let flick = 0.8 + 0.2 * (secs * 17.0 + seed as f32 * 0.37).sin();
+        let tail = wisp_tail(o, d, tmax, secs, seed, p, q, wisp_head, 0.03);
+        scale(
+            fade * flick * seen(t, behind, 0.3),
+            scale(2.6 * core + tail, vec(0.82, 0.95, 1.0)) + scale(0.3 * halo, vec(0.45, 0.75, 1.0)),
+        )
+    } else if kind == spell_wisp_tail {
+        let flick = 0.8 + 0.2 * (secs * 17.0 + seed as f32 * 0.37).sin();
+        let (_, t, behind) = ray_segment(o, d, tmax, p, q);
+        scale(flick * seen(t, behind, 0.3) * wisp_tail(o, d, tmax, secs, seed, p, q, age, life), vec(0.82, 0.95, 1.0))
     } else if kind == spell_burst {
         // An explosion: a billowing fireball that swells fast and cools
         // from yellow-white through orange to a dull red, a shockwave ring

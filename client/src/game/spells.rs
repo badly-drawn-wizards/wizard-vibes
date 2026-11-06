@@ -38,6 +38,11 @@ pub const LOCK: u32 = 7; // his strike locking on to a target (held)
 pub const CHARGE: u32 = 8; // a fire bolt being charged at the orb (his: held)
 pub const WINDUP: u32 = 9; // wind blades warming up at the orb
 pub const WISP: u32 = 10; // a defeated enemy's soul, flying to him (it restores his mana)
+pub const WISP_TAIL: u32 = 11; // a piece of a soul's tail (drawn only: see pack)
+// (a soul's tail: how much of its path it trails, units, and how far apart
+// the points of its path are kept)
+const TAIL: f32 = 1.8;
+const TAIL_STEP: f32 = 0.05;
 pub const STRIDE: usize = 10;
 
 const LIFE: [f32; 11] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5, 12.0]; // seconds, by kind
@@ -139,6 +144,7 @@ struct Spell {
     done: bool, // its blast (a burst's or a strike's) has been dealt
     power: f32, // a fire bolt's (and its burst's) charge, 0..1
     quiet: bool, // a wind blade that fades at the end of its flight (not bursting)
+    trail: Vec<V3>, // a soul's path behind it, newest last (TAIL of it)
 }
 
 // His wind blades held: they come faster as it spins up (spin 0..1), and
@@ -290,6 +296,7 @@ impl Spells {
             done: false,
             power: 0.0,
             quiet: false,
+            trail: Vec::new(),
         };
         self.next_id += 1;
         if kind == STRIKE || kind == MARK {
@@ -491,6 +498,21 @@ impl Spells {
                     s.pos[i] += s.vel[i] * dt;
                 }
             }
+            // (a soul's path, as its tail: a point every TAIL_STEP, as much
+            // as TAIL of it)
+            if s.kind == WISP && s.trail.last().is_none_or(|&l| dist(l, s.pos) >= TAIL_STEP) {
+                s.trail.push(s.pos);
+                let mut length = 0.0;
+                let mut keep = 0;
+                for k in (1..s.trail.len()).rev() {
+                    length += dist(s.trail[k], s.trail[k - 1]);
+                    if length > TAIL {
+                        keep = k - 1;
+                        break;
+                    }
+                }
+                s.trail.drain(..keep);
+            }
             // a wind blade that flew its course bursts too (a gatling's
             // fades)
             if s.kind == WIND && !s.quiet && s.age >= s.life {
@@ -571,11 +593,19 @@ impl Spells {
     // poses it, not at its x, y, z).
     pub fn pack(&self) -> Vec<f32> {
         let mut out = vec![-1.0; self.limit * STRIDE];
+        let mut tails = Vec::new();
         for (i, s) in self.items.iter().take(self.limit).enumerate() {
             let extra = if s.kind == STRIKE || s.kind == MARK {
                 [0.0, s.top, 0.0]
             } else if s.kind == BURST {
                 [s.power, 0.0, 0.0]
+            } else if s.kind == WISP {
+                // (a soul: its head, and the first of three points along its
+                // tail; the rest as two more pieces, in free slots)
+                let [a, b, c] = tail_points(&s.trail, s.pos);
+                tails.push([WISP_TAIL as f32, a[0], a[1], a[2], b[0], b[1], b[2], 0.03, 0.014, s.seed]);
+                tails.push([WISP_TAIL as f32, b[0], b[1], b[2], c[0], c[1], c[2], 0.014, 0.003, s.seed]);
+                a
             } else {
                 s.vel
             };
@@ -584,11 +614,20 @@ impl Spells {
             ];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
+        // (the souls' tails, in the free slots there are)
+        let mut free = self.items.len();
+        for t in tails {
+            if free < self.limit {
+                out[free * STRIDE..(free + 1) * STRIDE].copy_from_slice(&t);
+                free += 1;
+            }
+        }
+        let free = free.min(self.limit.max(1) - 1);
         // (locking on, the ring round the target: likewise)
         if let (Some(l), true) = (&self.lock, self.limit > 0) {
             let at = l.target.or(l.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
             if let Some(p) = at {
-                let i = self.items.len().min(self.limit - 1);
+                let i = free;
                 let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, LOCK_TIME, 11.0];
                 out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
             }
@@ -596,14 +635,14 @@ impl Spells {
         // (his wind blades warming up, at the orb: likewise)
         let g = self.gatling;
         if g.warm > 0.0 && g.warm < WARMUP && self.limit > 0 {
-            let i = self.items.len().min(self.limit - 1);
+            let i = free;
             let [x, y, z] = self.orb;
             let slot = [WINDUP as f32, x, y, z, 0.0, 0.0, 0.0, g.warm, WARMUP, 3.0];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
         // (charging, the fire bolt at the orb: likewise)
         if self.charge >= 0.0 && self.limit > 0 {
-            let i = self.items.len().min(self.limit - 1);
+            let i = free;
             let [x, y, z] = self.orb;
             let slot = [CHARGE as f32, x, y, z, 0.0, 0.0, 0.0, self.charge, CHARGE_TIME, 5.0];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
@@ -611,7 +650,7 @@ impl Spells {
         // (channelling, the healing round him: in the first free slot, or
         // the last)
         if self.channel >= 0.0 && self.limit > 0 {
-            let i = self.items.len().min(self.limit - 1);
+            let i = free;
             let [x, y, z] = self.here;
             let slot = [HEAL as f32, x, y, z, 0.0, 0.0, 0.0, self.channel, LIFE[HEAL as usize], 7.0];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
@@ -721,4 +760,27 @@ mod tests {
         assert!(s.events.contains(&SpellEvent::Sound { what: Sound::Strike, pos: [1.0, 2.0, 3.0] }));
         assert_eq!(hits(&s), vec![(HIS, STRIKE)]);
     }
+}
+
+// Three points along a soul's tail (its path behind `head`, oldest first),
+// a third, two thirds and all the way along it: all of it the renderer is
+// sent.
+fn tail_points(trail: &[V3], head: V3) -> [V3; 3] {
+    let mut pts: Vec<V3> = trail.iter().rev().copied().collect();
+    pts.insert(0, head);
+    let total: f32 = pts.windows(2).map(|w| dist(w[0], w[1])).sum();
+    let at = |f: f32| {
+        let want = f * total;
+        let mut gone = 0.0;
+        for w in pts.windows(2) {
+            let d = dist(w[0], w[1]);
+            if gone + d >= want && d > 0.0 {
+                let t = (want - gone) / d;
+                return [0, 1, 2].map(|k| w[0][k] + (w[1][k] - w[0][k]) * t);
+            }
+            gone += d;
+        }
+        *pts.last().unwrap()
+    };
+    [at(1.0 / 3.0), at(2.0 / 3.0), at(1.0)]
 }

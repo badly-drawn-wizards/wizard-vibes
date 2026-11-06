@@ -49,8 +49,9 @@ fn main() -> eframe::Result {
                 o.camera = Some(wizard::types::Camera { yaw, pitch, dist });
             }
             "--spell" => {
-                // (A: the slot's a, e.g. a burst's charge; LIFE: its life)
-                let usage = "--spell: KIND,X,Y,Z,AGE[,A[,LIFE]]";
+                // (A, B, C: the slot's a, b, c, e.g. a burst's charge, or a
+                // soul's tail; LIFE: its life)
+                let usage = "--spell: KIND,X,Y,Z,AGE[,A[,LIFE[,B,C]]]";
                 let v: Vec<f32> = value().split(',').map(|x| x.parse().unwrap_or_else(|_| die(usage))).collect();
                 let (kind, x, y, z, age) = match v[..] {
                     [k, x, y, z, age, ..] => (k, x, y, z, age),
@@ -58,7 +59,8 @@ fn main() -> eframe::Result {
                 };
                 let a = v.get(5).copied().unwrap_or(0.0);
                 let life = v.get(6).copied().unwrap_or(1000.0);
-                o.spells.extend([kind, x, y, z, a, 0.0, 0.0, age, life, 7.0]);
+                let (b, c) = (v.get(7).copied().unwrap_or(0.0), v.get(8).copied().unwrap_or(0.0));
+                o.spells.extend([kind, x, y, z, a, b, c, age, life, 7.0]);
             }
             "--wgsl" => o.wgsl = true,
             "--music" => o.music = Some(value().parse().unwrap_or_else(|_| die("--music: a number of frames"))),
