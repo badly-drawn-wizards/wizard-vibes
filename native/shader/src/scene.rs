@@ -175,7 +175,7 @@ pub const local_layers: i32 = figure_layers | layers_rock;
 // capsule along its axis, and the staff as a plain rod; and the rock.
 #[inline(never)]
 pub fn shadow_scene(mask: i32, pose: Pose, tol: f32, p: Vec3) -> f32 {
-    let figure = if !(has(mask, layers_figure)) {
+    let figure = if !(has(mask, layers_figure)) || pose.dead {
         1e9
     } else {
         let b = wizard_bound(p);
@@ -189,7 +189,7 @@ pub fn shadow_scene(mask: i32, pose: Pose, tol: f32, p: Vec3) -> f32 {
             sd_capsule(hq, beard_top, beard_tip, 0.05).minimum(x)
         }
     };
-    let staff = if !(has(mask, layers_staff)) {
+    let staff = if !(has(mask, layers_staff)) || pose.dead {
         1e9
     } else {
         sd_capsule(staff_rest(pose, p), staff_foot, staff_top, staff_radius)

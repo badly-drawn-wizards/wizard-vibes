@@ -233,8 +233,8 @@ pub enum Chip {
     Stick(char),
     // a direction of the D-pad (up, down, left, right)
     DPad(u8),
-    // the mouse, its left button pressed (a click)
-    Mouse,
+    // the mouse, its left (false) or right (true) button pressed (a click)
+    Mouse(bool),
 }
 
 // A row of chips, laid out left to right.
@@ -292,9 +292,9 @@ pub fn chip(ui: &mut Ui, c: Chip) {
             ui.painter().rect_filled(r, radius, Color32::from_rgb(0x3a, 0x37, 0x60));
             paint_icon(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(10.0)), which, Color32::WHITE);
         }
-        Chip::Mouse => {
+        Chip::Mouse(right) => {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 18.0), Sense::hover());
-            paint_mouse(ui.painter(), rect.center(), 8.0, FG);
+            paint_mouse(ui.painter(), rect.center(), 8.0, FG, right);
         }
         Chip::DPad(d) => {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 18.0), Sense::hover());
@@ -466,7 +466,7 @@ pub fn paint_pad_glyph(p: &egui::Painter, c: Pos2, r: f32, chip: Chip) {
             paint_dpad(p, c, r, d);
         }
         Chip::Key(k) => paint_key_glyph(p, c, 2.0 * r, k),
-        Chip::Mouse => paint_mouse(p, c, r, FG),
+        Chip::Mouse(right) => paint_mouse(p, c, r, FG, right),
         Chip::Text(s) => label(s, DIM),
     }
 }
@@ -559,14 +559,19 @@ pub fn paint_spell(p: &egui::Painter, c: Pos2, r: f32, i: usize, colour: Color32
     }
 }
 
-// A mouse, `r` half its height, round c: its outline, its left button
-// filled (a click).
-pub fn paint_mouse(p: &egui::Painter, c: Pos2, r: f32, colour: Color32) {
+// A mouse, `r` half its height, round c: its outline, its left (or right)
+// button filled (a click).
+pub fn paint_mouse(p: &egui::Painter, c: Pos2, r: f32, colour: Color32, right: bool) {
     let body = Rect::from_center_size(c, Vec2::new(1.3 * r, 2.0 * r));
     let k = (0.62 * r) as u8;
     p.rect_stroke(body, k, Stroke::new(1.3, colour), StrokeKind::Inside);
-    let left = Rect::from_min_max(body.min, Pos2::new(body.center().x, body.top() + 0.8 * r));
-    p.rect_filled(left.shrink(1.2), CornerRadius { nw: k, ne: 0, sw: 0, se: 0 }, colour);
+    let button = if right {
+        Rect::from_min_max(Pos2::new(body.center().x, body.top()), Pos2::new(body.right(), body.top() + 0.8 * r))
+    } else {
+        Rect::from_min_max(body.min, Pos2::new(body.center().x, body.top() + 0.8 * r))
+    };
+    let corner = if right { CornerRadius { nw: 0, ne: k, sw: 0, se: 0 } } else { CornerRadius { nw: k, ne: 0, sw: 0, se: 0 } };
+    p.rect_filled(button.shrink(1.2), corner, colour);
     p.line_segment([Pos2::new(body.center().x, body.top()), Pos2::new(body.center().x, body.top() + 0.8 * r)], Stroke::new(1.0, colour));
     p.line_segment([Pos2::new(body.left(), body.top() + 0.8 * r), Pos2::new(body.right(), body.top() + 0.8 * r)], Stroke::new(1.0, colour));
 }

@@ -78,6 +78,10 @@ pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
     let fall = if dying >= 0.0 { 2.5 * dying * dying } else { 0.0 };
     let size = if dying >= 0.0 { smoothstep(fall_time, fall_time - 1.0, dying) } else { 1.0 - 0.95 * appear * appear };
     let pos = foe_pos(fs, i);
+    // (him, defeated: where he stood, turned his way, not falling)
+    let him = i == fs.him;
+    let fall = if him { 0.0 } else { fall };
+    let size = if him { 1.0 } else { size };
     let to_him = fl.pos - pos;
     let (kill, cut_n, cut_o) = kill_of(foe_kill(fs, i));
     Enemy {
@@ -86,12 +90,12 @@ pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
         kill,
         cut_n,
         cut_o,
-        yaw: to_him.x.atan2(to_him.z),
+        yaw: if him { fl.heading } else { to_him.x.atan2(to_him.z) },
         r#gen,
         appear,
         dying,
         size,
-        tumble: if dying >= 0.0 { 1.4 * dying + 0.5 * dying * dying } else { 0.0 },
+        tumble: if dying >= 0.0 && !him { 1.4 * dying + 0.5 * dying * dying } else { 0.0 },
     }
 }
 
@@ -399,7 +403,8 @@ pub fn giblets_span(prm: Params, e: Enemy, i: i32, fl: Flight, ro: Vec3, rd: Vec
 // the march): ro + t rd for t in [0, tend]: (radiance, transmittance).
 pub fn blood_mist(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Vec3, tend: f32) -> (Vec3, f32) {
     let (mut rad, mut tr) = (splat(0.0), 1f32);
-    let n = prm.enemies.min(max_enemies);
+    // (and him, defeated: see him_dying)
+    let n = prm.enemies.min(max_enemies) + if him_dying(fs) { 1 } else { 0 };
     let mut i = 0;
     while i < n {
         let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
@@ -494,6 +499,30 @@ pub struct Looks {
     // the spell it casts (as his: 0 fire, 1 lightning, 2 wind), which its
     // orb shows
     pub spell: i32,
+}
+
+// The looks of slot i: an enemy's, or, the slot after theirs, his (see
+// him_dying).
+pub fn looks_in(prm: Params, fs: Foes, g: i32, i: i32) -> Looks {
+    if i == fs.him {
+        Looks {
+            kind: prm.platform,
+            robe: prm.robe_colour,
+            hat: prm.hat_colour,
+            beard: prm.beard_tint,
+            skin: prm.skin_colour,
+            circle: prm.orb_glow_colour,
+            carpet: prm.robe_colour,
+            hem: prm.robe_hem - 0.06,
+            hat_h: 0.8,
+            droop: prm.hat_droop,
+            beard_len: 0.4,
+            phase: 0.0,
+            spell: 1,
+        }
+    } else {
+        looks_of(prm.enemy_seed, g, i)
+    }
 }
 
 pub fn looks_of(seed: i32, g: i32, i: i32) -> Looks {
@@ -592,10 +621,11 @@ pub fn enemy_figure(prm: Params, i: i32, lk: Looks, secs: f32, q: Vec3, parts: i
             | (if parts & parts_staff != 0 { layers_staff } else { 0 })
             | (if body && !hat { no_hat } else { 0 })
             | (if hat && !body { only_hat } else { 0 });
-        // (its orb his, in the colour of its spell)
+        // (its orb a glowing sphere, in the colour of its spell: his is
+        // drawn apart, as glass)
         let (d, fm) = if mask & figure_layers != 0 { bounded_figure(mask, ep, 0.1, q) } else { nothing };
-        let _ = m;
-        (d, m_enemy_full + full_parts * i + hit_material(fm))
+        let h = (d, m_enemy_full + full_parts * i + hit_material(fm));
+        if parts & parts_staff != 0 { umin((sd_sphere(q - ep.orb, orb_radius), m + part_orb), h) } else { h }
     } else {
         let (d, part) = sd_enemy_figure(lk, secs, q, parts);
         (d, m + part)
@@ -607,7 +637,8 @@ pub fn enemy_figure(prm: Params, i: i32, lk: Looks, secs: f32, q: Vec3, parts: i
 pub fn enemies_dist(prm: Params, fs: Foes, secs: f32, fl: Flight, p: Vec3) -> Hit {
     let seed = prm.enemy_seed;
     let mut best = nothing;
-    let n = prm.enemies.min(max_enemies);
+    // (and him, defeated: only his remains, see him_dying)
+    let n = prm.enemies.min(max_enemies) + if him_dying(fs) { 1 } else { 0 };
     let mut i = 0;
     while i < n {
         let e = enemy_at(seed, fs, i, secs, fl);
@@ -617,9 +648,11 @@ pub fn enemies_dist(prm: Params, fs: Foes, secs: f32, fl: Flight, p: Vec3) -> Hi
             let q = enemy_space(fl, e, p);
             let bound = e.size * (length(q - enemy_centre) - enemy_radius);
             let m = m_enemy + enemy_parts * i;
-            let lk = looks_of(seed, e.r#gen, i);
+            let lk = looks_in(prm, fs, e.r#gen, i);
             // the platform, and alive, the figure on it
-            let h = if bound > 0.3f32.minimum(best.0) {
+            let h = if i == fs.him {
+                best
+            } else if bound > 0.3f32.minimum(best.0) {
                 umin(best, (bound, m))
             } else {
                 let (pd, pm) = platform_exact(lk.kind, secs, q);
@@ -652,14 +685,15 @@ pub fn enemies_dist(prm: Params, fs: Foes, secs: f32, fl: Flight, p: Vec3) -> Hi
 // ray-sphere test each).
 pub fn march_enemies(prm: Params, fs: Foes, secs: f32, fl: Flight, ro: Vec3, rd: Vec3, tmax: f32) -> (f32, i32) {
     let (mut t0, mut t1) = (INF, -INF);
-    let n = prm.enemies.min(max_enemies);
+    let n = prm.enemies.min(max_enemies) + if him_dying(fs) { 1 } else { 0 };
     let mut i = 0;
     while i < n {
         let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
-        // (tumbling moves the centre round the axis: a wider sphere covers it)
+        // (tumbling moves the centre round the axis: a wider sphere covers it;
+        // him: only his remains)
         let c = to_local_dir(fl, e.pos + tumble_axis - fl.pos);
         let (a, b) = ray_sphere(c, e.size * enemy_radius + 0.6, ro, rd);
-        let (n0, n1) = if !(shown(e)) || a > b || b < 0.0 { (t0, t1) } else { (t0.minimum(a), t1.maximum(b)) };
+        let (n0, n1) = if !(shown(e)) || a > b || b < 0.0 || i == fs.him { (t0, t1) } else { (t0.minimum(a), t1.maximum(b)) };
         // (defeated, where the ray passes its giblets too)
         // (first the burst's wide bound, which most rays miss)
         let (n0, n1) = if shown(e) && e.dying >= 0.0 {

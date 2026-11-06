@@ -14,6 +14,10 @@ pub const CHARGE_DRAIN: f32 = 12.0; // a second, while charging a fire bolt (on 
 #[derive(Clone, Debug)]
 pub struct Mana {
     pub value: f32,
+    // the most there can be, and how fast it refills (times REGEN): his
+    // skills raise them
+    pub max: f32,
+    pub regen: f32,
     // seconds since something wanted more than there was
     pub short: f32,
     since: f32, // seconds since it was last spent
@@ -21,7 +25,7 @@ pub struct Mana {
 
 impl Default for Mana {
     fn default() -> Self {
-        Mana { value: MANA, short: 99.0, since: 99.0 }
+        Mana { value: MANA, max: MANA, regen: 1.0, short: 99.0, since: 99.0 }
     }
 }
 
@@ -52,7 +56,7 @@ impl Mana {
         self.since += dt;
         self.short += dt;
         if self.since > PAUSE {
-            self.value = (self.value + REGEN * dt).min(MANA);
+            self.value = (self.value + REGEN * self.regen * dt).min(self.max);
         }
     }
 }

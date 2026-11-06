@@ -184,6 +184,9 @@ pub struct Spells {
     pub gatling: Gatling,
     // free for all: the enemies' spells hit each other too
     pub ffa: bool,
+    // his bursts' reach, and his lock-on's time, times (his skills)
+    pub blast: f32,
+    pub lock_time: f32,
     items: Vec<Spell>,
     // each spell's cooldown left (seconds)
     cooldowns: [f32; 4],
@@ -206,6 +209,8 @@ impl Default for Spells {
             orb: [0.0; 3],
             gatling: Gatling::default(),
             ffa: false,
+            blast: 1.0,
+            lock_time: LOCK_TIME,
             items: Vec::new(),
             cooldowns: [0.0; 4],
             next_id: 1,
@@ -434,6 +439,7 @@ impl Spells {
 
     // Bolts and blades that fly into a target; bursts' and strikes' blasts.
     fn collide(&mut self) {
+        let blast = self.blast;
         let ffa = self.ffa;
         let targets = &self.targets;
         let events = &mut self.events;
@@ -454,7 +460,7 @@ impl Spells {
                 // damage by its charge, and down to half at the edge of its
                 // reach)
                 s.done = true;
-                let reach = if s.kind == BURST { BLAST * (1.0 + s.power) } else { STRIKE_REACH };
+                let reach = if s.kind == BURST { BLAST * (1.0 + s.power) * if s.owner == HIS { blast } else { 1.0 } } else { STRIKE_REACH };
                 let mut hits: Vec<(i32, f32)> = Vec::new();
                 for t in targets {
                     let d = (dist(s.pos, t.c) - t.r).max(0.0);
@@ -654,7 +660,7 @@ impl Spells {
             let at = l.target.or(l.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
             if let Some(p) = at {
                 let i = free;
-                let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, LOCK_TIME, 11.0];
+                let slot = [LOCK as f32, p[0], p[1], p[2], 0.0, p[1] + STRIKE_HEIGHT, 0.0, l.age, self.lock_time, 11.0];
                 out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
             }
         }

@@ -25,6 +25,7 @@ pub mod mode;
 pub mod quality;
 pub mod sfx;
 pub mod shield;
+pub mod skills;
 pub mod spellbar;
 pub mod spells;
 pub mod vec;
@@ -57,6 +58,7 @@ const STORE_SHOULDER: &str = "wizard-over-shoulder";
 const STORE_SWAP_XY: &str = "wizard-swap-xy";
 const STORE_SOULS: &str = "wizard-souls";
 const STORE_FFA: &str = "wizard-ffa";
+const STORE_SKILLS: &str = "wizard-skills";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -123,6 +125,13 @@ pub struct Game {
     pub souls: u64,
     // free for all (the enemies fight each other too), or one against all
     ffa: bool,
+    // defeated: how (see Death)
+    death: Option<Death>,
+    // his skills (bought with souls), the one shown in the tree, and the
+    // skill tree asked for (from the defeat screen: the app opens it)
+    skills: skills::Skills,
+    skill_shown: usize,
+    open_skills: bool,
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
@@ -164,6 +173,20 @@ struct Capture {
     since: Instant,
     mods: egui::Modifiers,
 }
+
+// Defeated, he comes apart (drawn as an enemy would: see the shader's
+// him_dying) while time slows to a stop over DEATH_SLOW seconds; then the
+// scene holds still, the camera free to look round, and the defeat panel
+// shows. Where he stood, what defeated him (a kill code, as he faced), and
+// since when.
+#[derive(Clone, Copy, Debug)]
+struct Death {
+    pos: V3,
+    code: f32,
+    since: Instant,
+}
+
+const DEATH_SLOW: f32 = 2.0;
 
 // (how long a binding waits for its key, or button)
 const CAPTURE_SECS: f32 = 6.0;
@@ -211,6 +234,10 @@ impl Game {
             enemies_shown: 0,
             souls: get(STORE_SOULS).and_then(|v| v.parse().ok()).unwrap_or(0),
             ffa: get(STORE_FFA).as_deref() == Some("1"),
+            death: None,
+            skills: get(STORE_SKILLS).map_or_else(skills::Skills::default, |v| skills::Skills::restored(&v)),
+            skill_shown: 0,
+            open_skills: false,
             cross: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
@@ -233,6 +260,7 @@ impl Game {
         storage.set_string(STORE_SWAP_XY, if self.pads.swap_xy { "1" } else { "0" }.to_string());
         storage.set_string(STORE_SOULS, self.souls.to_string());
         storage.set_string(STORE_FFA, if self.ffa { "1" } else { "0" }.to_string());
+        storage.set_string(STORE_SKILLS, self.skills.saved());
         if let Some(c) = self.quality.choice {
             storage.set_string(STORE_QUALITY, c.key().to_string());
         }
@@ -439,11 +467,10 @@ impl Game {
             });
             self.orbit.interacted = true;
         }
-        // the mouse: a click on the view takes it (not while paused, nor
-        // defeated), and it then turns the camera
-        let defeated = self.combat.hud.lost.is_some();
+        // the mouse: a click on the view takes it (not while paused), and it
+        // then turns the camera
         let picture = self.picture.is_some();
-        if view.clicked() && (!self.paused || picture) && (!defeated || picture) && !self.look.held() {
+        if view.clicked() && (!self.paused || picture) && !self.look.held() {
             self.look.grab(ctx);
         }
         // (a click on the view, outside the dialogs, dismisses them: the
@@ -451,8 +478,6 @@ impl Game {
         if view.clicked() && !picture {
             if self.paused {
                 self.paused = false;
-            } else if defeated {
-                self.combat.reset(&mut self.spells);
             }
         }
         let (dx, dy) = self.look.take(ctx);
@@ -534,13 +559,17 @@ impl Game {
                     Action::Mode => self.cycle_mode(),
                     Action::Pause => self.pause_pressed(),
                     Action::Spell(s) => self.spells.select(s),
+                    // (defeated, and time stopped: casting opens the skill
+                    // tree, the shield tries again)
+                    Action::Cast if self.settled() && !self.paused => self.ask_skills(),
+                    Action::Shield if self.settled() && !self.paused => self.combat.reset(&mut self.spells),
                     _ => {}
                 }
             }
             for (key, _) in keys {
                 match key {
                     Key::Escape => self.pause_pressed(),
-                    Key::Enter if self.combat.enemies.down >= 0.0 && !self.paused => self.combat.reset(&mut self.spells),
+                    Key::Enter if self.settled() && !self.paused => self.combat.reset(&mut self.spells),
                     _ => {}
                 }
             }
@@ -554,11 +583,11 @@ impl Game {
             self.paused = true;
         }
         let picture = self.picture.is_some();
-        if (self.paused || defeated) && !picture || !ctx.input(|i| i.focused) {
+        if self.paused && !picture || !ctx.input(|i| i.focused) {
             self.look.release(ctx);
         }
         if !self.paused {
-            self.time += dt;
+            self.time += dt * self.time_scale();
         }
         self.orbit.idle(dt);
         let pad = self.pads.read(&self.binds);
@@ -594,7 +623,10 @@ impl Game {
                 self.menu = Some(*p);
             } else {
                 // (A tries again once he is defeated)
-                if p.confirm && self.combat.enemies.down >= 0.0 {
+                if p.pressed == Some(binds::PadButton::X) && self.settled() {
+                    self.ask_skills();
+                }
+                if p.confirm && self.settled() {
                     self.combat.reset(&mut self.spells);
                 }
                 if let Some(s) = p.spell {
@@ -608,7 +640,7 @@ impl Game {
             self.enemies_shown = n;
         }
         let pad_cast = pad.is_some_and(|p| p.cast);
-        let game_dt = if self.paused { 0.0 } else { dt };
+        let game_dt = if self.paused { 0.0 } else { dt * self.time_scale() };
         let (origin, dir) = self.cast_from();
         // (how fast he goes: from where he was last step; a jump, as the
         // mode changes, not counted)
@@ -620,6 +652,7 @@ impl Game {
         }
         let dir = self.assist(origin, dir);
         self.spells.ffa = self.ffa;
+        self.combat.boosts = self.skills.boosts();
         self.combat.enemies.ffa = self.ffa;
         let moment = Moment {
             dt: game_dt,
@@ -676,7 +709,7 @@ impl Game {
         // (channelling healing, he cannot move: no input, and he is brought
         // to a stop)
         let channelling = self.spells.channel >= 0.0;
-        let (held, stick) = if channelling { (flight::Held::default(), None) } else { (held, stick) };
+        let (held, stick) = if channelling || self.death.is_some() { (flight::Held::default(), None) } else { (held, stick) };
         self.flight.update(game_dt, self.time, heading + self.orbit.cam.yaw + PI, &held, stick.as_ref());
         if channelling {
             self.flight.brake(game_dt);
@@ -714,6 +747,29 @@ impl Game {
         drive.foe = foes;
         drive.kill = kills;
         drive.foe_pos = self.combat.enemies.positions();
+        // (defeated: he comes apart in the slot after the enemies')
+        let e = &self.combat.enemies;
+        match (e.down >= 0.0, self.death) {
+            (true, None) => {
+                let (pos, heading) = self.flight.place(self.time);
+                let (kind, cut) = e.his_end.unwrap_or((spells::BURST, None));
+                self.death = Some(Death { pos, code: enemies::kill_code(kind, cut, pos, heading), since: Instant::now() });
+            }
+            (false, Some(_)) => self.death = None,
+            _ => {}
+        }
+        // (else that slot says nothing of the kind: an enemy there before,
+        // with more of them, may have been defeated)
+        if n < enemies::MAX {
+            match &self.death {
+                Some(d) => {
+                    drive.foe[n] = 16.0 * e.his_deaths as f32 + 8.0 + e.down.min(7.9);
+                    drive.kill[n] = d.code;
+                    drive.foe_pos[n] = d.pos;
+                }
+                None => drive.foe[n] = 0.0,
+            }
+        }
 
 
         // (and for a lock on the ground, its height)
@@ -765,6 +821,31 @@ impl Game {
         if let Some(m) = chosen {
             self.set_mode(m);
         }
+    }
+
+    // The skill tree, asked for from the defeat screen: paused, the app
+    // opens the menu at it (see take_open_skills).
+    fn ask_skills(&mut self) {
+        self.paused = true;
+        self.open_skills = true;
+    }
+
+    pub fn take_open_skills(&mut self) -> bool {
+        std::mem::take(&mut self.open_skills)
+    }
+
+    // How fast time runs: slowing to a stop as he comes apart.
+    fn time_scale(&self) -> f32 {
+        match &self.death {
+            Some(d) => (1.0 - d.since.elapsed().as_secs_f32() / DEATH_SLOW).max(0.0).powi(2),
+            None => 1.0,
+        }
+    }
+
+    // Defeated, and time stopped: the defeat panel is up (and he may try
+    // again).
+    fn settled(&self) -> bool {
+        self.death.is_some_and(|d| d.since.elapsed().as_secs_f32() >= DEATH_SLOW)
     }
 
     // Whether in picture mode (the scene still, the camera flown freely:
@@ -976,40 +1057,152 @@ impl Game {
 
         // defeated: a panel says so, until he tries again
         match (&h.lost, self.defeat_since) {
-            (Some(_), None) => self.defeat_since = Some(Instant::now()),
+            (Some(_), None) if self.settled() => self.defeat_since = Some(Instant::now()),
             (None, Some(_)) => self.defeat_since = None,
             _ => {}
         }
         if let (Some(stats), Some(since)) = (&h.lost, self.defeat_since) {
-            let alpha = (since.elapsed().as_secs_f32() / 0.6).min(1.0);
+            // the word across a dark band a quarter of the way down, fading
+            // in and growing a little; what he did, beneath; and at the
+            // bottom, what the buttons do now
+            let t = since.elapsed().as_secs_f32();
+            let alpha = (t / 1.6).min(1.0);
             if alpha < 1.0 {
                 ctx.request_repaint();
             }
-            egui::Area::new(egui::Id::unique("wizard-defeat"))
-                .pivot(Align2::CENTER_CENTER)
-                .fixed_pos(egui::pos2(rect.center().x, rect.top() + 0.4 * rect.height()))
+            let y = rect.top() + 0.25 * rect.height();
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("wizard-defeat")));
+            let band = 110.0;
+            let mut mesh = egui::epaint::Mesh::default();
+            for (k, a) in [(0.0, 0.0), (0.5, 0.75), (1.0, 0.0)] {
+                let c = egui::Color32::from_black_alpha((255.0 * a * alpha) as u8);
+                let yy = y - 0.5 * band + k * band;
+                mesh.colored_vertex(egui::pos2(rect.left(), yy), c);
+                mesh.colored_vertex(egui::pos2(rect.right(), yy), c);
+            }
+            for k in 0..2u32 {
+                let b = 2 * k;
+                mesh.add_triangle(b, b + 1, b + 3);
+                mesh.add_triangle(b, b + 3, b + 2);
+            }
+            painter.add(egui::Shape::mesh(mesh));
+            let size = 52.0 * (1.0 + 0.06 * alpha);
+            let word = tr("Defeated").to_uppercase();
+            let red = egui::Color32::from_rgb(0xa8, 0x1c, 0x18).gamma_multiply(alpha);
+            let g = painter.layout_no_wrap(word.chars().map(|c| format!("{c} ")).collect::<String>().trim_end().to_string(), egui::FontId::proportional(size), red);
+            painter.galley(Align2::CENTER_CENTER.anchor_size(egui::pos2(rect.center().x, y), g.size()).min, g, red);
+            let g = painter.layout_no_wrap(stats.clone(), hud::mono(hud::FONT), hud::DIM.gamma_multiply(alpha));
+            painter.galley(Align2::CENTER_TOP.anchor_size(egui::pos2(rect.center().x, y + 0.5 * band + 8.0), g.size()).min, g, hud::DIM);
+            let pad = self.spellbar.device == Device::Pad;
+            let mut skills = false;
+            egui::Area::new(egui::Id::unique("wizard-defeat-hints"))
+                .pivot(Align2::CENTER_BOTTOM)
+                .fixed_pos(rect.center_bottom() - Vec2::new(0.0, 28.0))
                 .show(ctx, |ui| {
-                    // (ease-out)
-                    ui.set_opacity(1.0 - (1.0 - alpha).powi(2));
-                    hud::panel(0.8, 8, Margin::symmetric(32, 20)).show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.spacing_mut().item_spacing.y = 10.0;
-                            ui.label(hud::text(tr("Defeated"), 1.8 * hud::FONT, hud::DEFEAT).extra_letter_spacing(0.1 * 1.8 * hud::FONT));
-                            ui.label(hud::text(stats.clone(), hud::FONT, hud::FG));
-                            // (its glyph: the controller's A, or a click)
-                            let glyph = if self.spellbar.device == Device::Pad { hud::Chip::Face('A') } else { hud::Chip::Mouse };
-                            if hud::glyph_button(ui, glyph, tr("Try again"), 1.05 * hud::FONT).clicked() {
-                                reset = true;
-                            }
-                        });
+                    ui.set_opacity(alpha);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 18.0;
+                        let skill_glyph = if pad { hud::Chip::Face('X') } else { hud::Chip::Mouse(false) };
+                        if hud::glyph_button(ui, skill_glyph, tr("Skill tree"), 1.05 * hud::FONT).clicked() {
+                            skills = true;
+                        }
+                        let again_glyph = if pad { hud::Chip::Face('A') } else { hud::Chip::Mouse(true) };
+                        if hud::glyph_button(ui, again_glyph, tr("Try again"), 1.05 * hud::FONT).clicked() {
+                            reset = true;
+                        }
                     });
                 });
+            if skills {
+                self.ask_skills();
+            }
         }
         if reset {
             self.combat.reset(&mut self.spells);
         }
 
         self.spellbar.ui(ctx, rect, &self.binds);
+    }
+
+    // The skills tab of the pause menu: the tree (a row of the navigation
+    // each tier), each skill a node to buy the next level of (with souls);
+    // what the one in hand (focused or hovered) does, and costs, beneath.
+    pub fn skills_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        use skills::SKILLS;
+        ui.horizontal(|ui| {
+            hud::icon(ui, hud::Icon::Soul, 1.2 * hud::FONT, egui::Color32::from_rgb(0x50, 0x8c, 0xc8), egui::Sense::hover());
+            ui.label(egui::RichText::new(crate::i18n::trf("{} souls", &[&self.souls])).strong());
+        });
+        let w = ui.available_width().min(520.0);
+        let (area, _) = ui.allocate_exact_size(Vec2::new(w, 290.0), egui::Sense::hover());
+        let at = |s: &skills::Skill| area.center() + Vec2::new(s.at.0 * (0.5 * w - 40.0), s.at.1 * 115.0);
+        let p = ui.painter();
+        for s in SKILLS {
+            if let Some(n) = s.needs.and_then(skills::skill) {
+                let lit = self.skills.level(s.id) > 0;
+                p.line_segment([at(n), at(s)], egui::Stroke::new(if lit { 2.5 } else { 1.5 }, if lit { egui::Color32::from_rgb(0x50, 0x8c, 0xc8) } else { egui::Color32::from_gray(170) }));
+            }
+        }
+        // (by tiers, top down, each left to right)
+        let mut order: Vec<usize> = (0..SKILLS.len()).collect();
+        order.sort_by(|&a, &b| (SKILLS[a].at.1, SKILLS[a].at.0).partial_cmp(&(SKILLS[b].at.1, SKILLS[b].at.0)).unwrap());
+        let mut tier = f32::NAN;
+        for k in order {
+            let s = &SKILLS[k];
+            if s.at.1 != tier {
+                tier = s.at.1;
+                nav.row();
+            }
+            let c = at(s);
+            let r = 21.0;
+            let resp = ui.interact(egui::Rect::from_center_size(c, Vec2::splat(2.0 * r)), ui.scope_id().with(("skill", s.id)), egui::Sense::click());
+            nav.item(ui, &resp);
+            if resp.hovered() || resp.has_focus() {
+                self.skill_shown = k;
+            }
+            let level = self.skills.level(s.id);
+            let cost = self.skills.cost(s);
+            let p = ui.painter();
+            let blue = egui::Color32::from_rgb(0x50, 0x8c, 0xc8);
+            let (fill, ink, edge) = if level > 0 {
+                (blue, egui::Color32::WHITE, blue)
+            } else if cost.is_some_and(|c| c <= self.souls) {
+                (egui::Color32::from_gray(245), egui::Color32::from_gray(40), blue)
+            } else {
+                (egui::Color32::from_gray(225), egui::Color32::from_gray(140), egui::Color32::from_gray(170))
+            };
+            p.circle_filled(c, r, fill);
+            p.circle_stroke(c, r, egui::Stroke::new(if k == self.skill_shown { 2.5 } else { 1.5 }, edge));
+            let name = skills::shown(s).0;
+            let initials: String = name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
+            let g = p.layout_no_wrap(initials, egui::FontId::proportional(14.0), ink);
+            p.galley(Align2::CENTER_CENTER.anchor_size(c, g.size()).min, g, ink);
+            // (its levels, as pips beneath)
+            for l in 0..s.levels {
+                let x = c.x + (l as f32 - 0.5 * (s.levels - 1) as f32) * 8.0;
+                let pc = egui::pos2(x, c.y + r + 6.0);
+                if l < level {
+                    p.circle_filled(pc, 2.6, blue);
+                } else {
+                    p.circle_stroke(pc, 2.6, egui::Stroke::new(1.0, egui::Color32::from_gray(150)));
+                }
+            }
+            if resp.clicked() && self.skills.buy(s, &mut self.souls) {
+                self.combat.sfx.push(sfx::here(sfx::APPEAR));
+            }
+        }
+        // the one in hand
+        let s = &SKILLS[self.skill_shown.min(SKILLS.len() - 1)];
+        let (name, what) = skills::shown(s);
+        let level = self.skills.level(s.id);
+        ui.separator();
+        ui.label(egui::RichText::new(format!("{name}  {level}/{}", s.levels)).strong());
+        ui.label(what);
+        let state = match self.skills.cost(s) {
+            Some(c) => crate::i18n::trf("Next level: {} souls", &[&c]),
+            None if level >= s.levels => tr("Learnt in full").to_string(),
+            None => crate::i18n::trf("Needs {}", &[&s.needs.and_then(skills::skill).map_or("", |n| skills::shown(n).0)]),
+        };
+        ui.label(egui::RichText::new(state).weak());
     }
 
     // The controls tab of the pause menu: each action's key and controller
@@ -1026,7 +1219,7 @@ impl Game {
             ui.end_row();
             for a in ACTIONS {
                 ui.label(a.label());
-                nav.row();
+                nav.grid_row();
                 for device in [Device::Keyboard, Device::Pad] {
                     let waiting = self.capture.is_some_and(|c| c.action == a && c.device == device);
                     let chip = match device {

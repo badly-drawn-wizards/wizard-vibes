@@ -157,6 +157,14 @@ const DODGE_BY: f32 = 2.4;
 // (its fire bolts' charge, at most; its wind blades' warm-up, and how many
 // in a run, and how far apart, spun down and up)
 const ENEMY_POWER: f32 = 0.5;
+// Aggro: how much each holds against him, and against each other, at
+// rest; what a hit adds against whoever cast it; and how fast it settles
+// back (a time constant, seconds). Free for all, it picks whom to cast at
+// by it (nearer counting for more).
+const AGGRO_HIM: f32 = 3.0;
+const AGGRO_OTHER: f32 = 1.0;
+const AGGRO_HIT: f32 = 2.0;
+const AGGRO_SETTLE: f32 = 6.0;
 const BLADES: u32 = 5;
 const SLOW_BLADE: f32 = 0.3;
 const FAST_BLADE: f32 = 0.14;
@@ -180,6 +188,7 @@ struct Slot {
     strafe_t: f32,
     target: i32, // whom it casts at: him (HIS), or free for all another
     chosen: bool, // (free for all) its next target chosen
+    aggro: [f32; MAX + 1], // against each other one, and (last) him
 }
 
 impl Slot {
@@ -202,6 +211,7 @@ impl Slot {
             strafe_t: 0.0,
             target: HIS,
             chosen: false,
+            aggro: aggro_at_rest(),
         }
     }
 }
@@ -221,6 +231,11 @@ pub struct Enemies {
     vel: V3,              // how fast he is going, smoothed
     placed: bool,         // the slots have been put where they belong
     pub ffa: bool,        // free for all: they fight each other too
+    // what defeated him last (its kind, and a wind blade's cut), and how
+    // many times he has been (each comes apart its own way)
+    pub his_end: Option<(u32, Option<(V3, V3)>)>,
+    pub his_deaths: i64,
+    pub max_hp: i32, // his health, full (his skills raise it)
 }
 
 impl Default for Enemies {
@@ -239,6 +254,9 @@ impl Default for Enemies {
             vel: [0.0; 3],
             placed: false,
             ffa: false,
+            his_end: None,
+            his_deaths: 0,
+            max_hp: PLAYER_HP,
         }
     }
 }
@@ -301,7 +319,7 @@ impl Enemies {
     // none defeated, and a new set of enemies appearing.
     pub fn reset(&mut self, arena: V3) {
         self.arena = [arena[0], arena[1].max(ARENA_FLOOR), arena[2]];
-        self.hp = PLAYER_HP;
+        self.hp = self.max_hp;
         self.down = -1.0;
         self.defeated = 0;
         self.hurt = 99.0;
@@ -342,6 +360,8 @@ impl Enemies {
             self.events.push(EnemyEvent::Hurt);
             if self.hp == 0 {
                 self.down = 0.0;
+                self.his_end = Some((kind, cut));
+                self.his_deaths += 1;
             }
         } else {
             let him = self.seen.2;
@@ -350,8 +370,13 @@ impl Enemies {
                 return;
             }
             s.hp -= damage;
+            if s.hp > 0 {
+                s.aggro[if owner == HIS { MAX } else { (owner as usize).min(MAX) }] += AGGRO_HIT;
+            }
             if s.hp <= 0 {
                 s.down = 0.0;
+                // (the one who hit it is held against, the more)
+                s.aggro[if owner == HIS { MAX } else { (owner as usize).min(MAX) }] += AGGRO_HIT;
                 s.vel = [0.0; 3];
                 let his = owner == HIS;
                 if his {
@@ -421,6 +446,12 @@ impl Enemies {
             s.appear = (s.appear - dt).max(0.0);
             if i >= n || dt == 0.0 {
                 continue;
+            }
+            // (aggro settling back)
+            let k = 1.0 - (-dt / AGGRO_SETTLE).exp();
+            let rest = aggro_at_rest();
+            for (a, r) in s.aggro.iter_mut().zip(rest) {
+                *a += (r - *a) * k;
             }
             // it moves (not while still appearing)
             if s.appear <= 0.0 {
@@ -517,11 +548,13 @@ impl Enemies {
                     // (free for all: whoever is nearest, give or take)
                     if ffa && !s.chosen {
                         s.chosen = true;
-                        let mut best = (if he_stands { dist(him, s.pos) * (0.7 + 0.6 * rng.uniform()) } else { f32::MAX }, HIS);
+                        // (by aggro, nearer counting for more, give or take)
+                        let score = |a: f32, p: V3, rng: &mut Rng| a * (0.7 + 0.6 * rng.uniform()) / (1.0 + dist(p, s.pos) / 15.0);
+                        let mut best = (if he_stands { score(s.aggro[MAX], him, rng) } else { -1.0 }, HIS);
                         for (j, &(up, p, _)) in others.iter().enumerate() {
-                            let d = dist(p, s.pos) * (0.7 + 0.6 * rng.uniform());
-                            if j != i && up && d < best.0 {
-                                best = (d, j as i32);
+                            let sc = score(s.aggro[j], p, rng);
+                            if j != i && up && sc > best.0 {
+                                best = (sc, j as i32);
                             }
                         }
                         s.target = best.1;
@@ -592,6 +625,13 @@ impl Enemies {
             }
         }
     }
+}
+
+// Aggro at rest: AGGRO_OTHER against each other one, AGGRO_HIM against him.
+fn aggro_at_rest() -> [f32; MAX + 1] {
+    let mut a = [AGGRO_OTHER; MAX + 1];
+    a[MAX] = AGGRO_HIM;
+    a
 }
 
 // (off by up to 2.5 either way, mostly less)
@@ -685,6 +725,9 @@ mod tests {
         let mut e = Enemies::default();
         e.reset([0.0; 3]);
         e.slots[0].appear = 0.0;
+        e.hit_with(0, BURST, None, 1.0, 1);
+        // (a hit held against the one who cast it)
+        assert_eq!(e.slots[0].aggro[1], AGGRO_OTHER + AGGRO_HIT);
         e.hit_with(0, STRIKE, None, 2.0, 1);
         assert_eq!(e.defeated, 0);
         assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, false))));

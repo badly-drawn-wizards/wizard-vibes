@@ -11,6 +11,17 @@ pub struct Foes {
     pub arena: Vec3,
     // where each stands (its platform's top, in the world)
     pub pos: (Vec3, Vec3, Vec3, Vec3, Vec3, Vec3),
+    // the slot after the enemies fighting (their count): defeated, he is
+    // drawn coming apart there as they do (see him_dying)
+    pub him: i32,
+}
+
+// Whether he has been defeated (the slot after the enemies' says so, as
+// an enemy's would: see enemy_at), and is coming apart.
+#[inline]
+pub fn him_dying(fs: Foes) -> bool {
+    let s = foe_state(fs, fs.him);
+    fs.him < max_enemies && s - 16.0 * (s / 16.0).floor() >= 8.0
 }
 
 #[inline]

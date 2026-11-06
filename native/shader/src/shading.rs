@@ -522,7 +522,7 @@ pub fn enemy_material(prm: Params, g: Glow, fs: Foes, secs: f32, tm: f32, fl: Fl
     let full = m >= m_enemy_full;
     let i = if full { idiv(m - m_enemy_full, full_parts) } else { idiv(m - m_enemy, enemy_parts) };
     let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
-    let lk = looks_of(prm.enemy_seed, e.r#gen, i);
+    let lk = looks_in(prm, fs, e.r#gen, i);
     let part = imod(m - m_enemy, enemy_parts);
     let platform = !full && (part == part_top || part == part_side);
     // (defeated, the figure's parts are on its remains: shaded where they

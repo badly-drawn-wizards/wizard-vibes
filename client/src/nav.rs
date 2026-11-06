@@ -36,6 +36,10 @@ pub struct Nav {
     // sliders), and as this frame draws them
     rows: Vec<Vec<bool>>,
     drawing: Vec<Vec<bool>>,
+    // which rows are a grid's (up and down between them keep the column),
+    // as drawn and as drawing
+    grid: Vec<bool>,
+    drawing_grid: Vec<bool>,
     // moves since the last frame, and a slider's change this frame (-1, 0,
     // 1)
     pending: Vec<Move>,
@@ -82,6 +86,7 @@ impl Nav {
     pub fn begin(&mut self) {
         self.adjust = 0;
         self.drawing.clear();
+        self.drawing_grid.clear();
         // (none drawn yet, as a menu opens: kept for when there are)
         if self.rows.is_empty() {
             return;
@@ -90,6 +95,7 @@ impl Nav {
             let Some(row) = self.rows.get(self.row) else { break };
             let on_slider = row.get(self.col).copied().unwrap_or(false);
             let held = self.held && on_slider;
+            let from = self.row;
             match m {
                 Move::Up => self.row = self.row.saturating_sub(1),
                 Move::Down => self.row = (self.row + 1).min(self.rows.len().saturating_sub(1)),
@@ -100,9 +106,16 @@ impl Nav {
                 Move::Press => self.held = on_slider && !self.held,
                 Move::Release => self.held = false,
             }
-            // (a new row, from its start; a slider let go)
+            // (a new row, from its start, unless both are a grid's (the
+            // column kept, as far as the row goes); a slider let go)
             if matches!(m, Move::Up | Move::Down) {
-                self.col = 0;
+                let grid = |r: usize| self.grid.get(r).copied().unwrap_or(false);
+                if grid(from) && grid(self.row) {
+                    let len = self.rows.get(self.row).map_or(1, Vec::len);
+                    self.col = self.col.min(len.saturating_sub(1));
+                } else {
+                    self.col = 0;
+                }
                 self.held = false;
             }
         }
@@ -111,6 +124,13 @@ impl Nav {
     // A new row (its items follow).
     pub fn row(&mut self) {
         self.drawing.push(Vec::new());
+        self.drawing_grid.push(false);
+    }
+
+    // A new row of a grid: up and down between such rows keep the column.
+    pub fn grid_row(&mut self) {
+        self.drawing.push(Vec::new());
+        self.drawing_grid.push(true);
     }
 
     // A control in the current row: under the cursor (and in use), it takes
@@ -131,7 +151,7 @@ impl Nav {
             return false;
         }
         if self.drawing.is_empty() {
-            self.drawing.push(Vec::new());
+            self.row();
         }
         let row = self.drawing.len() - 1;
         let col = self.drawing[row].len();
@@ -155,12 +175,14 @@ impl Nav {
     // them.
     // (a frame that drew none, as a window's first can, leaves it be)
     pub fn end(&mut self) {
-        let mut rows = std::mem::take(&mut self.drawing);
-        rows.retain(|r| !r.is_empty());
+        let rows = std::mem::take(&mut self.drawing);
+        let grid = std::mem::take(&mut self.drawing_grid);
+        let (rows, grid): (Vec<_>, Vec<_>) = rows.into_iter().zip(grid).filter(|(r, _)| !r.is_empty()).unzip();
         if rows.is_empty() {
             return;
         }
         self.rows = rows;
+        self.grid = grid;
         self.row = self.row.min(self.rows.len() - 1);
         self.col = self.col.min(self.rows[self.row].len() - 1);
     }
@@ -173,7 +195,35 @@ mod tests {
     // (the rows as a frame would draw them: their items' kinds)
     fn drawn(n: &mut Nav, rows: &[&[bool]]) {
         n.drawing = rows.iter().map(|r| r.to_vec()).collect();
+        n.drawing_grid = vec![false; rows.len()];
         n.end();
+    }
+
+    #[test]
+    fn a_grid_keeps_the_column() {
+        let mut n = Nav::default();
+        let draw = |n: &mut Nav| {
+            n.row();
+            n.drawing.last_mut().unwrap().extend([false; 3]);
+            for _ in 0..3 {
+                n.grid_row();
+                n.drawing.last_mut().unwrap().extend([false; 2]);
+            }
+            n.end();
+        };
+        draw(&mut n);
+        // into the grid: its first column; along, then down: the column kept
+        n.push(Move::Down);
+        n.push(Move::Right);
+        n.push(Move::Down);
+        n.begin();
+        assert_eq!((n.row, n.col), (2, 1));
+        draw(&mut n);
+        // out of it, up to the tabs: from the start
+        n.push(Move::Up);
+        n.push(Move::Up);
+        n.begin();
+        assert_eq!((n.row, n.col), (0, 0));
     }
 
     #[test]

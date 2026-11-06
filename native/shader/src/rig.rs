@@ -100,6 +100,7 @@ pub struct Pose {
     pub orb_boost: f32,  // its glow, flaring as a spell is cast
     pub spell: i32,      // the spell in hand (0 fire, 1 lightning, 2 wind)
     pub foes: Foes,      // the enemies' states
+    pub dead: bool,      // defeated (drawn coming apart: see him_dying)
     pub shield: f32,
     pub shield_hit: f32, // his shield (see shield_layer in shading.fut)
     pub l_shoulder: Vec3,
@@ -405,6 +406,20 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
     let pole = normalise(mix(vec(-0.6, -1.0, -0.5), vec(-1.0, -0.35, 0.1), thumb));
     let (r_elbow, r_wrist) = two_bone(r_shoulder, target, 0.31, 0.27, pole);
     let moon_world = moon_dir(prm.moon_azimuth, prm.moon_elevation);
+    let foes = Foes {
+            states: (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5),
+            kills: (dr.kill0, dr.kill1, dr.kill2, dr.kill3, dr.kill4, dr.kill5),
+            arena: vec(dr.arena_x, dr.arena_y, dr.arena_z),
+            him: prm.enemies.min(max_enemies).max(0),
+            pos: (
+                vec(dr.fx0, dr.fy0, dr.fz0),
+                vec(dr.fx1, dr.fy1, dr.fz1),
+                vec(dr.fx2, dr.fy2, dr.fz2),
+                vec(dr.fx3, dr.fy3, dr.fz3),
+                vec(dr.fx4, dr.fy4, dr.fz4),
+                vec(dr.fx5, dr.fy5, dr.fz5),
+            ),
+    };
     let point_look = 0.45 * point * side * (if dr.free { 1f32.minimum(2.0 * dr.ax.abs()) } else { 1.0 }) - 0.4 * thumb;
     Pose {
         tm,
@@ -422,6 +437,8 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         twist: follow.twist,
         glance: 0.8 * point_look + follow.eyes,
         glance_up: follow.eyes_up,
+        foes,
+        dead: him_dying(foes),
         point,
         thumb,
         pix: 0.0008,
@@ -453,18 +470,5 @@ pub fn pose_at(secs: f32, prm: Params, dr: Drive) -> Pose {
         spell,
         shield: dr.shield,
         shield_hit: dr.shield_hit,
-        foes: Foes {
-            states: (dr.foe0, dr.foe1, dr.foe2, dr.foe3, dr.foe4, dr.foe5),
-            kills: (dr.kill0, dr.kill1, dr.kill2, dr.kill3, dr.kill4, dr.kill5),
-            arena: vec(dr.arena_x, dr.arena_y, dr.arena_z),
-            pos: (
-                vec(dr.fx0, dr.fy0, dr.fz0),
-                vec(dr.fx1, dr.fy1, dr.fz1),
-                vec(dr.fx2, dr.fy2, dr.fz2),
-                vec(dr.fx3, dr.fy3, dr.fz3),
-                vec(dr.fx4, dr.fy4, dr.fz4),
-                vec(dr.fx5, dr.fy5, dr.fz5),
-            ),
-        },
     }
 }

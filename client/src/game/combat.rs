@@ -82,6 +82,8 @@ pub struct Combat {
     // he has taken in since the game last counted them
     souls: Vec<V3>,
     pub souls_taken: u32,
+    // what his skills add (set by the game)
+    pub boosts: super::skills::Boosts,
     // sounds to play
     pub sfx: Vec<SfxEvent>,
     pub hud: Hud,
@@ -102,6 +104,7 @@ impl Default for Combat {
             started: false,
             souls: Vec::new(),
             souls_taken: 0,
+            boosts: Default::default(),
             sfx: Vec::new(),
             hud: Hud::default(),
         }
@@ -124,7 +127,7 @@ impl Combat {
         let d = x.hypot(z);
         let d = if d == 0.0 { 1.0 } else { d };
         self.enemies.reset([him[0] + 12.0 * x / d, him[1], him[2] + 12.0 * z / d]);
-        self.mana.value = MANA;
+        self.mana.value = self.mana.max;
         spells.clear();
     }
 
@@ -137,6 +140,13 @@ impl Combat {
     // the shield, and only with the mana for it). Before the spells' update.
     pub fn update(&mut self, m: &Moment, spells: &mut Spells, rng: &mut Rng) {
         self.here = (m.him, m.dir);
+        // (his skills)
+        let b = self.boosts;
+        self.enemies.max_hp = PLAYER_HP + b.health;
+        self.mana.max = MANA + b.mana;
+        self.mana.regen = b.regen;
+        spells.blast = b.blast;
+        spells.lock_time = LOCK_TIME * b.lock;
         let able = m.able && self.enemies.down < 0.0;
         self.shield.update(m.dt, m.shielding, able, &mut self.mana);
         self.shield_sounds();
@@ -152,10 +162,10 @@ impl Combat {
                 }
                 spells.channel += m.dt;
                 spells.since_cast = 0.0;
-                self.healed += HEAL_RATE * m.dt;
+                self.healed += HEAL_RATE * self.boosts.heal * m.dt;
                 while self.healed >= 1.0 {
                     self.healed -= 1.0;
-                    self.enemies.hp = (self.enemies.hp + 1).min(PLAYER_HP);
+                    self.enemies.hp = (self.enemies.hp + 1).min(self.enemies.max_hp);
                 }
             } else {
                 spells.channel = -1.0;
@@ -201,7 +211,7 @@ impl Combat {
             if spells.charge >= 0.0 {
                 if m.casting {
                     if spells.charge < CHARGE_TIME && self.mana.drain(CHARGE_DRAIN * m.dt) {
-                        spells.charge = (spells.charge + m.dt).min(CHARGE_TIME);
+                        spells.charge = (spells.charge + m.dt * self.boosts.charge).min(CHARGE_TIME);
                     } else {
                         // (held charged: no refill meanwhile)
                         self.mana.drain(0.0);
@@ -248,7 +258,7 @@ impl Combat {
                 }
                 lock.age += m.dt;
                 spells.lock = Some(lock);
-                if lock.age >= LOCK_TIME {
+                if lock.age >= spells.lock_time {
                     spells.lock = None;
                     if self.mana.spend(SPELL_COST[STRIKE as usize]) {
                         let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
@@ -290,7 +300,7 @@ impl Combat {
                 self.short = false;
                 let g = &mut spells.gatling;
                 g.next = SLOW_SHOT + (FAST_SHOT - SLOW_SHOT) * g.spin;
-                g.heat += SHOT_HEAT;
+                g.heat += SHOT_HEAT * self.boosts.heat;
                 if g.heat >= 1.0 {
                     g.heat = 1.0;
                     g.overheated = true;
@@ -328,8 +338,8 @@ impl Combat {
                     self.enemy_events();
                 }
                 SpellEvent::Soul => {
-                    self.souls_taken += 1;
-                    self.mana.value = (self.mana.value + SOUL_MANA).min(MANA);
+                    self.souls_taken += self.boosts.souls;
+                    self.mana.value = (self.mana.value + SOUL_MANA + self.boosts.soul_mana).min(self.mana.max);
                     self.sfx.push(sfx::here(sfx::SHIELD_UP));
                 }
                 SpellEvent::Sound { what, pos } => {
@@ -346,8 +356,8 @@ impl Combat {
             spells.soul(at);
         }
         // (the HUD as it now stands: the health and defeat a hit changed)
-        self.hud.health = self.enemies.hp as f32 / PLAYER_HP as f32;
-        self.hud.mana = self.mana.value / MANA;
+        self.hud.health = self.enemies.hp as f32 / self.enemies.max_hp as f32;
+        self.hud.mana = self.mana.value / self.mana.max;
         self.hud.defeated = self.enemies.defeated;
     }
 
@@ -407,8 +417,8 @@ impl Combat {
         let h = &mut self.hud;
         h.drawn = m.drawn;
         h.n = n;
-        h.health = e.hp as f32 / PLAYER_HP as f32;
-        h.mana = self.mana.value / MANA;
+        h.health = e.hp as f32 / e.max_hp as f32;
+        h.mana = self.mana.value / self.mana.max;
         h.short = self.mana.short < 0.4;
         h.defeated = e.defeated;
         let lost = n > 0 && e.down >= 0.0;

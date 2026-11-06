@@ -52,7 +52,7 @@ pub struct App {
     // the render scale (by hand, or dynamic: see scale.rs)
     scale: crate::scale::RenderScale,
     // the top bar open (else just the frame rate), the pause menu's tab (0
-    // settings, 1 controls, 2 parameters) and its tabs' width (last frame,
+    // settings, 1 skills, 2 controls, 3 parameters) and its tabs' width (last frame,
     // to centre them), whether it was open last frame (to put the cursor on
     // its tab as it opens), its focus navigation (see nav.rs), and the key
     // events the controller's A makes for it (fed to egui before the next
@@ -389,6 +389,11 @@ impl App {
     // flank them while it is in use; B or Start resumes): rows of controls
     // (see nav.rs), the first the tabs, where the cursor starts.
     fn pause_menu(&mut self, ctx: &egui::Context, secs: f64) {
+        // (the skill tree, asked for from the defeat screen)
+        if self.game.take_open_skills() {
+            self.menu_tab = 1;
+            self.menu_was_open = false;
+        }
         let open = self.game.paused() && !self.game.picture();
         let opening = open && !self.menu_was_open;
         self.menu_was_open = open;
@@ -401,7 +406,7 @@ impl App {
         }
         self.nav.begin();
         let nav = &mut self.nav;
-        let names = ["Settings", "Controls", "Parameters"].map(tr);
+        let names = ["Settings", "Skills", "Controls", "Parameters"].map(tr);
         let pad = self.game.device() == crate::game::spellbar::Device::Pad;
         egui::Window::new(tr("Paused"))
             .id(egui::Id::unique("pause-menu"))
@@ -438,7 +443,8 @@ impl App {
                 let tall = ctx.content_rect().height() * 0.7;
                 match self.menu_tab {
                     0 => Self::settings(&mut self.game, &mut self.params, &mut self.audio, &mut self.scale, nav, ui),
-                    1 => {
+                    1 => self.game.skills_ui(ui, nav),
+                    2 => {
                         egui::ScrollArea::vertical().max_height(tall).auto_shrink([false, true]).show(ui, |ui| self.game.controls_ui(ui, nav));
                     }
                     _ => match self.params.as_mut() {
@@ -560,7 +566,7 @@ impl App {
             self.nav.push(crate::nav::Move::Release);
         }
         if p.tab != 0 {
-            self.menu_tab = (self.menu_tab as i32 + p.tab).rem_euclid(3) as usize;
+            self.menu_tab = (self.menu_tab as i32 + p.tab).rem_euclid(4) as usize;
             self.nav.go(0, self.menu_tab);
             self.nav.active = true;
         }
