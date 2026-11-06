@@ -848,7 +848,7 @@ impl App {
     fn keep_awake(&mut self) {
         let playing = self.shader.is_some() && !self.game.paused();
         if playing && self.awake.is_none() && !self.awake_failed {
-            match keepawake::Builder::default().display(true).idle(true).reason("Playing").app_name("Wizard").app_reverse_domain("com.causalnexus.wizard").create() {
+            match keepawake::Builder::default().display(true).idle(true).reason("Playing").app_name("Wizard").app_reverse_domain("com.badlydrawnwizards.wizard-vibes").create() {
                 Ok(a) => self.awake = Some(a),
                 Err(e) => {
                     log::warn!("could not keep the screen on: {e}");

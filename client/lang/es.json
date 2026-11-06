@@ -300,5 +300,15 @@
  "Recompile ({})": "Recompilar ({})",
  "Rebuild the shader with the compile-time parameters changed (marked ●)": "Recompila el shader con los parámetros de compilación cambiados (marcados con ●)",
  "Nothing changed to recompile": "Nada que recompilar",
- "Changed: Recompile to rebuild the shader with it": "Cambiado: Recompilar para recompilar el shader con él"
+ "Changed: Recompile to rebuild the shader with it": "Cambiado: Recompilar para recompilar el shader con él",
+ "Loadout": "Equipo de hechizos",
+ "(empty)": "(vacío)",
+ "Spell slot": "Ranura de hechizo",
+ "A second spell slot": "Una segunda ranura de hechizo",
+ "A third spell slot": "Una tercera ranura de hechizo",
+ "A fourth spell slot": "Una cuarta ranura de hechizo",
+ "Spell slot 1": "Ranura 1",
+ "Spell slot 2": "Ranura 2",
+ "Spell slot 3": "Ranura 3",
+ "Spell slot 4": "Ranura 4"
 }

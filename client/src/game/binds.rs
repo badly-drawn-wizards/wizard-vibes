@@ -57,7 +57,7 @@ impl Action {
             Action::Boost => "Boost",
             Action::Cast => "Cast",
             Action::Shield => "Shield (hold)",
-            Action::Spell(i) => super::spells::SPELL_NAMES[i.min(3)],
+            Action::Spell(i) => ["Spell slot 1", "Spell slot 2", "Spell slot 3", "Spell slot 4"][i.min(3)],
             Action::ZoomIn => "Zoom in",
             Action::ZoomOut => "Zoom out",
             Action::Mode => "Mode",

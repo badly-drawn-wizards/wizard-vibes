@@ -60,6 +60,7 @@ const STORE_SOULS: &str = "wizard-souls";
 const STORE_FFA: &str = "wizard-ffa";
 const STORE_SKILLS: &str = "wizard-skills";
 const STORE_SPELL: &str = "wizard-spell";
+const STORE_LOADOUT: &str = "wizard-loadout";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -134,6 +135,10 @@ pub struct Game {
     skill_shown: usize,
     // the skill tree, when open (see Tree)
     tree: Option<Tree>,
+    // the spell in each of his slots (see fit_loadout), and the loadout
+    // screen, when open (the slot picked)
+    loadout: Vec<Option<usize>>,
+    loadout_open: Option<usize>,
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
@@ -260,6 +265,10 @@ impl Game {
             skills: get(STORE_SKILLS).map_or_else(skills::Skills::default, |v| skills::Skills::restored(&v)),
             skill_shown: 0,
             tree: None,
+            loadout: get(STORE_LOADOUT).map_or_else(|| vec![Some(0)], |v| {
+                v.split(',').map(|x| x.parse::<usize>().ok().filter(|&i| i < 4)).collect()
+            }),
+            loadout_open: None,
             cross: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
@@ -290,6 +299,7 @@ impl Game {
         storage.set_string(STORE_FFA, if self.ffa { "1" } else { "0" }.to_string());
         storage.set_string(STORE_SKILLS, self.skills.saved());
         storage.set_string(STORE_SPELL, self.spells.selected.to_string());
+        storage.set_string(STORE_LOADOUT, self.loadout.iter().map(|s| s.map_or("-".to_string(), |i| i.to_string())).collect::<Vec<_>>().join(","));
         // (none chosen: the drawer's own settings, recompiled)
         storage.set_string(STORE_QUALITY, self.quality.choice.map_or("custom", |c| c.key()).to_string());
     }
@@ -582,6 +592,27 @@ impl Game {
                 }));
             }
             self.mods = mods;
+            // (defeated, and time stopped: the middle button opens the
+            // loadout)
+            if mouse && self.settled() && !self.paused && ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Middle)) {
+                self.open_loadout();
+            }
+            // (the loadout open: up and down pick a slot, left and right
+            // change its spell)
+            if let Some(k) = self.loadout_open {
+                let n = self.loadout.len();
+                for (key, _) in &keys {
+                    match key {
+                        Key::W | Key::ArrowUp => self.loadout_open = Some((k + n - 1) % n),
+                        Key::S | Key::ArrowDown => self.loadout_open = Some((k + 1) % n),
+                        Key::A | Key::ArrowLeft => self.cycle_slot(k, -1),
+                        Key::D | Key::ArrowRight => self.cycle_slot(k, 1),
+                        Key::Enter => self.close_loadout(),
+                        _ => {}
+                    }
+                }
+                acts.retain(|a| *a == Action::Pause);
+            }
             // (the skill tree open: the keys move about it, buy, go back)
             if self.tree.is_some() {
                 for (key, _) in &keys {
@@ -600,7 +631,7 @@ impl Game {
                 match a {
                     Action::Mode => self.cycle_mode(),
                     Action::Pause => self.pause_pressed(),
-                    Action::Spell(s) => self.spells.select(s),
+                    Action::Spell(k) => self.select_slot(k),
                     // (defeated, and time stopped: casting opens the skill
                     // tree, the shield tries again)
                     Action::Cast if self.settled() && !self.paused => self.ask_skills(),
@@ -625,7 +656,7 @@ impl Game {
             self.paused = true;
         }
         let picture = self.picture.is_some();
-        if self.paused && !picture || self.tree.is_some() || !ctx.input(|i| i.focused) {
+        if self.paused && !picture || self.tree.is_some() || self.loadout_open.is_some() || !ctx.input(|i| i.focused) {
             self.look.release(ctx);
         }
         if !self.paused {
@@ -662,7 +693,26 @@ impl Game {
             if p.active {
                 self.spellbar.device = Device::Pad;
             }
-            if self.tree.is_some() {
+            if let Some(k) = self.loadout_open {
+                // (the loadout: up and down pick a slot, left and right
+                // change its spell, B (or A) goes back)
+                let n = self.loadout.len();
+                if p.nav[0] {
+                    self.loadout_open = Some((k + n - 1) % n);
+                }
+                if p.nav[1] {
+                    self.loadout_open = Some((k + 1) % n);
+                }
+                if p.nav[2] {
+                    self.cycle_slot(k, -1);
+                }
+                if p.nav[3] {
+                    self.cycle_slot(k, 1);
+                }
+                if p.back || p.confirm {
+                    self.close_loadout();
+                }
+            } else if self.tree.is_some() {
                 // (the skill tree: the D-pad or the left stick move about it,
                 // A buys, B goes back)
                 for (on, d) in p.nav.iter().zip([Vec2::new(0.0, -1.0), Vec2::new(0.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0)]) {
@@ -686,11 +736,14 @@ impl Game {
                 if p.pressed == Some(binds::PadButton::X) && self.settled() {
                     self.ask_skills();
                 }
+                if p.pressed == Some(binds::PadButton::Y) && self.settled() {
+                    self.open_loadout();
+                }
                 if p.confirm && self.settled() {
                     self.combat.reset(&mut self.spells);
                 }
-                if let Some(s) = p.spell {
-                    self.spells.select(s);
+                if let Some(k) = p.spell {
+                    self.select_slot(k);
                 }
             }
         }
@@ -713,10 +766,13 @@ impl Game {
         let dir = self.assist(origin, dir);
         self.spells.ffa = self.ffa;
         self.combat.boosts = self.skills.boosts();
-        // (the spells he has; one he no longer has out of his hand)
+        // (the spells he has, in his slots; one not in them out of his hand)
         self.spells.unlocked = self.combat.boosts.spells;
-        if !self.spells.unlocked[self.spells.selected] {
-            self.spells.selected = 0;
+        self.fit_loadout();
+        if !self.loadout.contains(&Some(self.spells.selected)) {
+            if let Some(s) = self.loadout.iter().flatten().next() {
+                self.spells.selected = *s;
+            }
         }
         self.combat.enemies.ffa = self.ffa;
         let moment = Moment {
@@ -739,6 +795,7 @@ impl Game {
         self.souls += std::mem::take(&mut self.combat.souls_taken) as u64;
         self.spellbar.spell = self.spells.selected;
         self.spellbar.unlocked = self.spells.unlocked;
+        self.spellbar.loadout = self.loadout.clone();
         self.spellbar.cooling = [0, 1, 2, 3].map(|i| self.spells.cooling(i));
         self.spellbar.heat = self.spells.gatling.heat;
         self.spellbar.overheated = self.spells.gatling.overheated;
@@ -890,6 +947,60 @@ impl Game {
     }
 
     // The skill tree, asked for from the defeat screen.
+    // His slots as his skills give them, each holding one of his spells (or
+    // none): more slots, filled with spells not yet in one; fewer, the last
+    // gone; a spell he no longer has, out.
+    fn fit_loadout(&mut self) {
+        let have = self.combat.boosts.spells;
+        let n = self.combat.boosts.slots.clamp(1, 4);
+        self.loadout.resize(n, None);
+        for s in self.loadout.iter_mut() {
+            if s.is_some_and(|i| !have[i]) {
+                *s = None;
+            }
+        }
+        for k in 0..n {
+            if self.loadout[k].is_none() {
+                self.loadout[k] = (0..4).find(|&i| have[i] && !self.loadout.contains(&Some(i)));
+            }
+        }
+    }
+
+    // Takes the spell in slot k in hand.
+    fn select_slot(&mut self, k: usize) {
+        if let Some(Some(s)) = self.loadout.get(k) {
+            self.spells.select(*s);
+        }
+    }
+
+    // The loadout screen (from the defeat screen): slot k's spell, the next
+    // (by) of those he has: swapped with a slot that held it.
+    fn cycle_slot(&mut self, k: usize, by: i32) {
+        let have = self.combat.boosts.spells;
+        let mut opts: Vec<Option<usize>> = (0..4).filter(|&i| have[i]).map(Some).collect();
+        opts.push(None);
+        let Some(cur) = self.loadout.get(k).copied() else { return };
+        let at = opts.iter().position(|o| *o == cur).unwrap_or(0) as i32;
+        let next = opts[(at + by).rem_euclid(opts.len() as i32) as usize];
+        if let Some(j) = self.loadout.iter().position(|o| next.is_some() && *o == next) {
+            self.loadout[j] = cur;
+        }
+        self.loadout[k] = next;
+    }
+
+    // The loadout screen, from the defeat screen (paused while open), and
+    // back.
+    fn open_loadout(&mut self) {
+        self.paused = true;
+        self.loadout_open = Some(0);
+    }
+
+    fn close_loadout(&mut self) {
+        if self.loadout_open.take().is_some() {
+            self.paused = false;
+        }
+    }
+
     // (at the skill last looked at)
     fn ask_skills(&mut self) {
         let sel = self.skill_shown.min(skills::SKILLS.len() - 1);
@@ -907,7 +1018,7 @@ impl Game {
     // Whether something covers the game that is not the pause menu (the
     // skill tree, or picture mode): the app shows no menu.
     pub fn overlay(&self) -> bool {
-        self.picture.is_some() || self.tree.is_some()
+        self.picture.is_some() || self.tree.is_some() || self.loadout_open.is_some()
     }
 
     // The skill tree, open: picks the skill that way (a direction on
@@ -985,7 +1096,9 @@ impl Game {
     // Escape, P, B or Start: picture mode left (to the menu), or else the
     // pause toggled.
     fn pause_pressed(&mut self) {
-        if self.tree.is_some() {
+        if self.loadout_open.is_some() {
+            self.close_loadout();
+        } else if self.tree.is_some() {
             self.close_tree();
         } else if self.picture.is_some() {
             self.leave_picture();
@@ -1061,6 +1174,11 @@ impl Game {
     // the defeat panel and the controls panel.
     pub fn ui(&mut self, ctx: &egui::Context) {
         let rect = self.view.unwrap_or_else(|| ctx.content_rect());
+        // (the loadout, open: over everything)
+        if self.loadout_open.is_some() {
+            self.loadout_ui(ctx, rect);
+            return;
+        }
         // (the skill tree, open: over everything)
         if self.tree.is_some() {
             self.tree_ui(ctx, rect);
@@ -1217,6 +1335,7 @@ impl Game {
             painter.galley(Align2::CENTER_TOP.anchor_size(egui::pos2(rect.center().x, y + 0.5 * band + 8.0), g.size()).min, g, hud::DIM);
             let pad = self.spellbar.device == Device::Pad;
             let mut skills = false;
+            let mut loadout = false;
             egui::Area::new(egui::Id::unique("wizard-defeat-hints"))
                 .pivot(Align2::CENTER_BOTTOM)
                 .fixed_pos(rect.center_bottom() - Vec2::new(0.0, 28.0))
@@ -1228,6 +1347,10 @@ impl Game {
                         if hud::glyph_button(ui, skill_glyph, tr("Skill tree"), 1.05 * hud::FONT).clicked() {
                             skills = true;
                         }
+                        let loadout_glyph = if pad { hud::Chip::Face('Y') } else { hud::Chip::MouseMiddle };
+                        if hud::glyph_button(ui, loadout_glyph, tr("Loadout"), 1.05 * hud::FONT).clicked() {
+                            loadout = true;
+                        }
                         let again_glyph = if pad { hud::Chip::Face('A') } else { hud::Chip::Mouse(true) };
                         if hud::glyph_button(ui, again_glyph, tr("Try again"), 1.05 * hud::FONT).clicked() {
                             reset = true;
@@ -1237,12 +1360,100 @@ impl Game {
             if skills {
                 self.ask_skills();
             }
+            if loadout {
+                self.open_loadout();
+            }
         }
         if reset {
             self.combat.reset(&mut self.spells);
         }
 
         self.spellbar.ui(ctx, rect, &self.binds);
+    }
+
+    // The loadout, open: over everything, dark; his slots, each its key (or
+    // button) and the spell in it between arrows that change it, the slot
+    // picked lit; and what the buttons do.
+    fn loadout_ui(&mut self, ctx: &egui::Context, rect: Rect) {
+        let Some(sel) = self.loadout_open else { return };
+        let pad = self.spellbar.device == Device::Pad;
+        let mut change: Option<(usize, i32)> = None;
+        let mut pick = None;
+        let mut back = false;
+        egui::Area::new(egui::Id::unique("wizard-loadout")).fixed_pos(rect.min).order(egui::Order::Foreground).show(ctx, |ui| {
+            let (area, _) = ui.allocate_exact_size(rect.size(), egui::Sense::click());
+            let p = ui.painter().clone();
+            p.rect_filled(area, 0, hud::bg(0.88));
+            let title = p.layout_no_wrap(tr("Loadout").to_string(), egui::FontId::proportional(26.0), hud::FG);
+            p.galley(Align2::CENTER_TOP.anchor_size(area.center_top() + Vec2::new(0.0, 24.0), title.size()).min, title, hud::FG);
+            let n = self.loadout.len();
+            let row_h = 64.0;
+            let top = area.center().y - 0.5 * row_h * n as f32;
+            for k in 0..n {
+                let y = top + (k as f32 + 0.5) * row_h;
+                let row = Rect::from_center_size(egui::pos2(area.center().x, y), Vec2::new(420.0, row_h - 10.0));
+                let on = k == sel;
+                p.rect_filled(row, 8, if on { hud::bg(1.0) } else { hud::bg(0.5) });
+                p.rect_stroke(row, 8, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { hud::FOCUS } else { hud::BORDER }), egui::StrokeKind::Inside);
+                if ui.interact(row, ui.scope_id().with(("slot", k)), egui::Sense::click()).clicked() {
+                    pick = Some(k);
+                }
+                // its key or button
+                let glyph_at = egui::pos2(row.left() + 30.0, y);
+                if pad {
+                    if let Some(b) = self.binds.pad(Action::Spell(k)) {
+                        hud::paint_pad_glyph(&p, glyph_at, 10.0, b.chip());
+                    }
+                } else if let Some(key) = self.binds.key(Action::Spell(k)) {
+                    hud::paint_key_glyph(&p, glyph_at, 20.0, key.shown());
+                }
+                // the spell, between arrows
+                let mid = egui::pos2(row.center().x + 10.0, y);
+                for (dir, x) in [(-1, row.left() + 80.0), (1, row.right() - 30.0)] {
+                    let r = Rect::from_center_size(egui::pos2(x, y), Vec2::splat(30.0));
+                    let resp = ui.interact(r, ui.scope_id().with(("arrow", k, dir)), egui::Sense::click());
+                    let c = if resp.hovered() { hud::FG } else { hud::DIM };
+                    let s = 7.0 * dir as f32;
+                    p.add(egui::Shape::convex_polygon(
+                        vec![r.center() + Vec2::new(s, 0.0), r.center() + Vec2::new(-s, -7.0), r.center() + Vec2::new(-s, 7.0)],
+                        c,
+                        egui::Stroke::NONE,
+                    ));
+                    if resp.clicked() {
+                        change = Some((k, dir));
+                    }
+                }
+                match self.loadout[k] {
+                    Some(i) => {
+                        hud::paint_spell(&p, mid - Vec2::new(70.0, 0.0), 14.0, i, hud::SPELL_COLOURS[i]);
+                        let g = p.layout_no_wrap(tr(spells::SPELL_NAMES[i]).to_string(), egui::FontId::proportional(18.0), hud::FG);
+                        p.galley(Align2::LEFT_CENTER.anchor_size(mid - Vec2::new(45.0, 0.0), g.size()).min, g, hud::FG);
+                    }
+                    None => {
+                        let g = p.layout_no_wrap(tr("(empty)").to_string(), egui::FontId::proportional(18.0), hud::DIM);
+                        p.galley(Align2::LEFT_CENTER.anchor_size(mid - Vec2::new(45.0, 0.0), g.size()).min, g, hud::DIM);
+                    }
+                }
+            }
+            egui::Area::new(egui::Id::unique("wizard-loadout-hints"))
+                .order(egui::Order::Foreground)
+                .pivot(Align2::CENTER_BOTTOM)
+                .fixed_pos(area.center_bottom() - Vec2::new(0.0, 24.0))
+                .show(ctx, |ui| {
+                    let g = if pad { hud::Chip::Face('B') } else { hud::Chip::Key("Esc") };
+                    back = hud::glyph_button(ui, g, tr("Back"), 1.05 * hud::FONT).clicked();
+                });
+        });
+        if let Some(k) = pick {
+            self.loadout_open = Some(k);
+        }
+        if let Some((k, d)) = change {
+            self.loadout_open = Some(k);
+            self.cycle_slot(k, d);
+        }
+        if back {
+            self.close_loadout();
+        }
     }
 
     // The skill tree, open: over everything, dark; its skills (logos in
@@ -1513,6 +1724,27 @@ mod tests {
         assert!(!g.picture() && g.paused() && o.paused);
         assert_eq!(g.orbit.cam, cam);
         assert_eq!(frame(&ctx, &mut g, &p, vec![]).drive.picture, 0.0);
+    }
+
+    #[test]
+    fn the_loadout_fills_its_slots_and_swaps() {
+        let mut g = Game::new(None);
+        g.combat.boosts.spells = [true, true, true, false];
+        g.combat.boosts.slots = 3;
+        g.loadout = vec![Some(0)];
+        g.fit_loadout();
+        assert_eq!(g.loadout, vec![Some(0), Some(1), Some(2)]);
+        // (slot 0 to the next spell: lightning, which slot 1 held, takes the
+        // fire bolt)
+        g.cycle_slot(0, 1);
+        assert_eq!(g.loadout, vec![Some(1), Some(0), Some(2)]);
+        g.select_slot(1);
+        assert_eq!(g.spells.selected, 0);
+        // (fewer slots, a spell lost: out)
+        g.combat.boosts.slots = 2;
+        g.combat.boosts.spells = [true, false, true, false];
+        g.fit_loadout();
+        assert_eq!(g.loadout, vec![Some(2), Some(0)]);
     }
 
     #[test]

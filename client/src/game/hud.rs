@@ -233,8 +233,10 @@ pub enum Chip {
     Stick(char),
     // a direction of the D-pad (up, down, left, right)
     DPad(u8),
-    // the mouse, its left (false) or right (true) button pressed (a click)
+    // the mouse, its left (false) or right (true) button pressed (a click),
+    // or its middle (its wheel)
     Mouse(bool),
+    MouseMiddle,
 }
 
 // A row of chips, laid out left to right.
@@ -295,6 +297,10 @@ pub fn chip(ui: &mut Ui, c: Chip) {
         Chip::Mouse(right) => {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 18.0), Sense::hover());
             paint_mouse(ui.painter(), rect.center(), 8.0, FG, right);
+        }
+        Chip::MouseMiddle => {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 18.0), Sense::hover());
+            paint_mouse_middle(ui.painter(), rect.center(), 8.0, FG);
         }
         Chip::DPad(d) => {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 18.0), Sense::hover());
@@ -467,6 +473,7 @@ pub fn paint_pad_glyph(p: &egui::Painter, c: Pos2, r: f32, chip: Chip) {
         }
         Chip::Key(k) => paint_key_glyph(p, c, 2.0 * r, k),
         Chip::Mouse(right) => paint_mouse(p, c, r, FG, right),
+        Chip::MouseMiddle => paint_mouse_middle(p, c, r, FG),
         Chip::Text(s) => label(s, DIM),
     }
 }
@@ -688,4 +695,12 @@ pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32
             p.circle_stroke(c, 0.5 * r, Stroke::new(1.5, colour));
         }
     }
+}
+
+// A mouse, its wheel lit (a middle click).
+pub fn paint_mouse_middle(p: &egui::Painter, c: Pos2, r: f32, colour: Color32) {
+    let body = Rect::from_center_size(c, Vec2::new(1.3 * r, 2.0 * r));
+    p.rect_stroke(body, (0.62 * r) as u8, Stroke::new(1.3, colour), StrokeKind::Inside);
+    p.line_segment([Pos2::new(body.left(), body.top() + 0.8 * r), Pos2::new(body.right(), body.top() + 0.8 * r)], Stroke::new(1.0, colour));
+    p.rect_filled(Rect::from_center_size(Pos2::new(c.x, body.top() + 0.42 * r), Vec2::new(0.3 * r, 0.6 * r)), 1, colour);
 }

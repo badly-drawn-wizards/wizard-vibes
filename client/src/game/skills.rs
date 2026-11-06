@@ -29,6 +29,9 @@ pub const SKILLS: &[Skill] = &[
     Skill { id: "cool", name: "Cool winds", what: "Wind blades heat 15% less", levels: 3, cost: 4, needs: Some("wind"), at: (3.0, 0.0) },
     Skill { id: "lightning", name: "Lightning strike", what: "Unlocks the lightning strike", levels: 1, cost: 5, needs: Some("soul"), at: (1.0, 1.0) },
     Skill { id: "static", name: "Static", what: "Lightning locks on 20% sooner", levels: 2, cost: 6, needs: Some("lightning"), at: (1.0, 2.0) },
+    Skill { id: "slot2", name: "Spell slot", what: "A second spell slot", levels: 1, cost: 4, needs: Some("soul"), at: (0.0, -1.0) },
+    Skill { id: "slot3", name: "Spell slot", what: "A third spell slot", levels: 1, cost: 10, needs: Some("slot2"), at: (0.0, -2.0) },
+    Skill { id: "slot4", name: "Spell slot", what: "A fourth spell slot", levels: 1, cost: 20, needs: Some("slot3"), at: (0.0, -3.0) },
     Skill { id: "reaper", name: "Reaper", what: "One more soul from each defeat", levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
 ];
 
@@ -55,6 +58,7 @@ pub struct Boosts {
     pub soul_mana: f32,   // more mana a soul brings
     pub souls: u32,       // souls a defeat brings
     pub spells: [bool; 4], // the spells he can cast (the fire bolt always)
+    pub slots: usize,      // his spell slots (1 to 4)
 }
 
 impl Skills {
@@ -96,6 +100,7 @@ impl Skills {
             soul_mana: 5.0 * l("soul"),
             souls: 1 + self.level("reaper") as u32,
             spells: [true, self.level("lightning") > 0, self.level("wind") > 0, self.level("healing") > 0],
+            slots: 1 + ["slot2", "slot3", "slot4"].iter().filter(|s| self.level(s) > 0).count(),
         }
     }
 
