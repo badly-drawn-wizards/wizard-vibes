@@ -591,3 +591,101 @@ pub fn glyph_button(ui: &mut Ui, glyph: Chip, label: &str, size: f32) -> Respons
     }
     r
 }
+
+// A padlock, `r` its half height, round c.
+pub fn paint_lock(p: &egui::Painter, c: Pos2, r: f32, colour: Color32) {
+    let body = Rect::from_center_size(c + Vec2::new(0.0, 0.3 * r), Vec2::new(1.4 * r, 1.1 * r));
+    p.rect_filled(body, 2, colour);
+    let n = 12;
+    let pts: Vec<Pos2> = (0..=n)
+        .map(|k| {
+            let a = std::f32::consts::PI * k as f32 / n as f32;
+            c + Vec2::new(-0.45 * r * a.cos(), -0.25 * r - 0.5 * r * a.sin())
+        })
+        .collect();
+    p.add(Shape::line(pts, Stroke::new(0.22 * r, colour)));
+}
+
+// Skill `id`'s logo, `r` its half size, round c, in `colour` (see
+// skills.rs): a spell's glyph for the spells and what improves them, ringed
+// for a spell it unlocks; else its own (a heart, a drop, waves, a burst,
+// a skull, a soul).
+pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32) {
+    let icon = |which: Icon| paint_icon(p, Rect::from_center_size(c, Vec2::splat(2.0 * r)), which, colour);
+    let spell = |i: usize| paint_spell(p, c, r, i, colour);
+    let ring = || p.circle_stroke(c, 1.15 * r, Stroke::new(1.2, colour));
+    match id {
+        "soul" => icon(Icon::Soul),
+        "vitality" => icon(Icon::Heart),
+        "reaper" => icon(Icon::Skull),
+        "healing" => {
+            spell(3);
+            ring();
+        }
+        "mending" => {
+            spell(3);
+            // (and an arrow up beside it: more)
+            let a = c + Vec2::new(0.75 * r, -0.2 * r);
+            p.add(Shape::convex_polygon(vec![a + Vec2::new(0.0, -0.35 * r), a + Vec2::new(0.25 * r, 0.0), a + Vec2::new(-0.25 * r, 0.0)], colour, Stroke::NONE));
+        }
+        "lightning" => {
+            spell(1);
+            ring();
+        }
+        "static" => {
+            spell(1);
+            // (sparks round it)
+            for k in 0..4 {
+                let a = std::f32::consts::FRAC_PI_2 * k as f32 + 0.6;
+                let d = Vec2::new(a.cos(), a.sin());
+                p.line_segment([c + d * 0.75 * r, c + d * r], Stroke::new(1.2, colour));
+            }
+        }
+        "wind" => {
+            spell(2);
+            ring();
+        }
+        "cool" => {
+            spell(2);
+            // (a snowflake's six arms, small, beside it)
+            let s = c + Vec2::new(0.7 * r, 0.6 * r);
+            for k in 0..3 {
+                let a = std::f32::consts::PI / 3.0 * k as f32;
+                let d = Vec2::new(a.cos(), a.sin()) * 0.3 * r;
+                p.line_segment([s - d, s + d], Stroke::new(1.0, colour));
+            }
+        }
+        "kindling" => spell(0),
+        "inferno" => {
+            // a burst: rays out from a ball
+            p.circle_filled(c, 0.35 * r, colour);
+            for k in 0..8 {
+                let a = std::f32::consts::FRAC_PI_4 * k as f32;
+                let d = Vec2::new(a.cos(), a.sin());
+                p.line_segment([c + d * 0.5 * r, c + d * if k % 2 == 0 { r } else { 0.8 * r }], Stroke::new(1.6, colour));
+            }
+        }
+        "well" => {
+            // a drop
+            let base = c + Vec2::new(0.0, 0.25 * r);
+            p.circle_filled(base, 0.5 * r, colour);
+            p.add(Shape::convex_polygon(vec![c + Vec2::new(0.0, -0.85 * r), base + Vec2::new(0.47 * r, -0.15 * r), base + Vec2::new(-0.47 * r, -0.15 * r)], colour, Stroke::NONE));
+        }
+        "flow" => {
+            // waves
+            for k in 0..3 {
+                let y = (k as f32 - 1.0) * 0.45 * r;
+                let pts: Vec<Pos2> = (0..=12)
+                    .map(|j| {
+                        let t = j as f32 / 12.0;
+                        c + Vec2::new((t - 0.5) * 1.8 * r, y + 0.15 * r * (t * std::f32::consts::TAU).sin())
+                    })
+                    .collect();
+                p.add(Shape::line(pts, Stroke::new(1.6, colour)));
+            }
+        }
+        _ => {
+            p.circle_stroke(c, 0.5 * r, Stroke::new(1.5, colour));
+        }
+    }
+}

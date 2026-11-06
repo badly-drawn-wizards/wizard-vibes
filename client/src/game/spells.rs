@@ -109,6 +109,10 @@ pub struct Lock {
 // (the probe's id for a lock's ground point)
 const LOCK_PROBE: u32 = u32::MAX;
 
+// A wind blade's cut: a point of its plane and the plane's normal, and how
+// fast the blade was going (all in the world).
+pub type Cut = (V3, V3, V3);
+
 // What happened, for the fight to deal with.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SpellEvent {
@@ -116,7 +120,7 @@ pub enum SpellEvent {
     // along a plane, through a point with a normal, in the world), its
     // damage scaled by `scale` (a burst's, by its charge and how near its
     // heart)
-    Hit { side: i32, kind: u32, owner: i32, cut: Option<(V3, V3)>, scale: f32 },
+    Hit { side: i32, kind: u32, owner: i32, cut: Option<Cut>, scale: f32 },
     // (for the sound: a bolt bursting, a blade breaking up, a strike landing)
     Sound { what: Sound, pos: V3 },
     // a soul reached him
@@ -167,6 +171,8 @@ pub struct Gatling {
 #[derive(Clone, Debug)]
 pub struct Spells {
     pub selected: usize,
+    // the spells he has (his skills unlock them: see the game)
+    pub unlocked: [bool; 4],
     pub limit: usize,
     pub staff: f32,      // how far the staff is held out (0..1)
     pub since_cast: f32, // seconds
@@ -196,7 +202,8 @@ pub struct Spells {
 impl Default for Spells {
     fn default() -> Self {
         Spells {
-            selected: 1, // lightning: the orb's own colours
+            selected: 0, // the fire bolt: the one he starts with
+            unlocked: [true, true, true, true],
             limit: 6,
             staff: 0.0,
             since_cast: 10.0,
@@ -223,8 +230,9 @@ impl Spells {
         self.items.len()
     }
 
+    // Takes spell i in hand, if he has it (see unlocked).
     pub fn select(&mut self, i: usize) {
-        if i < SPELL_NAMES.len() {
+        if i < SPELL_NAMES.len() && self.unlocked[i] {
             self.selected = i;
         }
     }
@@ -448,7 +456,7 @@ impl Spells {
                 let Some(t) = targets.iter().find(|t| Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r) else {
                     continue;
                 };
-                let cut = if s.kind == WIND { Some((s.pos, blade_normal(s))) } else { None };
+                let cut = if s.kind == WIND { Some((s.pos, blade_normal(s), s.vel)) } else { None };
                 events.push(SpellEvent::Hit { side: t.side, kind: s.kind, owner: s.owner, cut, scale: 1.0 });
                 if s.kind == FIRE {
                     Self::burst(s, events);

@@ -11,7 +11,7 @@
 // under 8 the seconds it has still to appear, 8 and over 8 plus the seconds
 // since its defeat.
 
-use super::spells::{Spells, Target, BURST, CHARGE, FIRE, HIS, MARK, STRIKE, WARMUP, WIND, WINDUP};
+use super::spells::{Cut, Spells, Target, BURST, CHARGE, FIRE, HIS, MARK, STRIKE, WARMUP, WIND, WINDUP};
 use super::vec::{add, dist, dot, len, normalise, scale, sub, turn, V3};
 use super::Rng;
 use std::f32::consts::PI;
@@ -36,14 +36,19 @@ pub const PLAYER_HP: i32 = 10;
 // blade's cut: its plane (a point and normal in the world) in the enemy's
 // space (it at `pos`, turned by `yaw`), the normal up, moved to cut through
 // the figure if it would miss (within 0.35 of its middle), each of
-// azimuth, elevation and offset in six bits.
-pub fn kill_code(kind: u32, cut: Option<(V3, V3)>, pos: V3, yaw: f32) -> f32 {
+// azimuth, elevation and offset in six bits; and above them, in four, the
+// way the blade went (level, one of sixteen: the halves are carried that
+// way).
+pub fn kill_code(kind: u32, cut: Option<Cut>, pos: V3, yaw: f32) -> f32 {
     let k = match kind {
         STRIKE => 1,
         WIND => 2,
         _ => 0,
     };
-    let Some((p, n)) = cut.filter(|_| k == 2) else { return k as f32 };
+    let Some((p, n, v)) = cut.filter(|_| k == 2) else { return k as f32 };
+    // (the way the blade went, level, in its space: one of sixteen)
+    let vb = turn(-yaw, v);
+    let push = ((vb[0].atan2(vb[2]) + PI) / (2.0 * PI) * 16.0).round() as u32 % 16;
     let n = normalise(turn(-yaw, n));
     let n = if n[1] < 0.0 { scale(-1.0, n) } else { n };
     let pb = turn(-yaw, sub(p, pos));
@@ -53,7 +58,7 @@ pub fn kill_code(kind: u32, cut: Option<(V3, V3)>, pos: V3, yaw: f32) -> f32 {
     let a = ((phi + PI) / (2.0 * PI) * 63.0).round() as u32 % 64;
     let e = (th / (0.5 * PI) * 63.0).round() as u32;
     let o = ((off + 0.35) / 0.7 * 63.0).round() as u32;
-    (k + 4 * (a + 64 * (e + 64 * o))) as f32
+    (k + 4 * (a + 64 * (e + 64 * o)) + (push << 20)) as f32
 }
 
 fn damage(kind: u32) -> i32 {
@@ -233,7 +238,7 @@ pub struct Enemies {
     pub ffa: bool,        // free for all: they fight each other too
     // what defeated him last (its kind, and a wind blade's cut), and how
     // many times he has been (each comes apart its own way)
-    pub his_end: Option<(u32, Option<(V3, V3)>)>,
+    pub his_end: Option<(u32, Option<Cut>)>,
     pub his_deaths: i64,
     pub max_hp: i32, // his health, full (his skills raise it)
 }
@@ -339,7 +344,7 @@ impl Enemies {
     // The same, a wind blade's cut with it (a point and normal, world), its
     // damage scaled by `scale` (rounded; at least 1, if it does any), cast
     // by `owner` (only his defeats count).
-    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<(V3, V3)>, scale: f32, owner: i32) {
+    pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<Cut>, scale: f32, owner: i32) {
         let damage = match damage(kind) {
             0 => 0,
             d => ((d as f32 * scale).round() as i32).max(1),
@@ -770,8 +775,8 @@ mod tests {
         let n = turn(yaw, [1.0, 0.0, 0.0]);
         let pos = [3.0, 10.0, -2.0];
         let p = add(pos, turn(yaw, [0.2, 1.0, 0.0]));
-        let code = kill_code(WIND, Some((p, n)), pos, yaw);
-        let (k, nb, o) = wizard_shader::enemies::kill_of(code);
+        let code = kill_code(WIND, Some((p, n, [0.0; 3])), pos, yaw);
+        let (k, nb, o, _) = wizard_shader::enemies::kill_of(code);
         assert_eq!(k, 2);
         assert!((nb.x.abs() - 1.0).abs() < 0.02 && nb.y.abs() < 0.03, "{nb:?}");
         assert!((o * nb.x.signum() - 0.2).abs() < 0.02, "{o}");
@@ -780,7 +785,7 @@ mod tests {
         assert_eq!(wizard_shader::enemies::kill_of(kill_code(BURST, None, pos, yaw)).0, 0);
         // a cut that misses the figure is moved to its edge
         let far = add(pos, turn(yaw, [3.0, 1.0, 0.0]));
-        let (_, _, o) = wizard_shader::enemies::kill_of(kill_code(WIND, Some((far, n)), pos, yaw));
+        let (_, _, o, _) = wizard_shader::enemies::kill_of(kill_code(WIND, Some((far, n, [0.0; 3])), pos, yaw));
         assert!(o.abs() <= 0.351, "{o}");
     }
 }

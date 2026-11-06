@@ -802,8 +802,22 @@ pub const glass_tint: Vec3 = Vec3::new(0.93, 0.97, 1.0);
 
 // Distances (entry, exit) where the ray meets the orb; entry > exit on a miss.
 #[inline]
-pub fn orb_hit(pose: Pose, ro: Vec3, rd: Vec3) -> (f32, f32) {
-    ray_sphere(pose.orb, orb_radius, ro, rd)
+// Where the ray ro + t rd meets the orb's glass, sphere-traced (within a
+// bounding sphere a little wider): from outside, where it enters (else
+// infinity), and the far side of the bound; from inside, where it leaves
+// (-infinity, then). With the glass's normals there.
+pub fn orb_hit(pose: Pose, ro: Vec3, rd: Vec3, inside: bool) -> (f32, f32, Vec3) {
+    let sdf = move |q: Vec3| sd_sphere(q - pose.orb, orb_radius);
+    let (a, b) = ray_sphere(pose.orb, orb_radius + 0.02, ro, rd);
+    if a > b || b < 0.0 {
+        (INF, -INF, vec(0.0, 1.0, 0.0))
+    } else if inside {
+        let (hit, t, n) = glass_hit(sdf, 24, ro, rd, 1e-3, b);
+        (-INF, if hit { t } else { b }, n)
+    } else {
+        let (hit, t, n) = glass_hit(sdf, 24, ro, rd, a.maximum(1e-3), b);
+        if hit { (t, b, n) } else { (INF, -INF, n) }
+    }
 }
 
 // What a glass surface at p, met as fr describes, reflects towards the
@@ -925,7 +939,7 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
         } else {
             let vis = pose.prm.layers;
             // (a hidden orb is no glass at all)
-            let (t_in, t_out) = if has(vis, layers_orb) { orb_hit(pose, ro, rd) } else { (INF, -INF) };
+            let (t_in, t_out, n_orb) = if has(vis, layers_orb) && !pose.dead { orb_hit(pose, ro, rd, inside) } else { (INF, -INF, vec(0.0, 1.0, 0.0)) };
             let enters = !inside && t_in > 1e-3 && t_in < t_out;
             let tmax = if inside { t_out } else if enters { t_in } else { pose.prm.view_distance };
             // Two passes: the terrain alone over the whole segment, then the
@@ -978,15 +992,13 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
             } else if enters && t >= t_in {
                 // into the glass
                 let p = ro + scale(t_in, rd);
-                let n = normalise(p - pose.orb);
-                let fr = fresnel_at(pose.prm.orb_ior, rd, n);
+                let fr = fresnel_at(pose.prm.orb_ior, rd, n_orb);
                 let refl = if refl.0 { refl } else { (true, p, fr.reflected, w.x * fr.f) };
                 (p, fr.refracted, scale(1.0 - fr.f, w * glass_tint), acc, true, false, refl, first)
             } else if inside && t >= t_out {
                 // out of the glass
                 let p = ro + scale(t_out, rd);
-                let n = normalise(p - pose.orb);
-                (p, fresnel_at(1.0 / pose.prm.orb_ior, rd, n).refracted, w * glass_tint, acc, false, false, refl, first)
+                (p, fresnel_at(1.0 / pose.prm.orb_ior, rd, n_orb).refracted, w * glass_tint, acc, false, false, refl, first)
             } else {
                 (ro, rd, w, acc + (w * sky(pose, to_world_dir(pose.fl, rd))), inside, true, refl, first)
             }

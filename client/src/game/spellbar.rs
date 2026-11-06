@@ -26,11 +26,13 @@ pub struct SpellBar {
     pub cooling: [f32; 4],
     pub heat: f32,
     pub overheated: bool,
+    // the spells he has (the others shown locked)
+    pub unlocked: [bool; 4],
 }
 
 impl Default for SpellBar {
     fn default() -> Self {
-        SpellBar { device: Device::Keyboard, spell: 1, cooling: [0.0; 4], heat: 0.0, overheated: false }
+        SpellBar { device: Device::Keyboard, spell: 0, cooling: [0.0; 4], heat: 0.0, overheated: false, unlocked: [true; 4] }
     }
 }
 
@@ -91,6 +93,12 @@ impl SpellBar {
                     } else {
                         p.circle_filled(c, R, hud::bg(0.6));
                         p.circle_stroke(c, R, Stroke::new(1.0, hud::BORDER));
+                    }
+                    if !self.unlocked[i] {
+                        // (locked: a padlock, the spell faint behind it)
+                        hud::paint_spell(p, c, 0.62 * R, i, colour.gamma_multiply(0.12));
+                        hud::paint_lock(p, c, 0.45 * R, hud::DIM);
+                        continue;
                     }
                     hud::paint_spell(p, c, 0.62 * R, i, if on { colour } else { colour.gamma_multiply(0.45) });
                     // cooling down: the part still to come shaded, from the

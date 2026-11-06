@@ -13,20 +13,23 @@ pub struct Skill {
     pub levels: u8,
     pub cost: u64, // the first level's; each after costs twice the one before
     pub needs: Option<&'static str>,
-    pub at: (f32, f32), // where in the tree (-1..1 across, -1..1 down)
+    pub at: (f32, f32), // where in the tree (across, down: a grid's cells)
 }
 
 pub const SKILLS: &[Skill] = &[
     Skill { id: "soul", name: "Soul bond", what: "Souls restore 5 more mana", levels: 1, cost: 1, needs: None, at: (0.0, 0.0) },
-    Skill { id: "vitality", name: "Vitality", what: "2 more health", levels: 3, cost: 3, needs: Some("soul"), at: (-0.45, -0.5) },
-    Skill { id: "mending", name: "Mending", what: "Healing 30% faster", levels: 3, cost: 5, needs: Some("vitality"), at: (-0.45, -1.0) },
-    Skill { id: "well", name: "Mana well", what: "20 more mana", levels: 3, cost: 3, needs: Some("soul"), at: (0.45, -0.5) },
-    Skill { id: "flow", name: "Mana flow", what: "Mana refills 25% faster", levels: 3, cost: 5, needs: Some("well"), at: (0.45, -1.0) },
-    Skill { id: "kindling", name: "Kindling", what: "Fire bolts charge 25% faster", levels: 3, cost: 4, needs: Some("soul"), at: (-0.9, 0.2) },
-    Skill { id: "inferno", name: "Inferno", what: "Fire bursts reach 20% further", levels: 2, cost: 8, needs: Some("kindling"), at: (-0.9, 0.8) },
-    Skill { id: "cool", name: "Cool winds", what: "Wind blades heat 15% less", levels: 3, cost: 4, needs: Some("soul"), at: (0.9, 0.2) },
-    Skill { id: "static", name: "Static", what: "Lightning locks on 20% sooner", levels: 2, cost: 6, needs: Some("soul"), at: (0.45, 0.8) },
-    Skill { id: "reaper", name: "Reaper", what: "One more soul from each defeat", levels: 3, cost: 10, needs: Some("soul"), at: (-0.25, 0.9) },
+    Skill { id: "vitality", name: "Vitality", what: "2 more health", levels: 3, cost: 3, needs: Some("soul"), at: (-1.0, -1.0) },
+    Skill { id: "healing", name: "Healing", what: "Unlocks healing (channelled)", levels: 1, cost: 6, needs: Some("vitality"), at: (-1.0, -2.0) },
+    Skill { id: "mending", name: "Mending", what: "Healing 30% faster", levels: 3, cost: 5, needs: Some("healing"), at: (-1.0, -3.0) },
+    Skill { id: "well", name: "Mana well", what: "20 more mana", levels: 3, cost: 3, needs: Some("soul"), at: (1.0, -1.0) },
+    Skill { id: "flow", name: "Mana flow", what: "Mana refills 25% faster", levels: 3, cost: 5, needs: Some("well"), at: (1.0, -2.0) },
+    Skill { id: "kindling", name: "Kindling", what: "Fire bolts charge 25% faster", levels: 3, cost: 4, needs: Some("soul"), at: (-2.0, 0.0) },
+    Skill { id: "inferno", name: "Inferno", what: "Fire bursts reach 20% further", levels: 2, cost: 8, needs: Some("kindling"), at: (-3.0, 0.0) },
+    Skill { id: "wind", name: "Wind blade", what: "Unlocks the wind blades", levels: 1, cost: 5, needs: Some("soul"), at: (2.0, 0.0) },
+    Skill { id: "cool", name: "Cool winds", what: "Wind blades heat 15% less", levels: 3, cost: 4, needs: Some("wind"), at: (3.0, 0.0) },
+    Skill { id: "lightning", name: "Lightning strike", what: "Unlocks the lightning strike", levels: 1, cost: 5, needs: Some("soul"), at: (1.0, 1.0) },
+    Skill { id: "static", name: "Static", what: "Lightning locks on 20% sooner", levels: 2, cost: 6, needs: Some("lightning"), at: (1.0, 2.0) },
+    Skill { id: "reaper", name: "Reaper", what: "One more soul from each defeat", levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
 ];
 
 pub fn skill(id: &str) -> Option<&'static Skill> {
@@ -51,6 +54,7 @@ pub struct Boosts {
     pub lock: f32,        // lightning's lock-on time, times
     pub soul_mana: f32,   // more mana a soul brings
     pub souls: u32,       // souls a defeat brings
+    pub spells: [bool; 4], // the spells he can cast (the fire bolt always)
 }
 
 impl Skills {
@@ -91,6 +95,7 @@ impl Skills {
             lock: 0.8f32.powf(l("static")),
             soul_mana: 5.0 * l("soul"),
             souls: 1 + self.level("reaper") as u32,
+            spells: [true, self.level("lightning") > 0, self.level("wind") > 0, self.level("healing") > 0],
         }
     }
 
@@ -130,6 +135,7 @@ mod tests {
     fn learnt_in_order_for_souls() {
         let mut k = Skills::default();
         let mut souls = 20;
+        assert_eq!(k.boosts().spells, [true, false, false, false]);
         let vit = skill("vitality").unwrap();
         // (not before the root)
         assert!(!k.buy(vit, &mut souls));

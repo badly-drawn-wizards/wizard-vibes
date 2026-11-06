@@ -78,7 +78,7 @@
  "Keyboard": "Teclado",
  "Controller": "Mando",
  "Forward": "Adelante",
- "Back": "Atrás",
+ "Back": "Volver",
  "Left": "Izquierda",
  "Right": "Derecha",
  "Climb": "Subir",
@@ -290,5 +290,10 @@
  "param.orb_tendrils": "Rayos dentro del orbe",
  "param.orb_arcs": "Arcos de rayos",
  "param.bolts_per_kind": "Rayos",
- "param.max_spells": "Hechizos a la vez"
+ "param.max_spells": "Hechizos a la vez",
+ "Picture mode": "Modo foto",
+ "Learn": "Aprender",
+ "Unlocks healing (channelled)": "Desbloquea la curación (canalizada)",
+ "Unlocks the wind blades": "Desbloquea las cuchillas de viento",
+ "Unlocks the lightning strike": "Desbloquea el rayo"
 }

@@ -55,6 +55,8 @@ pub struct Enemy {
     pub kill: i32,
     pub cut_n: Vec3,
     pub cut_o: f32,
+    // (a wind blade's) the way its pieces are carried, in the burst's space
+    pub push: Vec3,
     pub yaw: f32,
     pub r#gen: i32,
     pub appear: f32,
@@ -83,13 +85,14 @@ pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
     let fall = if him { 0.0 } else { fall };
     let size = if him { 1.0 } else { size };
     let to_him = fl.pos - pos;
-    let (kill, cut_n, cut_o) = kill_of(foe_kill(fs, i));
+    let (kill, cut_n, cut_o, push) = kill_of(foe_kill(fs, i));
     Enemy {
         pos: pos - vec(0.0, fall, 0.0),
         burst: pos,
         kill,
         cut_n,
         cut_o,
+        push,
         yaw: if him { fl.heading } else { to_him.x.atan2(to_him.z) },
         r#gen,
         appear,
@@ -160,16 +163,20 @@ pub const parts_all: i32 = 7;
 // a wind blade's cut, its plane in the burst's space: a unit normal (up,
 // or level) and its offset from the figure's middle (fig_middle), clamped
 // so that it cuts the figure: code = kind + 4 (azimuth + 64 (elevation +
-// 64 offset)), each six bits.
+// 64 offset)), each six bits; and above them (times 2^20, four bits) the
+// way the blade went, level, one of sixteen (its pieces carried that way:
+// the last of what kill_of gives, in the burst's space).
 pub const fig_middle: Vec3 = Vec3::new(0.0, 1.0, 0.0);
-pub fn kill_of(code: f32) -> (i32, Vec3, f32) {
+pub fn kill_of(code: f32) -> (i32, Vec3, f32, Vec3) {
     let c = ftoi(code.maximum(0.0) + 0.5);
     let k = imod(c, 4);
     let r = idiv(c, 4);
     let phi = imod(r, 64) as f32 / 63.0 * 2.0 * PI - PI;
     let th = imod(idiv(r, 64), 64) as f32 / 63.0 * 0.5 * PI;
-    let o = idiv(r, 4096) as f32 / 63.0 * 0.7 - 0.35;
-    (k, vec(th.cos() * phi.cos(), th.sin(), th.cos() * phi.sin()), o)
+    let o = imod(idiv(r, 4096), 64) as f32 / 63.0 * 0.7 - 0.35;
+    let a = idiv(c, 1 << 20) as f32 / 16.0 * 2.0 * PI - PI;
+    let push = if k == kill_wind { vec(a.sin(), 0.0, a.cos()) } else { splat(0.0) };
+    (k, vec(th.cos() * phi.cos(), th.sin(), th.cos() * phi.sin()), o, push)
 }
 
 // Giblet k's seed (k < giblets), in the figure's space: the legs, the
@@ -253,7 +260,9 @@ pub fn piece_place(seed: i32, g: i32, i: i32, e: Enemy, k: i32, tau: f32) -> (Ve
         let spin = (4.0 + 8.0 * r(3)) * if r(2) < 0.5 { 1.0 } else { -1.0 };
         (giblet_seed(k), v, normalise(vec(a.cos(), 2.0 * r(3) - 1.0, a.sin())), spin * tau, 0.85)
     };
-    let c = pivot + scale(tau, v) + fall;
+    // (a wind blade carries the pieces on, slowing)
+    let carried = if e.kill == kill_wind { scale(3.2 * (1.0 - (-1.5 * tau).exp()), e.push) } else { splat(0.0) };
+    let c = pivot + scale(tau, v) + fall + carried;
     let a = -angle;
     (c, axis, a.cos(), a.sin(), size, pivot, reach)
 }

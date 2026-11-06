@@ -59,6 +59,7 @@ const STORE_SWAP_XY: &str = "wizard-swap-xy";
 const STORE_SOULS: &str = "wizard-souls";
 const STORE_FFA: &str = "wizard-ffa";
 const STORE_SKILLS: &str = "wizard-skills";
+const STORE_SPELL: &str = "wizard-spell";
 const STORE_QUALITY: &str = "wizard-quality";
 
 // A small random number generator (splitmix64) for what the TS takes from
@@ -131,7 +132,8 @@ pub struct Game {
     // skill tree asked for (from the defeat screen: the app opens it)
     skills: skills::Skills,
     skill_shown: usize,
-    open_skills: bool,
+    // the skill tree, when open (see Tree)
+    tree: Option<Tree>,
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
@@ -188,6 +190,27 @@ struct Death {
 
 const DEATH_SLOW: f32 = 2.0;
 
+// The skill tree, open (over everything, the game paused): the skill
+// picked, and where the view is (the tree's space, points, its middle at
+// the root), easing to the one picked unless being dragged; and whether it
+// was opened from the pause menu (it goes back there) or the defeat screen.
+#[derive(Clone, Copy, Debug)]
+struct Tree {
+    sel: usize,
+    pan: Vec2,
+    dragging: bool,
+    from_menu: bool,
+}
+
+// (the tree's cells, points)
+const TREE_CELL: f32 = 120.0;
+
+// Where skill k is in the tree's space (points).
+fn tree_at(k: usize) -> Vec2 {
+    let s = &skills::SKILLS[k];
+    Vec2::new(s.at.0, s.at.1) * TREE_CELL
+}
+
 // (how long a binding waits for its key, or button)
 const CAPTURE_SECS: f32 = 6.0;
 
@@ -237,7 +260,7 @@ impl Game {
             death: None,
             skills: get(STORE_SKILLS).map_or_else(skills::Skills::default, |v| skills::Skills::restored(&v)),
             skill_shown: 0,
-            open_skills: false,
+            tree: None,
             cross: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
@@ -245,6 +268,12 @@ impl Game {
             view: None,
             defeat_since: None,
         };
+        // (the spell he last had in hand, kept from round to round and run to
+        // run, if he has it)
+        g.spells.unlocked = g.skills.boosts().spells;
+        if let Some(i) = get(STORE_SPELL).and_then(|v| v.parse().ok()) {
+            g.spells.select(i);
+        }
         // (the flight as the mode has it, the camera as it was: main.ts sets
         // this before free flight's take-off turns the camera)
         g.flight.set_active(g.mode.free());
@@ -261,6 +290,7 @@ impl Game {
         storage.set_string(STORE_SOULS, self.souls.to_string());
         storage.set_string(STORE_FFA, if self.ffa { "1" } else { "0" }.to_string());
         storage.set_string(STORE_SKILLS, self.skills.saved());
+        storage.set_string(STORE_SPELL, self.spells.selected.to_string());
         if let Some(c) = self.quality.choice {
             storage.set_string(STORE_QUALITY, c.key().to_string());
         }
@@ -554,6 +584,20 @@ impl Game {
                 }));
             }
             self.mods = mods;
+            // (the skill tree open: the keys move about it, buy, go back)
+            if self.tree.is_some() {
+                for (key, _) in &keys {
+                    match key {
+                        Key::W | Key::ArrowUp => self.tree_move(Vec2::new(0.0, -1.0)),
+                        Key::S | Key::ArrowDown => self.tree_move(Vec2::new(0.0, 1.0)),
+                        Key::A | Key::ArrowLeft => self.tree_move(Vec2::new(-1.0, 0.0)),
+                        Key::D | Key::ArrowRight => self.tree_move(Vec2::new(1.0, 0.0)),
+                        Key::Enter | Key::Space => self.tree_buy(),
+                        _ => {}
+                    }
+                }
+                acts.retain(|a| *a == Action::Pause);
+            }
             for a in acts {
                 match a {
                     Action::Mode => self.cycle_mode(),
@@ -583,7 +627,7 @@ impl Game {
             self.paused = true;
         }
         let picture = self.picture.is_some();
-        if self.paused && !picture || !ctx.input(|i| i.focused) {
+        if self.paused && !picture || self.tree.is_some() || !ctx.input(|i| i.focused) {
             self.look.release(ctx);
         }
         if !self.paused {
@@ -610,13 +654,27 @@ impl Game {
             if p.mode {
                 self.cycle_mode();
             }
-            if p.pause || (p.back && self.paused && !self.menu_holds) {
+            if p.pause || (p.back && self.paused && !self.menu_holds && self.tree.is_none()) {
                 self.pause_pressed();
             }
             if p.active {
                 self.spellbar.device = Device::Pad;
             }
-            if self.picture.is_some() {
+            if self.tree.is_some() {
+                // (the skill tree: the D-pad or the left stick move about it,
+                // A buys, B goes back)
+                for (on, d) in p.nav.iter().zip([Vec2::new(0.0, -1.0), Vec2::new(0.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0)]) {
+                    if *on {
+                        self.tree_move(d);
+                    }
+                }
+                if p.confirm {
+                    self.tree_buy();
+                }
+                if p.back {
+                    self.close_tree();
+                }
+            } else if self.picture.is_some() {
                 // (in picture mode, the sticks fly the camera: below)
             } else if self.paused {
                 // (in the pause menu, the rest is its navigation)
@@ -653,6 +711,11 @@ impl Game {
         let dir = self.assist(origin, dir);
         self.spells.ffa = self.ffa;
         self.combat.boosts = self.skills.boosts();
+        // (the spells he has; one he no longer has out of his hand)
+        self.spells.unlocked = self.combat.boosts.spells;
+        if !self.spells.unlocked[self.spells.selected] {
+            self.spells.selected = 0;
+        }
         self.combat.enemies.ffa = self.ffa;
         let moment = Moment {
             dt: game_dt,
@@ -673,6 +736,7 @@ impl Game {
         self.combat.handle(&mut self.spells);
         self.souls += std::mem::take(&mut self.combat.souls_taken) as u64;
         self.spellbar.spell = self.spells.selected;
+        self.spellbar.unlocked = self.spells.unlocked;
         self.spellbar.cooling = [0, 1, 2, 3].map(|i| self.spells.cooling(i));
         self.spellbar.heat = self.spells.gatling.heat;
         self.spellbar.overheated = self.spells.gatling.overheated;
@@ -823,15 +887,64 @@ impl Game {
         }
     }
 
-    // The skill tree, asked for from the defeat screen: paused, the app
-    // opens the menu at it (see take_open_skills).
+    // The skill tree, asked for from the defeat screen.
     fn ask_skills(&mut self) {
-        self.paused = true;
-        self.open_skills = true;
+        self.open_tree(false);
     }
 
-    pub fn take_open_skills(&mut self) -> bool {
-        std::mem::take(&mut self.open_skills)
+    // Opens the skill tree (from the pause menu, or the defeat screen),
+    // at the skill last looked at.
+    pub fn open_tree(&mut self, from_menu: bool) {
+        let sel = self.skill_shown.min(skills::SKILLS.len() - 1);
+        self.paused = true;
+        self.tree = Some(Tree { sel, pan: tree_at(sel), dragging: false, from_menu });
+    }
+
+    // Back to where it was opened from.
+    fn close_tree(&mut self) {
+        if let Some(t) = self.tree.take() {
+            self.paused = t.from_menu;
+        }
+    }
+
+    // Whether something covers the game that is not the pause menu (the
+    // skill tree, or picture mode): the app shows no menu.
+    pub fn overlay(&self) -> bool {
+        self.picture.is_some() || self.tree.is_some()
+    }
+
+    // The skill tree, open: picks the skill that way (a direction on
+    // screen), the nearest roughly that way.
+    fn tree_move(&mut self, dir: Vec2) {
+        let Some(t) = &mut self.tree else { return };
+        let from = tree_at(t.sel);
+        let mut best = (f32::MAX, t.sel);
+        for k in 0..skills::SKILLS.len() {
+            let d = tree_at(k) - from;
+            let len = d.length();
+            if k == t.sel || len < 1.0 {
+                continue;
+            }
+            let cos = d.dot(dir) / len;
+            if cos < 0.4 {
+                continue;
+            }
+            let score = len * (1.0 + 2.0 * (1.0 - cos));
+            if score < best.0 {
+                best = (score, k);
+            }
+        }
+        t.sel = best.1;
+        t.dragging = false;
+        self.skill_shown = t.sel;
+    }
+
+    // Buys the next level of the skill picked, if he can.
+    fn tree_buy(&mut self) {
+        let Some(t) = self.tree else { return };
+        if self.skills.buy(&skills::SKILLS[t.sel], &mut self.souls) {
+            self.combat.sfx.push(sfx::here(sfx::APPEAR));
+        }
     }
 
     // How fast time runs: slowing to a stop as he comes apart.
@@ -875,7 +988,9 @@ impl Game {
     // Escape, P, B or Start: picture mode left (to the menu), or else the
     // pause toggled.
     fn pause_pressed(&mut self) {
-        if self.picture.is_some() {
+        if self.tree.is_some() {
+            self.close_tree();
+        } else if self.picture.is_some() {
             self.leave_picture();
         } else {
             self.paused = !self.paused;
@@ -944,6 +1059,11 @@ impl Game {
     // the defeat panel and the controls panel.
     pub fn ui(&mut self, ctx: &egui::Context) {
         let rect = self.view.unwrap_or_else(|| ctx.content_rect());
+        // (the skill tree, open: over everything)
+        if self.tree.is_some() {
+            self.tree_ui(ctx, rect);
+            return;
+        }
         // (picture mode: nothing in the way but a note of how to leave, a
         // few seconds)
         if let Some(p) = &self.picture {
@@ -958,7 +1078,7 @@ impl Game {
                     .show(ctx, |ui| {
                         ui.set_opacity(alpha);
                         hud::panel(0.6, 6, Margin::symmetric(14, 6)).show(ui, |ui| {
-                            ui.label(hud::text(tr("Picture mode · click to look, fly as he would · Esc to return"), hud::FONT, hud::FG));
+                            ui.label(hud::text(tr("Picture mode"), hud::FONT, hud::FG));
                         });
                     });
             }
@@ -1123,86 +1243,133 @@ impl Game {
         self.spellbar.ui(ctx, rect, &self.binds);
     }
 
-    // The skills tab of the pause menu: the tree (a row of the navigation
-    // each tier), each skill a node to buy the next level of (with souls);
-    // what the one in hand (focused or hovered) does, and costs, beneath.
-    pub fn skills_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+    // The skill tree, open: over everything, dark; its skills (logos in
+    // rings, their levels as pips, the lines from those they need), the
+    // view panned by dragging (snapping to the skill nearest the middle as
+    // it is let go) and easing to the one picked; the souls he has; what
+    // the one picked does, and costs; and what the buttons do.
+    fn tree_ui(&mut self, ctx: &egui::Context, rect: Rect) {
         use skills::SKILLS;
-        ui.horizontal(|ui| {
-            hud::icon(ui, hud::Icon::Soul, 1.2 * hud::FONT, egui::Color32::from_rgb(0x50, 0x8c, 0xc8), egui::Sense::hover());
-            ui.label(egui::RichText::new(crate::i18n::trf("{} souls", &[&self.souls])).strong());
-        });
-        let w = ui.available_width().min(520.0);
-        let (area, _) = ui.allocate_exact_size(Vec2::new(w, 340.0), egui::Sense::hover());
-        let at = |s: &skills::Skill| area.center() + Vec2::new(s.at.0 * (0.5 * w - 40.0), s.at.1 * 140.0);
-        let p = ui.painter();
-        for s in SKILLS {
-            if let Some(n) = s.needs.and_then(skills::skill) {
-                let lit = self.skills.level(s.id) > 0;
-                p.line_segment([at(n), at(s)], egui::Stroke::new(if lit { 2.5 } else { 1.5 }, if lit { egui::Color32::from_rgb(0x50, 0x8c, 0xc8) } else { egui::Color32::from_gray(170) }));
+        let Some(mut t) = self.tree else { return };
+        let pad = self.spellbar.device == Device::Pad;
+        egui::Area::new(egui::Id::unique("wizard-tree")).fixed_pos(rect.min).order(egui::Order::Foreground).show(ctx, |ui| {
+            let (area, bg) = ui.allocate_exact_size(rect.size(), egui::Sense::click_and_drag());
+            let p = ui.painter().clone();
+            p.rect_filled(area, 0, hud::bg(0.88));
+            // (dragged: panned, and let go, the nearest to the middle picked)
+            if bg.dragged() {
+                t.pan -= bg.drag_delta();
+                t.dragging = true;
+            } else if t.dragging {
+                t.dragging = false;
+                t.sel = (0..SKILLS.len()).min_by(|&a, &b| (tree_at(a) - t.pan).length().total_cmp(&(tree_at(b) - t.pan).length())).unwrap_or(0);
+                self.skill_shown = t.sel;
             }
-        }
-        // (by tiers, top down, each left to right)
-        let mut order: Vec<usize> = (0..SKILLS.len()).collect();
-        order.sort_by(|&a, &b| (SKILLS[a].at.1, SKILLS[a].at.0).partial_cmp(&(SKILLS[b].at.1, SKILLS[b].at.0)).unwrap());
-        let mut tier = f32::NAN;
-        for k in order {
-            let s = &SKILLS[k];
-            if s.at.1 != tier {
-                tier = s.at.1;
-                nav.row();
-            }
-            let c = at(s);
-            let r = 21.0;
-            let resp = ui.interact(egui::Rect::from_center_size(c, Vec2::splat(2.0 * r)), ui.scope_id().with(("skill", s.id)), egui::Sense::click());
-            nav.item(ui, &resp);
-            if resp.hovered() || resp.has_focus() {
-                self.skill_shown = k;
-            }
-            let level = self.skills.level(s.id);
-            let cost = self.skills.cost(s);
-            let p = ui.painter();
-            let blue = egui::Color32::from_rgb(0x50, 0x8c, 0xc8);
-            let (fill, ink, edge) = if level > 0 {
-                (blue, egui::Color32::WHITE, blue)
-            } else if cost.is_some_and(|c| c <= self.souls) {
-                (egui::Color32::from_gray(245), egui::Color32::from_gray(40), blue)
-            } else {
-                (egui::Color32::from_gray(225), egui::Color32::from_gray(140), egui::Color32::from_gray(170))
-            };
-            p.circle_filled(c, r, fill);
-            p.circle_stroke(c, r, egui::Stroke::new(if k == self.skill_shown { 2.5 } else { 1.5 }, edge));
-            let name = skills::shown(s).0;
-            let initials: String = name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
-            let g = p.layout_no_wrap(initials, egui::FontId::proportional(14.0), ink);
-            p.galley(Align2::CENTER_CENTER.anchor_size(c, g.size()).min, g, ink);
-            // (its levels, as pips beneath)
-            for l in 0..s.levels {
-                let x = c.x + (l as f32 - 0.5 * (s.levels - 1) as f32) * 8.0;
-                let pc = egui::pos2(x, c.y + r + 6.0);
-                if l < level {
-                    p.circle_filled(pc, 2.6, blue);
-                } else {
-                    p.circle_stroke(pc, 2.6, egui::Stroke::new(1.0, egui::Color32::from_gray(150)));
+            if !t.dragging {
+                let k = 1.0 - (-ui.input(|i| i.stable_dt) * 10.0).exp();
+                t.pan += (tree_at(t.sel) - t.pan) * k;
+                if (tree_at(t.sel) - t.pan).length() > 0.5 {
+                    ctx.request_repaint();
                 }
             }
-            if resp.clicked() && self.skills.buy(s, &mut self.souls) {
-                self.combat.sfx.push(sfx::here(sfx::APPEAR));
+            let mid = area.center() + Vec2::new(0.0, -20.0);
+            let at = |k: usize| mid + tree_at(k) - t.pan;
+            let blue = egui::Color32::from_rgb(0x6f, 0xb4, 0xff);
+            for (k, s) in SKILLS.iter().enumerate() {
+                if let Some(n) = s.needs.and_then(|n| SKILLS.iter().position(|x| x.id == n)) {
+                    let lit = self.skills.level(s.id) > 0;
+                    p.line_segment([at(n), at(k)], egui::Stroke::new(if lit { 3.0 } else { 1.5 }, if lit { blue } else { hud::BORDER }));
+                }
             }
-        }
-        // the one in hand
-        let s = &SKILLS[self.skill_shown.min(SKILLS.len() - 1)];
-        let (name, what) = skills::shown(s);
-        let level = self.skills.level(s.id);
-        ui.separator();
-        ui.label(egui::RichText::new(format!("{name}  {level}/{}", s.levels)).strong());
-        ui.label(what);
-        let state = match self.skills.cost(s) {
-            Some(c) => crate::i18n::trf("Next level: {} souls", &[&c]),
-            None if level >= s.levels => tr("Learnt in full").to_string(),
-            None => crate::i18n::trf("Needs {}", &[&s.needs.and_then(skills::skill).map_or("", |n| skills::shown(n).0)]),
-        };
-        ui.label(egui::RichText::new(state).weak());
+            for (k, s) in SKILLS.iter().enumerate() {
+                let c = at(k);
+                let r = 30.0;
+                let resp = ui.interact(egui::Rect::from_center_size(c, Vec2::splat(2.0 * r)), ui.scope_id().with(("skill", s.id)), egui::Sense::click());
+                if resp.clicked() {
+                    if t.sel == k {
+                        self.tree = Some(t);
+                        self.tree_buy();
+                    }
+                    t.sel = k;
+                    t.dragging = false;
+                    self.skill_shown = k;
+                }
+                let level = self.skills.level(s.id);
+                let can = self.skills.cost(s).is_some_and(|c| c <= self.souls);
+                let open = self.skills.cost(s).is_some() || level > 0;
+                let (ring, ink) = if level > 0 {
+                    (blue, egui::Color32::WHITE)
+                } else if can {
+                    (hud::FG, hud::FG)
+                } else if open {
+                    (hud::DIM, hud::DIM)
+                } else {
+                    (hud::BORDER, hud::BORDER)
+                };
+                p.circle_filled(c, r, hud::bg(1.0));
+                if level > 0 {
+                    p.circle_filled(c, r, blue.gamma_multiply(0.25));
+                }
+                p.circle_stroke(c, r, egui::Stroke::new(if k == t.sel { 3.0 } else { 1.5 }, if k == t.sel { hud::FOCUS } else { ring }));
+                hud::paint_skill(&p, c, 0.6 * r, s.id, ink);
+                for l in 0..s.levels {
+                    let x = c.x + (l as f32 - 0.5 * (s.levels - 1) as f32) * 10.0;
+                    let pc = egui::pos2(x, c.y + r + 8.0);
+                    if l < level {
+                        p.circle_filled(pc, 3.0, blue);
+                    } else {
+                        p.circle_stroke(pc, 3.0, egui::Stroke::new(1.0, hud::DIM));
+                    }
+                }
+            }
+            // the title and his souls, top; what the one picked is, bottom
+            let title = p.layout_no_wrap(tr("Skill tree").to_string(), egui::FontId::proportional(26.0), hud::FG);
+            p.galley(Align2::CENTER_TOP.anchor_size(area.center_top() + Vec2::new(0.0, 24.0), title.size()).min, title, hud::FG);
+            let souls = p.layout_no_wrap(self.souls.to_string(), hud::mono(1.3 * hud::FONT), hud::FG);
+            let sp = area.right_top() + Vec2::new(-28.0 - souls.size().x, 30.0);
+            hud::paint_icon(&p, egui::Rect::from_center_size(sp + Vec2::new(-14.0, 0.5 * souls.size().y), Vec2::splat(18.0)), hud::Icon::Soul, egui::Color32::from_rgb(0xb8, 0xe4, 0xff));
+            p.galley(sp, souls, hud::FG);
+            let s = &SKILLS[t.sel];
+            let (name, what) = skills::shown(s);
+            let level = self.skills.level(s.id);
+            let state = match self.skills.cost(s) {
+                Some(c) => crate::i18n::trf("Next level: {} souls", &[&c]),
+                None if level >= s.levels => tr("Learnt in full").to_string(),
+                None => crate::i18n::trf("Needs {}", &[&s.needs.and_then(skills::skill).map_or("", |n| skills::shown(n).0)]),
+            };
+            let lines = [(format!("{name}  {level}/{}", s.levels), 1.4 * hud::FONT, hud::FG), (what.to_string(), hud::FONT, hud::FG), (state, hud::FONT, hud::DIM)];
+            let mut y = area.bottom() - 150.0;
+            for (text, size, colour) in lines {
+                let g = p.layout_no_wrap(text, egui::FontId::proportional(size), colour);
+                p.galley(Align2::CENTER_TOP.anchor_size(egui::pos2(area.center().x, y), g.size()).min, g, colour);
+                y += size + 10.0;
+            }
+            // what the buttons do
+            let mut back = false;
+            let mut buy = false;
+            egui::Area::new(egui::Id::unique("wizard-tree-hints"))
+                .order(egui::Order::Foreground)
+                .pivot(Align2::CENTER_BOTTOM)
+                .fixed_pos(area.center_bottom() - Vec2::new(0.0, 24.0))
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 18.0;
+                        let g = if pad { hud::Chip::Face('A') } else { hud::Chip::Key("Enter") };
+                        buy = hud::glyph_button(ui, g, tr("Learn"), 1.05 * hud::FONT).clicked();
+                        let g = if pad { hud::Chip::Face('B') } else { hud::Chip::Key("Esc") };
+                        back = hud::glyph_button(ui, g, tr("Back"), 1.05 * hud::FONT).clicked();
+                    });
+                });
+            if self.tree.is_some() {
+                self.tree = Some(Tree { sel: t.sel, pan: t.pan, dragging: t.dragging, from_menu: t.from_menu });
+            }
+            if buy {
+                self.tree_buy();
+            }
+            if back {
+                self.close_tree();
+            }
+        });
     }
 
     // The controls tab of the pause menu: each action's key and controller
@@ -1352,7 +1519,7 @@ mod tests {
         let mut g = Game::new(None);
         let p = params(3.0);
         let o = frame(&ctx, &mut g, &p, vec![]);
-        assert_eq!(o.drive, Drive { staff: o.drive.staff, shoulder: o.drive.shoulder, foe_pos: o.drive.foe_pos, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 1.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
+        assert_eq!(o.drive, Drive { staff: o.drive.staff, shoulder: o.drive.shoulder, foe_pos: o.drive.foe_pos, sx: o.drive.sx, sy: o.drive.sy, sz: o.drive.sz, flash: 10.0 + 1.0 / 60.0, spell: 0.0, shield_hit: 10.0 + 1.0 / 60.0, ..ON_PATH });
         assert!(o.probe.is_none());
         assert_eq!(o.overrides, vec![("enemies".to_string(), Value::Num(0.0))]);
         // F twice: fight
