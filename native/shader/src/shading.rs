@@ -484,6 +484,8 @@ pub fn enemy_surface(lk: Looks, sheen: f32, glow: f32, tm: f32, rock: (Vec3, Vec
         Material { ks: 0.05, ..plain(scale(0.75 + 0.25 * (q.y * 40.0).sin(), vec(0.3, 0.19, 0.1))) }
     } else if part == part_orb {
         Material { emission: scale(2.5, lk.circle), ks: 1.0, shininess: 80.0, ..plain(scale(0.3, lk.circle)) }
+    } else if part == part_flesh {
+        flesh(fp, q)
     } else {
         let side = if lk.kind == platform_ice { m_ice } else if lk.kind == platform_carpet { m_carpet } else { m_rock };
         let mat = platform_surface(lk.kind, rock, moss, lk.carpet, fp, if part == part_top { m_ground } else { side }, q);
@@ -498,6 +500,19 @@ pub fn enemy_surface(lk: Looks, sheen: f32, glow: f32, tm: f32, rock: (Vec3, Vec
     }
 }
 
+// Raw flesh, where a giblet was cut (q in the figure's space, so it stays
+// put on the chunk): a deep red, uneven, marbled with pale fat, with
+// darker clotted patches; wet, so glistening.
+#[inline(never)]
+pub fn flesh(fp: f32, q: Vec3) -> Material {
+    let grain = 0.75 + 0.45 * vnoise3(scale(45.0, q)) * keep(fp, 0.03);
+    let fat = smoothstep(0.6, 0.68, vnoise3(vec(q.x * 13.0, q.y * 5.0, q.z * 13.0) + vec(3.1, 0.0, 1.7)));
+    let clot = smoothstep(0.5, 0.75, vnoise3(scale(20.0, q) + vec(0.0, 7.3, 0.0)));
+    let red = scale(grain, vec(0.62, 0.05, 0.04));
+    let albedo = mix(mix(red, vec(0.85, 0.7, 0.55), 0.9 * fat), vec(0.16, 0.008, 0.006), 0.6 * clot);
+    Material { ks: 0.55, shininess: 70.0, rim: false, ..plain(albedo) }
+}
+
 // (with full_enemies, the parts of his figure are shaded as his are, in
 // the enemy's pose)
 #[inline(never)]
@@ -506,18 +521,29 @@ pub fn enemy_material(prm: Params, g: Glow, fs: Foes, secs: f32, tm: f32, fl: Fl
     let i = if full { idiv(m - m_enemy_full, full_parts) } else { idiv(m - m_enemy, enemy_parts) };
     let e = enemy_at(prm.enemy_seed, fs, i, secs, fl);
     let lk = looks_of(prm.enemy_seed, e.r#gen, i);
-    let q = enemy_space(fl, e, p);
-    let mat = if full_enemies && full {
-        let n = yaw_inv(e.yaw, to_world_dir(fl, n));
-        material(enemy_pose(prm, lk, secs), g, fp, imod(m - m_enemy_full, full_parts), q, n)
+    let part = imod(m - m_enemy, enemy_parts);
+    let platform = !full && (part == part_top || part == part_side);
+    // (defeated, the figure's parts are on giblets: shaded where they were
+    // cut from, the normal turned back with the chunk, the cloth near a cut
+    // soaked in blood)
+    let (q, n, soak, figure_secs) = if e.dying >= 0.0 && !platform {
+        let (qr, cell, axis, ca, sa) = giblet_at(prm, i, lk, e.r#gen, secs, e.dying, burst_space(fl, e, p));
+        let nb = yaw_inv(e.yaw, to_world_dir(fl, n));
+        (qr, rotate_about(axis, ca, sa, nb), smoothstep(-0.07, -0.005, cell), secs - e.dying)
     } else {
-        enemy_surface(lk, prm.sheen, prm.rune_glow, tm, (prm.rock_dark, prm.rock_light, prm.rock_top), prm.moss_colour, fp, imod(m - m_enemy, enemy_parts), q)
+        (enemy_space(fl, e, p), yaw_inv(e.yaw, to_world_dir(fl, n)), 0.0, secs)
     };
-    // appearing, it flashes in its circle's colour; defeated, it chars and
-    // smoulders as it falls, its circle going out
+    let mat = if full_enemies && full {
+        material(enemy_pose(prm, lk, figure_secs), g, fp, imod(m - m_enemy_full, full_parts), q, n)
+    } else {
+        enemy_surface(lk, prm.sheen, prm.rune_glow, tm, (prm.rock_dark, prm.rock_light, prm.rock_top), prm.moss_colour, fp, part, q)
+    };
+    let mat = if soak > 0.0 { Material { albedo: mix(mat.albedo, vec(0.16, 0.008, 0.006), 0.85 * soak), ks: mat.ks + 0.3 * soak, shininess: mat.shininess.maximum(40.0 * soak), ..mat } } else { mat };
+    // appearing, it flashes in its circle's colour; defeated, its platform
+    // chars and smoulders as it falls, its circle going out
     if e.appear > 0.0 {
         Material { emission: mat.emission + scale(2.0 * e.appear * e.appear, lk.circle), ..mat }
-    } else if e.dying < 0.0 {
+    } else if e.dying < 0.0 || !platform {
         mat
     } else {
         let burnt = smoothstep(0.0, 0.6, e.dying);
@@ -935,9 +961,15 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
             let acc = acc + (w * shield_added);
             let w = w * shield_through;
             let first = if seg > 0 { first } else if m >= 0 { t } else if enters { t_in } else { INF };
-            let acc = acc + (w * emitted) + (scale(tr, w) * cloud_rad);
+            // the blood mist where an enemy burst
+            let (mist_rad, mist_tr) = if inside || !(has(vis, layers_enemies)) || pose.prm.enemies <= 0 {
+                (splat(0.0), 1.0)
+            } else {
+                blood_mist(pose.prm, pose.foes, pose.secs, pose.fl, ro, rd, if m >= 0 { t } else { tmax })
+            };
+            let acc = acc + (w * emitted) + (scale(tr, w) * cloud_rad) + (scale(tr * cloud_tr, w) * mist_rad);
             // whatever lies beyond this segment is seen through its media
-            let w = scale(tr * cloud_tr, w);
+            let w = scale(tr * cloud_tr * mist_tr, w);
             if m >= 0 {
                 (ro, rd, w, acc + (w * surface(pose, g, m, ro + scale(t, rd), rd, t)), inside, true, refl, first)
             } else if enters && t >= t_in {

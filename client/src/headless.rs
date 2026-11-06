@@ -160,7 +160,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
 
     let frames = o.bench.unwrap_or(60);
     let mut enc = device.create_command_encoder(&Default::default());
-    frame.record(&device, &queue, &mut enc, &shader, &values, &ON_PATH, &args(o.t0, BENCH_CAMERA), &[]);
+    frame.record(&device, &queue, &mut enc, &shader, &values, drive, &args(o.t0, o.camera.unwrap_or(BENCH_CAMERA)), &[]);
     queue.submit([enc.finish()]);
     wait()?;
     let start = Instant::now();
@@ -170,7 +170,7 @@ pub fn run(root: &Path, o: &Options) -> Result<(), String> {
         if let Some((set, _, _)) = &timer {
             enc.write_timestamp(set, 0);
         }
-        frame.record(&device, &queue, &mut enc, &shader, &values, &ON_PATH, &args(o.t0 + f as f32 / 30.0, BENCH_CAMERA), &[]);
+        frame.record(&device, &queue, &mut enc, &shader, &values, drive, &args(o.t0 + f as f32 / 30.0, o.camera.unwrap_or(BENCH_CAMERA)), &[]);
         if let Some((set, resolve, read)) = &timer {
             enc.write_timestamp(set, 1);
             enc.resolve_query_set(set, 0..2, resolve, 0);
