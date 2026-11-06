@@ -15,9 +15,22 @@ pub struct MediaSample {
 
 // Marches up to distance tmax: (distance, material or -1, emission up to the
 // hit, transmittance to the hit).
-pub fn march(scene: impl Fn(f32, Vec3) -> Hit, media: impl Fn(Vec3) -> MediaSample, ro: Vec3, rd: Vec3, tmax: f32) -> (f32, i32, Vec3, f32) {
+//
+// `extended`: the ray starts on a surface (refracted or reflected there):
+// its first stretch, while it gets away from that surface (and what it
+// grazes, near it), has steps of its own (ESCAPE_STEPS, up to ESCAPE), each
+// at least ESCAPE_MIN (unless the media want finer), so it spends none of
+// the march's steps doing so.
+pub const ESCAPE: f32 = 0.4;
+pub const ESCAPE_STEPS: i32 = 64;
+pub const ESCAPE_MIN: f32 = 0.004;
+
+pub fn march(scene: impl Fn(f32, Vec3) -> Hit, media: impl Fn(Vec3) -> MediaSample, ro: Vec3, rd: Vec3, tmax: f32, extended: bool) -> (f32, i32, Vec3, f32) {
     let (mut t, mut i, mut m, mut acc, mut tr) = (0.02f32, 0i32, -1i32, splat(0.0), 1f32);
+    let (mut e, escaping) = (0i32, extended);
     while i < march_steps && m < 0 && t < tmax && tr > 0.01 {
+        // (getting away from the surface it starts on: steps of its own)
+        let near = escaping && t < ESCAPE && e < ESCAPE_STEPS;
         let p = ro + scale(t, rd);
         let (d, mat) = scene(0.1, p);
         if d < 0.0004 * t {
@@ -26,10 +39,16 @@ pub fn march(scene: impl Fn(f32, Vec3) -> Hit, media: impl Fn(Vec3) -> MediaSamp
         } else {
             let s = media(p);
             let dt = (d * 0.85).minimum(s.cap).minimum(tmax - t + 1e-4);
+            // (not past what the media need: the lightning in the orb)
+            let dt = if near { dt.maximum(ESCAPE_MIN.minimum(s.cap).minimum(tmax - t + 1e-4)) } else { dt };
             acc = acc + scale(dt * tr, s.radiance);
             tr = tr * (-s.extinction * dt).exp();
             t = t + dt;
-            i += 1;
+            if near {
+                e += 1;
+            } else {
+                i += 1;
+            }
             m = -1;
         }
     }

@@ -963,7 +963,9 @@ pub type Reflection = (bool, Vec3, Vec3, f32);
 // ray first enters the orb, and how far the ray sees before anything opaque
 // or the orb's glass (infinity if nothing).
 #[inline(never)] // (few call sites: the whole pose is passed)
-pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Reflection, f32) {
+// (`reflected`: a reflection's ray, starting on the glass: its marches are
+// extended, as those of rays refracted through it are; see march.)
+pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32, reflected: bool) -> (Vec3, Reflection, f32) {
     let (mut ro, mut rd, mut w, mut acc, mut inside, mut done, mut refl, mut first): (Vec3, Vec3, Vec3, Vec3, bool, bool, Reflection, f32) =
         (ro0, rd0, splat(w0), splat(0.0), false, false, (false, ro0, rd0, 0f32), INF);
     let mut seg = 0;
@@ -1001,7 +1003,8 @@ pub fn follow(pose: Pose, g: Glow, ro0: Vec3, rd0: Vec3, w0: f32) -> (Vec3, Refl
             };
             let local_end = 0f32.maximum(ray_sphere(occluder_centre, local_radius, ro, rd).1);
             let local_max = tmax.minimum(t_terrain.minimum(local_end));
-            let (t, m, emitted, tr) = march(move |tol, q| local_scene(vis, pose, tol, q), move |q| media(pose, g, q), ro, rd, local_max);
+            let extended = reflected || seg > 0;
+            let (t, m, emitted, tr) = march(move |tol, q| local_scene(vis, pose, tol, q), move |q| media(pose, g, q), ro, rd, local_max, extended);
             let (t, m) = if m < 0 && t_terrain < tmax {
                 (t_terrain, m_land)
             } else if m < 0 && far_orb {
@@ -1101,7 +1104,7 @@ pub fn shade(prm: Params, dr: Drive, secs: f32, pix: f32, ro: Vec3, rd: Vec3) ->
             (c, refl, first)
         } else {
             let (o, d, w) = if k == 0 { (ro, rd, 1.0) } else { (refl.1, refl.2, refl.3) };
-            let (col, r, f) = follow(pose, g, o, d, w);
+            let (col, r, f) = follow(pose, g, o, d, w, k == 1);
             (c + col, if k == 0 { r } else { refl }, if k == 0 { f } else { first })
         };
         c = next.0;
