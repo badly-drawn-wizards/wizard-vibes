@@ -1713,9 +1713,9 @@ impl Game {
                         ctx.request_repaint();
                     }
                 }
-                // the arcane missiles' locks: a violet diamond turning round
-                // each enemy locked on to, and how many missiles it will
-                // take, if more than one
+                // the arcane missiles' locks: violet diamonds turning round
+                // each enemy locked on to, one in another for each lock on
+                // it
                 if !self.spells.missile_locks.is_empty() {
                     let violet = egui::Color32::from_rgb(0xc8, 0x9c, 0xff);
                     let spin = ctx.input(|i| i.time) as f32 * 2.5;
@@ -1726,15 +1726,18 @@ impl Game {
                         let count = self.spells.missile_locks.iter().filter(|&&s| s == side).count();
                         let Some(t) = self.spells.targets.iter().find(|t| t.side == side && t.body) else { continue };
                         let Some(c) = self.on_screen(t.c, rect) else { continue };
-                        let r = 16.0 + 3.0 * count as f32;
-                        let pts: Vec<egui::Pos2> = (0..4).map(|k| {
-                            let a = spin + k as f32 * std::f32::consts::FRAC_PI_2;
-                            c + Vec2::new(a.cos(), a.sin()) * r
-                        }).collect();
-                        painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, violet)));
-                        if count > 1 {
-                            let g = painter.layout_no_wrap(format!("×{count}"), egui::FontId::proportional(14.0), violet);
-                            painter.galley(c + Vec2::new(r + 4.0, -r), g, violet);
+                        // (a diamond for each lock, nested: each more one
+                        // round the last, turning the other way)
+                        for k in 0..count {
+                            let r = 16.0 + 6.0 * k as f32;
+                            let turn = if k % 2 == 0 { spin } else { -spin };
+                            let pts: Vec<egui::Pos2> = (0..4)
+                                .map(|j| {
+                                    let a = turn + j as f32 * std::f32::consts::FRAC_PI_2;
+                                    c + Vec2::new(a.cos(), a.sin()) * r
+                                })
+                                .collect();
+                            painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, violet.gamma_multiply(1.0 - 0.1 * k as f32))));
                         }
                     }
                     ctx.request_repaint();
