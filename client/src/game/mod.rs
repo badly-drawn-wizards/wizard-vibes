@@ -1591,6 +1591,32 @@ impl Game {
                         ctx.request_repaint();
                     }
                 }
+                // the arcane missiles' locks: a violet diamond turning round
+                // each enemy locked on to, and how many missiles it will
+                // take, if more than one
+                if !self.spells.missile_locks.is_empty() {
+                    let violet = egui::Color32::from_rgb(0xc8, 0x9c, 0xff);
+                    let spin = ctx.input(|i| i.time) as f32 * 2.5;
+                    let mut sides: Vec<i32> = self.spells.missile_locks.clone();
+                    sides.sort();
+                    sides.dedup();
+                    for side in sides {
+                        let count = self.spells.missile_locks.iter().filter(|&&s| s == side).count();
+                        let Some(t) = self.spells.targets.iter().find(|t| t.side == side && t.body) else { continue };
+                        let Some(c) = self.on_screen(t.c, rect) else { continue };
+                        let r = 16.0 + 3.0 * count as f32;
+                        let pts: Vec<egui::Pos2> = (0..4).map(|k| {
+                            let a = spin + k as f32 * std::f32::consts::FRAC_PI_2;
+                            c + Vec2::new(a.cos(), a.sin()) * r
+                        }).collect();
+                        painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, violet)));
+                        if count > 1 {
+                            let g = painter.layout_no_wrap(format!("×{count}"), egui::FontId::proportional(14.0), violet);
+                            painter.galley(c + Vec2::new(r + 4.0, -r), g, violet);
+                        }
+                    }
+                    ctx.request_repaint();
+                }
                 // pause held in a fight: a ring filling round the middle
                 // until he gives up
                 if let Some(t) = self.give_up_hold {

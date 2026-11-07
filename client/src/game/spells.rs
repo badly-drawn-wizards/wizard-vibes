@@ -279,6 +279,9 @@ pub struct Spells {
     pub charge: f32,
     // which spell is charging (the fire bolt, or the frost lance: its look)
     pub charging: usize,
+    // the arcane missiles' locks so far (an enemy's side each: one on it
+    // more than once, more than one missile at it)
+    pub missile_locks: Vec<i32>,
     pub orb: V3,
     pub gatling: Gatling,
     // free for all: the enemies' spells hit each other too
@@ -310,6 +313,7 @@ impl Default for Spells {
             lock: None,
             charge: -1.0,
             charging: 0,
+            missile_locks: Vec::new(),
             orb: [0.0; 3],
             gatling: Gatling::default(),
             ffa: false,
@@ -399,24 +403,17 @@ impl Spells {
         true
     }
 
-    // His arcane missiles: three, fanned out from `origin` along `dir`,
-    // homing in on the enemies near his aim (aimed_all), each on another
-    // where there are enough (round them again where not), the fan's left
-    // on the leftmost, so their ways do not cross; with their cooldown.
-    pub fn cast_missiles(&mut self, origin: V3, dir: V3, targets: &[(i32, V3)], rng: &mut Rng) -> bool {
+    // His arcane missiles: one for each of `locks` (an enemy's side each),
+    // fanned out from `origin` across `dir`, each homing in on its own;
+    // with their cooldown.
+    pub fn cast_missiles(&mut self, origin: V3, dir: V3, locks: &[i32], rng: &mut Rng) -> bool {
         let side = super::vec::normalise([dir[2], 0.0, -dir[0]]);
-        let mut aims: Vec<(i32, V3)> = targets.iter().take(3).copied().collect();
-        aims.sort_by(|a, b| dot(sub(a.1, origin), side).total_cmp(&dot(sub(b.1, origin), side)));
+        let n = locks.len();
         let mut any = false;
-        for (i, k) in [-1.0f32, 0.0, 1.0].into_iter().enumerate() {
-            let d = super::vec::normalise(super::vec::add(dir, super::vec::add(super::vec::scale(0.35 * k, side), [0.0, 0.25 * (1.0 - k.abs()), 0.0])));
-            // (one each across the fan; fewer, shared, the middle's the nearest's)
-            let target = match aims.len() {
-                0 => NO_TARGET,
-                1 => aims[0].0,
-                2 => aims[if i == 0 { 0 } else if i == 2 { 1 } else { 0 }].0,
-                _ => aims[i].0,
-            };
+        for (i, &target) in locks.iter().enumerate() {
+            // (across the fan, -1 .. 1; the middle ones lifted)
+            let k = if n > 1 { 2.0 * i as f32 / (n - 1) as f32 - 1.0 } else { 0.0 };
+            let d = super::vec::normalise(super::vec::add(dir, super::vec::add(super::vec::scale(0.45 * k, side), [0.0, 0.25 * (1.0 - k.abs()), 0.0])));
             if self.launch(MISSILE, origin, d, HIS, None, rng) {
                 let s = self.items.last_mut().unwrap();
                 s.vel = super::vec::scale(MISSILE_SPEED, d);
@@ -1230,43 +1227,18 @@ mod tests {
     }
 
     #[test]
-    fn missiles_home_in() {
+    fn missiles_home_in_on_their_locks() {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
-        // (off to the side of where they are cast)
-        s.targets = vec![Target { c: [6.0, 0.0, 8.0], r: 0.9, side: 2, body: true }];
-        let targets = s.aimed_all([0.0; 3], [0.0, 0.0, 1.0], 0.9);
-        assert_eq!(targets.len(), 1);
-        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], &targets, &mut rng));
-        for _ in 0..120 {
-            s.update(1.0 / 60.0, false);
-        }
-        assert_eq!(hits(&s), vec![(2, MISSILE); 3]);
-    }
-
-    #[test]
-    fn missiles_split_across_the_enemies_near_the_aim() {
-        let mut rng = Rng::new(1);
-        let mut s = Spells::default();
-        // (three ahead, spread across; one far off to the side)
-        s.targets = vec![
-            Target { c: [-4.0, 0.0, 12.0], r: BODY_R, side: 0, body: true },
-            Target { c: [0.5, 0.0, 12.0], r: BODY_R, side: 1, body: true },
-            Target { c: [4.0, 0.0, 12.0], r: BODY_R, side: 2, body: true },
-            Target { c: [20.0, 0.0, 0.0], r: BODY_R, side: 3, body: true },
-        ];
-        let targets = s.aimed_all([0.0; 3], [0.0, 0.0, 1.0], 0.6);
-        let mut sides: Vec<i32> = targets.iter().map(|t| t.0).collect();
-        assert_eq!(sides[0], 1);
-        sides.sort();
-        assert_eq!(sides, vec![0, 1, 2]);
-        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], &targets, &mut rng));
+        // (off to either side of where they are cast; two locks on one)
+        s.targets = vec![Target { c: [6.0, 0.0, 8.0], r: 0.9, side: 2, body: true }, Target { c: [-6.0, 0.0, 8.0], r: 0.9, side: 0, body: true }];
+        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], &[2, 0, 2], &mut rng));
         for _ in 0..120 {
             s.update(1.0 / 60.0, false);
         }
         let mut got = hits(&s);
         got.sort();
-        assert_eq!(got, vec![(0, MISSILE), (1, MISSILE), (2, MISSILE)]);
+        assert_eq!(got, vec![(0, MISSILE), (2, MISSILE), (2, MISSILE)]);
     }
 
     #[test]

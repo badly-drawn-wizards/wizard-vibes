@@ -22,7 +22,12 @@ const CAST_SOUND: [usize; super::spells::N_SPELLS] =
     [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP, sfx::CAST_WIND, sfx::CAST_STRIKE, sfx::CAST_FIRE, sfx::GUST, sfx::APPEAR];
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
 const METEOR_CHANNEL: f32 = 1.2; // seconds a meteor takes to call down (held)
-const SOUL_MANA: f32 = 30.0; // mana a defeated enemy's soul brings him
+const SOUL_MANA: f32 = 30.0;
+// (the arcane missiles' locks: at most so many, one each so often, on an
+// enemy within so many radians of his aim)
+const MISSILE_LOCKS: usize = 6;
+const MISSILE_LOCK_EVERY: f32 = 0.25;
+const MISSILE_LOCK_CONE: f32 = 0.09; // mana a defeated enemy's soul brings him
 const BUFFER: f32 = 0.35; // seconds a press of cast is remembered, to start a spell not yet ready
 // the wind blades' gatling: seconds between blades, spun down and up; how
 // long it takes to spin up, and down; the heat each blade adds (1:
@@ -82,6 +87,9 @@ pub struct Combat {
     buffered: f32,     // seconds a press of cast is still remembered (see BUFFER)
     short: bool,       // the press remembered has waited on mana (it fizzles if it runs out)
     healed: f32,  // healing channelled towards the next point of health
+    // the arcane missiles locking on (held), and until the next lock
+    locking: bool,
+    lock_tick: f32,
     here: (V3, V3), // him, and the way he looks
     started: bool,  // the fight has an arena (it starts with the first enemies)
     // where enemies were defeated (their souls to send him), and the souls
@@ -115,6 +123,8 @@ impl Default for Combat {
             buffered: 0.0,
             short: false,
             healed: 0.0,
+            locking: false,
+            lock_tick: 0.0,
             here: ([0.0; 3], [0.0, 0.0, 1.0]),
             started: false,
             souls: Vec::new(),
@@ -319,16 +329,51 @@ impl Combat {
         } else {
             spells.lock = None;
         }
-        // the arcane missiles, gravity well and spirit familiar: pressed,
-        // cast at once (remembered a moment, as the others: see BUFFER)
-        if matches!(selected, ARCANE | GRAVITY | FAMILIAR) && can && self.buffered > 0.0 && spells.ready(selected) {
+        // the arcane missiles: held, his aim swept over the enemies locks on
+        // to each it passes (a lock each MISSILE_LOCK_EVERY, so lingering on
+        // one locks on to it again), each lock its cost as it is made, as
+        // many as MISSILE_LOCKS; let go, a missile for each lock (none
+        // locked: nothing cast, nothing spent)
+        if selected == ARCANE && can {
+            if m.casting {
+                if !self.locking && self.buffered > 0.0 && spells.ready(ARCANE) {
+                    self.locking = true;
+                    self.buffered = 0.0;
+                    spells.missile_locks.clear();
+                    self.lock_tick = 0.0;
+                }
+                if self.locking {
+                    self.lock_tick -= m.dt;
+                    spells.since_cast = 0.0;
+                    if self.lock_tick <= 0.0 && spells.missile_locks.len() < MISSILE_LOCKS {
+                        if let Some((side, _)) = spells.aimed(m.origin, m.dir, MISSILE_LOCK_CONE) {
+                            if self.mana.value >= SPELL_COST[ARCANE] {
+                                self.mana.spend(SPELL_COST[ARCANE]);
+                                spells.missile_locks.push(side);
+                                self.lock_tick = MISSILE_LOCK_EVERY;
+                                self.sfx.push(sfx::here(sfx::MARK));
+                            } else {
+                                self.short = true;
+                            }
+                        }
+                    }
+                }
+            } else if std::mem::take(&mut self.locking) {
+                let locks = std::mem::take(&mut spells.missile_locks);
+                if !locks.is_empty() && spells.cast_missiles(m.origin, m.dir, &locks, rng) {
+                    self.sfx.push(sfx::here(CAST_SOUND[ARCANE]));
+                }
+            }
+        } else {
+            self.locking = false;
+            spells.missile_locks.clear();
+        }
+        // the gravity well and spirit familiar: pressed, cast at once
+        // (remembered a moment, as the others: see BUFFER)
+        if matches!(selected, GRAVITY | FAMILIAR) && can && self.buffered > 0.0 && spells.ready(selected) {
             let cost = SPELL_COST[selected];
             if self.mana.value >= cost {
                 let cast = match selected {
-                    ARCANE => {
-                        let targets = spells.aimed_all(m.origin, m.dir, 0.6);
-                        spells.cast_missiles(m.origin, m.dir, &targets, rng)
-                    }
                     GRAVITY => spells.cast_well(m.origin, m.dir, rng),
                     _ => spells.summon(rng),
                 };
@@ -824,5 +869,37 @@ mod tests {
             c.update(&moment(), &mut spells, &mut rng);
         }
         assert_eq!((c.enemies.hp, spells.cool_rate), (4, 1.0));
+    }
+
+    #[test]
+    fn missiles_lock_on_as_the_aim_sweeps_and_fly_when_let_go() {
+        let mut c = Combat::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(1);
+        spells.unlocked = [true; super::super::spells::N_SPELLS];
+        spells.select(ARCANE);
+        let o = moment().origin;
+        let at = |x: f32| super::super::vec::add(o, [x, 0.0, 15.0]);
+        let targets = vec![
+            super::super::spells::Target { c: at(-3.0), r: 0.9, side: 0, body: true },
+            super::super::spells::Target { c: at(3.0), r: 0.9, side: 1, body: true },
+        ];
+        let aim = |x: f32| super::super::vec::normalise(super::super::vec::sub(at(x), o));
+        // (held: swept from one to the other, then lingering on the second;
+        // the targets set afresh each time: the fight's own, none, replace
+        // them as it updates)
+        for f in 0..120 {
+            spells.targets = targets.clone();
+            let x = if f < 40 { -3.0 + 6.0 * f as f32 / 40.0 } else { 3.0 };
+            c.update(&Moment { casting: true, n: 0, dir: aim(x), ..moment() }, &mut spells, &mut rng);
+            spells.update(1.0 / 60.0, true);
+        }
+        let locks = spells.missile_locks.clone();
+        assert!(locks.contains(&0) && locks.iter().filter(|&&s| s == 1).count() >= 3, "{locks:?}");
+        assert_eq!(spells.count(), 0);
+        // (let go: a missile each)
+        c.update(&Moment { casting: false, n: 0, dir: aim(3.0), ..moment() }, &mut spells, &mut rng);
+        assert_eq!(spells.count(), locks.len());
+        assert!(spells.missile_locks.is_empty());
     }
 }
