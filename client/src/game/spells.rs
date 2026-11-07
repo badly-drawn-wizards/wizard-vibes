@@ -79,6 +79,29 @@ const METEOR_FALL: f32 = 0.9;
 const METEOR_HEIGHT: f32 = 28.0;
 pub const WELL_REACH: f32 = 14.0;
 const WELL_PULL: f32 = 30.0;
+// A gravity well: cast from his orb, it drifts along his aim at WELL_SPEED
+// until it nears an enemy or meets the land (or after WELL_TRAVEL); there it
+// opens, its reach growing to WELL_REACH, drawing enemies (and their
+// spells) in, for WELL_OPEN; then implodes, drawing them in hard, for
+// WELL_IMPLODE; then bursts: harm within WELL_BURST, and a push out
+// (WELL_PUSH: enough to stagger them, not to scatter them: they are left
+// clumped), its light fading over WELL_AFTER.
+const WELL_SPEED: f32 = 7.0;
+const WELL_TRAVEL: f32 = 1.6;
+const WELL_OPEN: f32 = 2.2;
+const WELL_IMPLODE: f32 = 0.45;
+const WELL_AFTER: f32 = 0.5;
+const WELL_BURST: f32 = 6.0;
+pub const WELL_PUSH: f32 = 3.5;
+
+// A gravity well, open, as the enemies feel it: where, how far it reaches,
+// and how hard it draws (1 open, more imploding).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Well {
+    pub pos: V3,
+    pub reach: f32,
+    pub strength: f32,
+}
 const SPIRIT_ORBIT: f32 = 1.7;
 const SPIRIT_TURN: f32 = 1.3;
 const SPIRIT_REACH: f32 = 30.0;
@@ -214,6 +237,7 @@ struct Spell {
     absorb: f32,    // a soul reaching him: how far it has been taken in (0..1), or -1
     target: i32,    // an arcane missile's: whom it homes in on (a side), or NO_TARGET
     struck: u32,    // a frost lance's: those it has passed through (a bit a side)
+    settled: f32,   // a gravity well's: its age as it stopped (-1: still drifting)
     next_shot: f32, // his familiar's: seconds until it casts again
 }
 
@@ -243,6 +267,8 @@ pub struct Spells {
     pub since_cast: f32, // seconds
     pub targets: Vec<Target>,
     pub events: Vec<SpellEvent>,
+    // gravity wells' bursts, for the enemies (see take_pushes)
+    pushes: Vec<(V3, f32)>,
     // seconds he has been channelling healing (or -1), and where he is
     pub channel: f32,
     pub here: V3,
@@ -278,6 +304,7 @@ impl Default for Spells {
             since_cast: 10.0,
             targets: Vec::new(),
             events: Vec::new(),
+            pushes: Vec::new(),
             channel: -1.0,
             here: [0.0; 3],
             lock: None,
@@ -419,14 +446,40 @@ impl Spells {
         true
     }
 
-    // His gravity well, at `at`, with its cooldown.
-    pub fn cast_well(&mut self, at: V3, rng: &mut Rng) -> bool {
-        if !self.launch(WELL, at, [0.0, 1.0, 0.0], HIS, None, rng) {
+    // His gravity well, from `origin` along `dir` (see WELL_SPEED), with its
+    // cooldown.
+    pub fn cast_well(&mut self, origin: V3, dir: V3, rng: &mut Rng) -> bool {
+        if !self.launch(WELL, origin, dir, HIS, None, rng) {
             return false;
         }
-        self.items.last_mut().unwrap().vel = [0.0; 3];
+        let s = self.items.last_mut().unwrap();
+        s.vel = super::vec::scale(WELL_SPEED, dir);
+        s.life = 1e3; // (until it has burst: see well_phase)
         self.cooled(GRAVITY);
         true
+    }
+
+    // A gravity well's phase (0 drifting, 1 open, 2 imploding, 3 burst),
+    // seconds since it stopped, and its reach now.
+    fn well_phase(s: &Spell) -> (u32, f32, f32) {
+        if s.settled < 0.0 {
+            return (0, 0.0, 0.3);
+        }
+        let t = s.age - s.settled;
+        if t < WELL_OPEN {
+            (1, t, WELL_REACH * (0.25 + 0.75 * (t / 0.6).min(1.0)))
+        } else if t < WELL_OPEN + WELL_IMPLODE {
+            let f = (t - WELL_OPEN) / WELL_IMPLODE;
+            (2, t, WELL_REACH * (1.0 - 0.85 * f * f))
+        } else {
+            (3, t, WELL_BURST * ((t - WELL_OPEN - WELL_IMPLODE) / WELL_AFTER).min(1.0))
+        }
+    }
+
+    // Where the gravity wells burst since the enemies last looked (they are
+    // pushed out from there: see enemies.rs), and how far it reaches.
+    pub fn take_pushes(&mut self) -> Vec<(V3, f32)> {
+        std::mem::take(&mut self.pushes)
     }
 
     // His spirit familiar, summoned beside him (the one before, gone), with
@@ -441,9 +494,17 @@ impl Spells {
         true
     }
 
-    // Where his gravity wells are (the enemies are pulled to them).
-    pub fn wells(&self) -> Vec<V3> {
-        self.items.iter().filter(|s| s.kind == WELL && s.age > 0.2).map(|s| s.pos).collect()
+    // His gravity wells, open or imploding (the enemies are pulled to them).
+    pub fn wells(&self) -> Vec<Well> {
+        self.items
+            .iter()
+            .filter(|s| s.kind == WELL)
+            .filter_map(|s| match Self::well_phase(s) {
+                (1, _, reach) => Some(Well { pos: s.pos, reach, strength: 1.0 }),
+                (2, _, reach) => Some(Well { pos: s.pos, reach: reach.max(4.0), strength: 2.5 }),
+                _ => None,
+            })
+            .collect()
     }
 
     // The enemy nearest his aim (within `cone` radians of it, in reach): its
@@ -518,6 +579,7 @@ impl Spells {
             absorb: -1.0,
             target: NO_TARGET,
             struck: 0,
+            settled: -1.0,
             next_shot: 0.5,
         };
         self.next_id += 1;
@@ -755,7 +817,7 @@ impl Spells {
         self.staff += (goal - self.staff) * (1.0 - (-dt * if out { 12.0 } else { 2.5 }).exp());
         let wells = self.wells();
         let mut shots: Vec<(V3, V3, i32)> = Vec::new();
-        let (here, targets) = (self.here, &self.targets);
+        let (here, targets, ffa) = (self.here, &self.targets, self.ffa);
         for s in &mut self.items {
             s.age += dt;
             // (an arcane missile turns towards its target, if it still stands)
@@ -768,13 +830,34 @@ impl Spells {
                     }
                 }
             }
+            // (his gravity well: drifting, it stops near an enemy, or in
+            // time; stopped, it opens, implodes and bursts (see Well))
+            if s.kind == WELL {
+                if s.settled < 0.0 {
+                    let near = targets.iter().any(|t| t.side >= 0 && t.body && dist(t.c, s.pos) < t.r + 2.0);
+                    if near || s.age >= WELL_TRAVEL {
+                        s.settled = s.age;
+                        s.vel = [0.0; 3];
+                    }
+                } else if !s.done && s.age - s.settled >= WELL_OPEN + WELL_IMPLODE {
+                    s.done = true;
+                    s.life = s.age + WELL_AFTER;
+                    for t in targets.iter().filter(|t| Self::opposed(ffa, s.owner, t) && t.body) {
+                        if dist(t.c, s.pos) - t.r < WELL_BURST {
+                            self.events.push(SpellEvent::Hit { side: t.side, kind: WELL, owner: s.owner, cut: None, scale: 1.0 });
+                        }
+                    }
+                    self.pushes.push((s.pos, WELL_BURST));
+                    self.events.push(SpellEvent::Sound { what: Sound::Burst, pos: s.pos });
+                }
+            }
             // (an enemy's bolt or blade near his gravity well, drawn in)
             if s.owner != HIS && (s.kind == FIRE || s.kind == WIND) {
                 for w in &wells {
-                    let to = sub(*w, s.pos);
+                    let to = sub(w.pos, s.pos);
                     let d = len(to);
-                    if d < 0.5 * WELL_REACH && d > 0.1 {
-                        let pull = WELL_PULL * dt * (1.0 - d / (0.5 * WELL_REACH)) / d;
+                    if d < 0.5 * w.reach && d > 0.1 {
+                        let pull = w.strength * WELL_PULL * dt * (1.0 - d / (0.5 * w.reach)) / d;
                         for j in 0..3 {
                             s.vel[j] += to[j] * pull;
                         }
@@ -925,6 +1008,12 @@ impl Spells {
             if !(d < 1e5) {
                 continue;
             }
+            // (a gravity well meeting the land: it stops there)
+            if s.kind == WELL && s.settled < 0.0 && d < 0.6 {
+                s.settled = s.age;
+                s.vel = [0.0; 3];
+                continue;
+            }
             // (a frost lance or an arcane missile meeting the land: gone)
             if (s.kind == FROST || s.kind == MISSILE) && d < 0.15 {
                 s.age = s.life;
@@ -957,6 +1046,10 @@ impl Spells {
                 [0.0, s.top, 0.0]
             } else if s.kind == BURST {
                 [s.power, 0.0, 0.0]
+            } else if s.kind == WELL {
+                // (its phase, its reach, and seconds since it stopped)
+                let (phase, t, reach) = Self::well_phase(s);
+                [phase as f32, reach, t]
             } else if s.kind == WISP {
                 // (a soul: its head, and the first of three points along its
                 // tail; the rest as two more pieces, in free slots; taken in,
@@ -1201,13 +1294,34 @@ mod tests {
     }
 
     #[test]
-    fn a_well_is_where_it_was_cast() {
+    fn a_well_drifts_opens_implodes_and_bursts() {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
-        assert!(s.cast_well([3.0, 0.0, 4.0], &mut rng));
+        s.targets = vec![Target { c: [0.0, 0.0, 8.0], r: BODY_R, side: 0, body: true }];
+        assert!(s.cast_well([0.0; 3], [0.0, 0.0, 1.0], &mut rng));
         assert!(s.wells().is_empty());
-        s.update(0.5, false);
-        assert_eq!(s.wells(), vec![[3.0, 0.0, 4.0]]);
+        // (drifting slowly, it stops short of the enemy, and opens)
+        let mut t = 0.0;
+        while s.wells().is_empty() && t < 3.0 {
+            s.update(1.0 / 60.0, false);
+            t += 1.0 / 60.0;
+        }
+        let w = s.wells()[0];
+        assert!(w.pos[2] > 4.0 && w.pos[2] < 8.0 && w.strength == 1.0, "{w:?}");
+        // (then implodes, harder; then bursts, once, harming it and pushing)
+        let mut strongest: f32 = 0.0;
+        for _ in 0..(60.0 * (WELL_OPEN + WELL_IMPLODE + 0.1)) as usize {
+            s.update(1.0 / 60.0, false);
+            strongest = s.wells().iter().map(|w| w.strength).fold(strongest, f32::max);
+        }
+        assert_eq!(strongest, 2.5);
+        assert_eq!(hits(&s), vec![(0, WELL)]);
+        assert_eq!(s.take_pushes().len(), 1);
+        assert!(s.take_pushes().is_empty());
+        for _ in 0..60 {
+            s.update(1.0 / 60.0, false);
+        }
+        assert_eq!(s.count(), 0);
     }
 }
 

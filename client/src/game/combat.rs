@@ -329,16 +329,7 @@ impl Combat {
                         let targets = spells.aimed_all(m.origin, m.dir, 0.6);
                         spells.cast_missiles(m.origin, m.dir, &targets, rng)
                     }
-                    GRAVITY => {
-                        // (at the enemy aimed at, else ahead, short of the
-                        // ground)
-                        let at = spells.aimed(m.origin, m.dir, 0.2).map(|t| t.1).unwrap_or_else(|| {
-                            let g = aim_ground(m.origin, m.dir);
-                            let far = super::vec::dist(g, m.origin).min(14.0);
-                            super::vec::add(m.origin, super::vec::scale(far, m.dir))
-                        });
-                        spells.cast_well(at, rng)
-                    }
+                    GRAVITY => spells.cast_well(m.origin, m.dir, rng),
                     _ => spells.summon(rng),
                 };
                 if cast {

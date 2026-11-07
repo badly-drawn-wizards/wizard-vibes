@@ -281,17 +281,36 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             scale(6.0 * core, mix(vec(1.0, 0.4, 0.08), vec(1.0, 0.9, 0.6), hot)) + scale(2.0 * trail, vec(1.0, 0.35, 0.05)) + scale(0.6 * halo, vec(1.0, 0.3, 0.05)),
         )
     } else if kind == spell_well {
-        // a gravity well: a dark heart, rings of light turning round it,
-        // motes falling in
-        let grow = smoothstep(0.0, 0.4, age);
+        // a gravity well (q: its phase, its reach, seconds since it
+        // stopped; see the client's Well): drifting, a small dark heart in
+        // tight rings; open, rings of light turning round it, wider as it
+        // reaches further, motes falling in; imploding, the rings drawn in,
+        // faster and brighter; burst, a shell of light rushing out, fading
+        let phase = ftoi(q.x);
+        let reach = q.y;
+        let since = q.z;
         let (hd, t, behind) = ray_segment(o, d, tmax, p, p);
-        let rim = (-((hd - 0.35 * grow) * (hd - 0.35 * grow)) / 0.002).exp();
+        if phase == 3 {
+            let f = saturate((since - 2.65) / 0.5);
+            let shell = (-((hd - reach) * (hd - reach)) / (0.01 + 0.06 * f)).exp();
+            let (core, _) = glow_line(0.4 * (1.0 - f), 1.2, hd);
+            let fade = 1.0 - smoothstep(0.0, 1.0, reach / 6.0 * 0.5 + 0.5 * f);
+            return scale(seen(t, behind, 1.0) * fade, scale(1.8 * shell, vec(0.75, 0.55, 1.0)) + scale(4.0 * core, vec(0.95, 0.85, 1.0)));
+        }
+        let (size, spin, bright) = if phase == 0 {
+            (0.3, 4.0, 0.8)
+        } else if phase == 1 {
+            (0.35 + 0.09 * reach, 2.0, 1.0)
+        } else {
+            (0.15 + 0.09 * reach, 7.0, 2.2)
+        };
+        let rim = (-((hd - 0.3 * size) * (hd - 0.3 * size)) / 0.002).exp();
         let mut rings = 0.0f32;
         let mut j = 0;
         while j < 3 {
-            let rr = (0.6 + 0.35 * j as f32) * grow;
+            let rr = (0.5 + 0.25 * j as f32) * size;
             let tilt = 0.5 * j as f32 - 0.4;
-            let a0 = secs * (2.0 + j as f32) * (if j == 1 { -1.0 } else { 1.0 });
+            let a0 = secs * spin * (1.0 + 0.5 * j as f32) * (if j == 1 { -1.0 } else { 1.0 });
             let point = move |k: i32| {
                 let a = a0 + 0.9 * k as f32;
                 p + vec(rr * a.cos(), tilt * rr * a.sin(), rr * a.sin())
@@ -305,15 +324,15 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         let mut k = 0;
         while k < 8 {
             let h1 = hash2(seed + k, 31);
-            let f = fract(secs * 0.7 + h1);
-            let r = 1.6 * (1.0 - f) * grow;
+            let f = fract(secs * (0.7 + 0.8 * (phase == 2) as i32 as f32) + h1);
+            let r = 1.3 * size * (1.0 - f);
             let a = 6.28 * h1 + 3.0 * f;
             let m = p + vec(r * a.cos(), (hash2(seed + k, 32) - 0.5) * r, r * a.sin());
             let (md, _, _) = ray_segment(o, d, tmax, m, m);
             motes += (-(md * md) / 0.0006).exp();
             k += 1;
         }
-        scale(fade * seen(t, behind, 0.5), scale(1.4 * rim + 1.2 * rings + 1.5 * motes, vec(0.7, 0.5, 1.0)))
+        scale(bright * seen(t, behind, 0.5), scale(1.4 * rim + 1.2 * rings + 1.5 * motes, vec(0.7, 0.5, 1.0)))
     } else if kind == spell_spirit {
         // his familiar: a pale glowing orb, two wings beating either side
         let (hd, t, behind) = ray_segment(o, d, tmax, p, p);

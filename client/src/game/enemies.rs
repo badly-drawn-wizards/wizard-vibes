@@ -11,7 +11,7 @@
 // under 8 the seconds it has still to appear, 8 and over 8 plus the seconds
 // since its defeat.
 
-use super::spells::{Cut, Spells, Target, BURST, CHARGE, FIRE, FROST, HIS, MARK, MISSILE, STRIKE, WARMUP, WELL_REACH, WIND, WINDUP};
+use super::spells::{Cut, Spells, Target, BURST, CHARGE, FIRE, FROST, HIS, MARK, MISSILE, STRIKE, WARMUP, WELL_PUSH, WIND, WINDUP};
 use super::vec::{add, dist, dot, len, normalise, scale, sub, turn, V3};
 use super::Rng;
 use std::f32::consts::PI;
@@ -144,7 +144,7 @@ pub fn kill_code(kind: u32, cut: Option<Cut>, pos: V3, yaw: f32) -> f32 {
 
 fn damage(kind: u32) -> f32 {
     match kind {
-        BURST | WIND | FROST => 1.0,
+        BURST | WIND | FROST | super::spells::WELL => 1.0,
         MISSILE => 0.6,
         STRIKE => 2.0,
         _ => 0.0,
@@ -595,6 +595,7 @@ impl Enemies {
             let arena = self.arena;
             let missiles = spells.missiles_at(i as i32);
         let wells = spells.wells();
+        let pushes = spells.take_pushes();
         // (whether a boss stands: one at a time)
         let mut boss_up = self.slots.iter().take(n).any(|s| s.rank == Rank::Boss && s.down < 0.0);
             let s = &mut self.slots[i];
@@ -708,11 +709,21 @@ impl Enemies {
                 s.slow = (s.slow - dt).max(0.0);
                 let mut target_vel = if s.slow > 0.0 { scale(SLOWED, target_vel) } else { target_vel };
                 for w in &wells {
-                    let to = sub(*w, s.pos);
+                    let to = sub(w.pos, s.pos);
                     let d = len(to);
-                    if d < WELL_REACH && d > 0.3 {
-                        let k = 1.0 - d / WELL_REACH;
-                        target_vel = add(scale(1.0 - k, target_vel), scale(k * 12.0 / d, to));
+                    if d < w.reach && d > 0.3 {
+                        let k = (1.0 - d / w.reach).min(1.0);
+                        target_vel = add(scale(1.0 - k, target_vel), scale(k * 12.0 * w.strength / d, to));
+                    }
+                }
+                // (a well's burst: pushed out a little, staggered but still
+                // together)
+                for &(c, r) in &pushes {
+                    let away = sub(s.pos, c);
+                    let d = len(away);
+                    if d < r {
+                        let out = if d > 1e-3 { scale(1.0 / d, away) } else { [1.0, 0.0, 0.0] };
+                        s.vel = add(s.vel, add(scale(WELL_PUSH * (1.0 - 0.5 * d / r), out), [0.0, 2.0, 0.0]));
                     }
                 }
                 let k = 1.0 - (-dt * STEER * if s.dodge > 0.0 { 3.0 } else { 1.0 }).exp();
@@ -936,6 +947,31 @@ mod tests {
             was = now;
         }
         assert_eq!(starts, 1);
+    }
+
+    #[test]
+    fn a_well_leaves_them_clumped() {
+        let mut e = Enemies::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(5);
+        let him = [0.0, 12.0, 0.0];
+        e.reset([0.0, 12.0, 30.0]);
+        e.update(2.0, 2, 1, 0.0, him, &mut spells, &mut rng);
+        // (two of them 10 apart, a well cast between them)
+        e.slots[0].pos = [-5.0, 12.0, 20.0];
+        e.slots[1].pos = [5.0, 12.0, 20.0];
+        let apart = |e: &Enemies| len(sub(e.slots[0].pos, e.slots[1].pos));
+        spells.targets = e.targets(2, 1, 0.0, him);
+        spells.cast_well([0.0, 13.0, 18.0], [0.0, 0.0, 1.0], &mut rng);
+        let mut t = 0.0;
+        while t < 5.0 {
+            spells.targets = e.targets(2, 1, t, him);
+            e.update(1.0 / 60.0, 2, 1, t, him, &mut spells, &mut rng);
+            spells.update(1.0 / 60.0, false);
+            t += 1.0 / 60.0;
+        }
+        // (drawn in, burst, pushed out a little: still together)
+        assert!(apart(&e) < 6.0, "{}", apart(&e));
     }
 
     #[test]
