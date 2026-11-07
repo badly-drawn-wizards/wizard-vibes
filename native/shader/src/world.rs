@@ -656,6 +656,29 @@ pub fn structure_at(l: Land, density: f32, w: Vec3) -> (bool, i32, Vec3, f32) {
     (structure_present(density, w.x, w.z) && dry, kind, vec(px, ground, pz), yaw)
 }
 
+// The structure nearest world point w across the ground (its own cell's,
+// or a neighbouring cell's): (kind, or -1 for none; its distance across
+// the ground, from its centre; w's height above the ground there). For
+// the game: their blessings are his near them.
+pub fn structure_near(l: Land, density: f32, w: Vec3) -> (i32, f32, f32) {
+    let mut best = (-1, 1e9f32, 0.0f32);
+    let mut dx = -1;
+    while dx <= 1 {
+        let mut dz = -1;
+        while dz <= 1 {
+            let c = vec(w.x + dx as f32 * struct_cell, 0.0, w.z + dz as f32 * struct_cell);
+            let (present, kind, o, _) = structure_at(l, density, c);
+            let d = length2(vec2(w.x - o.x, w.z - o.z));
+            if present && d < best.1 {
+                best = (kind, d, w.y - o.y);
+            }
+            dz += 1;
+        }
+        dx += 1;
+    }
+    best
+}
+
 // The structures' distance at a world point: (distance, part). Every bound
 // returned is a true lower bound, so it is safe to step by:
 // - above every roof, the height above structure_top;

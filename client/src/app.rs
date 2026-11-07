@@ -876,6 +876,9 @@ impl App {
                         })
                     });
                     self.game.set_enemy_orbs(orbs);
+                    // and the structure he is near (its blessing his)
+                    let (kind, across, above) = wizard_shader::world::structure_near(wizard_shader::scene::land_of(prm), prm.structure_density, fl.pos);
+                    self.game.set_near(kind, across, above);
                 }
             }
             // the collision probe, on the CPU (the shader crate's code)

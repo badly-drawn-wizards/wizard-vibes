@@ -24,6 +24,7 @@ pub struct Pad {
     pub dash: bool,           // the dash button pressed since the last read
     pub mode: bool,           // the mode's button pressed since the last read
     pub pause: bool,          // pause's button pressed since the last read
+    pub pause_held: bool,     // and held (held long, in a fight, he gives up)
     pub back: bool,           // B pressed since the last read
     pub nav: [bool; 4],       // the D-pad, or the left stick, (up, down, left, right) pressed since the last read (or repeating)
     pub tab: i32,             // LB / LT (-1) or RB / RT (1) pressed since the last read
@@ -169,6 +170,7 @@ impl Pads {
             dash: pressed(Action::Dash),
             mode: pressed(Action::Mode),
             pause: pressed(Action::Pause),
+            pause_held: held(Action::Pause),
             back: hit(PadButton::B),
             nav,
             tab: (hit(PadButton::RB) || hit(PadButton::RT)) as i32 - (hit(PadButton::LB) || hit(PadButton::LT)) as i32,

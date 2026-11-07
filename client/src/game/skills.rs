@@ -37,6 +37,7 @@ pub const SKILLS: &[Skill] = &[
     Skill { id: "arcane", name: |t| t.spell_arcane_missiles(), what: |t| t.skill_arcane_what(), levels: 1, cost: 6, needs: Some("soul"), at: (0.0, 1.0) },
     Skill { id: "familiar", name: |t| t.spell_spirit_familiar(), what: |t| t.skill_familiar_what(), levels: 1, cost: 12, needs: Some("arcane"), at: (0.0, 2.0) },
     Skill { id: "meteor", name: |t| t.spell_meteor(), what: |t| t.skill_meteor_what(), levels: 1, cost: 12, needs: Some("inferno"), at: (-3.0, -1.0) },
+    Skill { id: "chrono", name: |t| t.skill_chrono_name(), what: |t| t.skill_chrono_what(), levels: 4, cost: 8, needs: Some("healing"), at: (-2.0, -2.0) },
     Skill { id: "reaper", name: |t| t.skill_reaper_name(), what: |t| t.skill_reaper_what(), levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
 ];
 
@@ -70,6 +71,7 @@ pub struct Boosts {
     pub souls: u32,       // souls a defeat brings
     pub spells: [bool; super::spells::N_SPELLS], // the spells he can cast (the fire bolt always)
     pub slots: usize,      // his spell slots (1 to 4)
+    pub revive: f32,       // the part of his health a chrono revive brings him back with (0: none)
 }
 
 impl Skills {
@@ -121,6 +123,7 @@ impl Skills {
                 self.level("gravity") > 0,
                 self.level("familiar") > 0,
             ],
+            revive: 0.25 * l("chrono"),
             slots: 1 + ["slot2", "slot3", "slot4"].iter().filter(|s| self.level(s) > 0).count(),
         }
     }

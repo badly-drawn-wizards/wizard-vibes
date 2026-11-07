@@ -249,6 +249,8 @@ pub struct Spells {
     items: Vec<Spell>,
     // each spell's cooldown left (seconds)
     cooldowns: [f32; N_SPELLS],
+    // how fast the cooldowns run (an ancient ward's: faster)
+    pub cool_rate: f32,
     next_id: u32,
 }
 
@@ -273,6 +275,7 @@ impl Default for Spells {
             lock_time: LOCK_TIME,
             items: Vec::new(),
             cooldowns: [0.0; N_SPELLS],
+            cool_rate: 1.0,
             next_id: 1,
         }
     }
@@ -684,11 +687,19 @@ impl Spells {
         }
     }
 
+    // The enemies' spells, gone (time rewound from under them).
+    pub fn clear_hostile(&mut self) {
+        let gone: Vec<u32> = self.items.iter().filter(|s| s.owner != HIS).map(|s| s.id).collect();
+        for id in gone {
+            self.end(id);
+        }
+    }
+
     // `holding`: the cast button is down. The staff comes out quickly while
     // casting and stays out between repeated casts, then lowers slowly.
     pub fn update(&mut self, dt: f32, holding: bool) {
         for c in &mut self.cooldowns {
-            *c = (*c - dt).max(0.0);
+            *c = (*c - dt * self.cool_rate).max(0.0);
         }
         self.since_cast += dt;
         let out = holding || self.since_cast < 0.7;

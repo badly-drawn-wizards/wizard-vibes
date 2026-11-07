@@ -157,6 +157,17 @@ pub trait Text: Sync {
     // hud
     fn hud_health(&self) -> &'static str; // Health
     fn hud_mana(&self) -> &'static str; // Mana
+    fn hud_dash(&self) -> &'static str; // Dash
+    fn hud_give_up(&self) -> &'static str; // Hold to give up
+    fn hud_rewound(&self) -> &'static str; // Time rewound
+
+    // status (a structure's blessing, near it)
+    fn status_hearth(&self) -> &'static str; // Hearth
+    fn status_hearth_what(&self) -> &'static str; // Health comes back, slowly
+    fn status_ley_line(&self) -> &'static str; // Ley line
+    fn status_ley_line_what(&self) -> &'static str; // Mana refills twice as fast
+    fn status_ancient_ward(&self) -> &'static str; // Ancient ward
+    fn status_ancient_ward_what(&self) -> &'static str; // Spells cool down half again as fast
 
     // defeat
     fn defeat_title(&self) -> &'static str; // Defeated
@@ -267,6 +278,10 @@ pub trait Text: Sync {
 
     // skill.familiar
     fn skill_familiar_what(&self) -> &'static str; // Unlocks the spirit familiar
+
+    // skill.chrono
+    fn skill_chrono_name(&self) -> &'static str; // Chrono revive
+    fn skill_chrono_what(&self) -> &'static str; // Once a run, a defeat rewinds time
 
     // skill.reaper
     fn skill_reaper_name(&self) -> &'static str; // Reaper

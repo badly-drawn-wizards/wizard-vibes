@@ -91,7 +91,16 @@ pub struct Combat {
     // sounds to play
     pub sfx: Vec<SfxEvent>,
     pub hud: Hud,
+    // the structure he is near (world.rs's kind_*), and its blessing:
+    // health back at a cottage's hearth (a point every HEARTH seconds),
+    // mana twice as fast on a tower's ley line, spells cooling half again
+    // as fast by a pyramid's ancient ward
+    pub near: Option<i32>,
+    hearth: f32,
 }
+
+// (seconds a point of health takes to come back by a hearth)
+const HEARTH: f32 = 3.0;
 
 impl Default for Combat {
     fn default() -> Self {
@@ -111,6 +120,8 @@ impl Default for Combat {
             boosts: Default::default(),
             sfx: Vec::new(),
             hud: Hud::default(),
+            near: None,
+            hearth: 0.0,
         }
     }
 }
@@ -148,7 +159,19 @@ impl Combat {
         let b = self.boosts;
         self.enemies.max_hp = PLAYER_HP + b.health;
         self.mana.max = MANA + b.mana;
-        self.mana.regen = b.regen;
+        self.enemies.revive = b.revive;
+        let near = self.near;
+        self.mana.regen = b.regen * if near == Some(wizard_shader::world::kind_tower) { 2.0 } else { 1.0 };
+        spells.cool_rate = if near == Some(wizard_shader::world::kind_pyramid) { 1.5 } else { 1.0 };
+        if near == Some(wizard_shader::world::kind_cottage) && self.enemies.down < 0.0 && self.enemies.hp < self.enemies.max_hp {
+            self.hearth += m.dt;
+            if self.hearth >= HEARTH {
+                self.hearth -= HEARTH;
+                self.enemies.hp += 1;
+            }
+        } else {
+            self.hearth = 0.0;
+        }
         spells.blast = b.blast;
         spells.lock_time = LOCK_TIME * b.lock;
         let able = m.able && self.enemies.down < 0.0;
@@ -429,6 +452,7 @@ impl Combat {
                     sfx::here(sfx::BLOCK)
                 }
                 EnemyEvent::Hurt => sfx::here(sfx::HURT),
+                EnemyEvent::Revived => sfx::here(sfx::APPEAR),
                 EnemyEvent::Defeat(pos, his) => {
                     if his {
                         self.souls.push(super::vec::add(pos, [0.0, 1.3, 0.0]));
@@ -490,6 +514,7 @@ impl Combat {
 mod tests {
     use super::*;
     use crate::game::mana::CHARGE_DRAIN;
+    use crate::game::spells::HIS;
 
     fn moment() -> Moment {
         Moment {
@@ -748,5 +773,51 @@ mod tests {
         c.reset(&mut s);
         c.update(&moment(), &mut s, &mut rng);
         assert!(c.hud.lost.is_none());
+    }
+
+    #[test]
+    fn a_chrono_revive_brings_him_back_once_a_run() {
+        let mut c = Combat::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(1);
+        c.boosts.revive = 0.5;
+        c.update(&moment(), &mut spells, &mut rng);
+        let e = &mut c.enemies;
+        e.hp = 1;
+        e.hit(HIS, STRIKE);
+        // (back, with half his health, time to rewind, a moment unhurt)
+        assert_eq!((e.down, e.hp, e.rewind), (-1.0, e.max_hp / 2, true));
+        e.hit(HIS, STRIKE);
+        assert_eq!(e.hp, e.max_hp / 2);
+        e.grace = 0.0;
+        e.hp = 1;
+        e.hit(HIS, STRIKE);
+        assert!(e.down >= 0.0);
+        // (a new run: his again; but giving up is giving up)
+        e.reset([0.0; 3]);
+        e.give_up();
+        assert!(e.down >= 0.0 && e.gave_up && e.his_end.is_none());
+    }
+
+    #[test]
+    fn structures_bless_him_near_them() {
+        use wizard_shader::world::{kind_cottage, kind_pyramid, kind_tower};
+        let mut c = Combat::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(1);
+        c.update(&moment(), &mut spells, &mut rng);
+        let regen = c.mana.regen;
+        c.near = Some(kind_tower);
+        c.update(&moment(), &mut spells, &mut rng);
+        assert_eq!(c.mana.regen, 2.0 * regen);
+        c.near = Some(kind_pyramid);
+        c.update(&moment(), &mut spells, &mut rng);
+        assert_eq!((c.mana.regen, spells.cool_rate), (regen, 1.5));
+        c.near = Some(kind_cottage);
+        c.enemies.hp = 3;
+        for _ in 0..(3.1 * 60.0) as usize {
+            c.update(&moment(), &mut spells, &mut rng);
+        }
+        assert_eq!((c.enemies.hp, spells.cool_rate), (4, 1.0));
     }
 }

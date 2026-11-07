@@ -23,6 +23,7 @@ pub const ENEMY_SLOTS: usize = 6;
 pub const WIZARD_SLOTS: usize = ENEMY_SLOTS + 1;
 const HP: i32 = 3;
 const APPEAR: f32 = wizard_shader::enemies::appear_time; // seconds
+const REVIVE_GRACE: f32 = 2.0; // seconds he cannot be hurt after a chrono revive
 const RESPAWN: f32 = 5.0; // seconds after a defeat until the next one appears
 const RANGE: f32 = 40.0; // they only cast at him from nearer than this
 // The arena, the point they circle, stays where the fight began unless he
@@ -133,6 +134,8 @@ pub enum EnemyEvent {
     // (and whether he defeated it)
     Defeat(V3, bool),
     Appear(V3),
+    // his chrono revive took him back
+    Revived,
     Cast(u32, V3),
 }
 
@@ -245,6 +248,16 @@ pub struct Enemies {
     pub his_end: Option<(u32, Option<Cut>)>,
     pub his_deaths: i64,
     pub max_hp: i32, // his health, full (his skills raise it)
+    // his chrono revive: the part of his health he comes back with, once a
+    // run, from what would have defeated him (0: none), whether this run's
+    // is spent, and (set as it is) that time is to rewind; then, seconds he
+    // cannot be hurt
+    pub revive: f32,
+    revived: bool,
+    pub rewind: bool,
+    pub grace: f32,
+    // he gave up (held Start): defeated by nothing in particular
+    pub gave_up: bool,
     // each one's orb in the world, as the renderer poses it (the shader
     // crate's enemy_orb_at, on the CPU: set each frame), where it casts
     // from
@@ -271,6 +284,11 @@ impl Default for Enemies {
             his_deaths: 0,
             max_hp: PLAYER_HP,
             orbs: [None; ENEMY_SLOTS],
+            revive: 0.0,
+            revived: false,
+            rewind: false,
+            grace: 0.0,
+            gave_up: false,
         }
     }
 }
@@ -336,6 +354,10 @@ impl Enemies {
         self.hp = self.max_hp;
         self.down = -1.0;
         self.defeated = 0;
+        self.revived = false;
+        self.rewind = false;
+        self.grace = 0.0;
+        self.gave_up = false;
         self.hurt = 99.0;
         let (seed, secs, _) = self.seen;
         for (i, s) in self.slots.iter_mut().enumerate() {
@@ -343,6 +365,17 @@ impl Enemies {
             *s = Slot::new(generation, APPEAR, 5.0 + i as f32 * 2.0, home(seed, generation, i, secs, self.arena));
         }
         self.placed = true;
+    }
+
+    // He gives up: defeated, at once, by nothing (no revive).
+    pub fn give_up(&mut self) {
+        if self.down < 0.0 {
+            self.hp = 0;
+            self.down = 0.0;
+            self.gave_up = true;
+            self.his_end = None;
+            self.his_deaths += 1;
+        }
     }
 
     // A spell of `kind` hit `side`.
@@ -359,7 +392,7 @@ impl Enemies {
             d => ((d as f32 * scale).round() as i32).max(1),
         };
         if side == HIS {
-            if self.down >= 0.0 {
+            if self.down >= 0.0 || self.grace > 0.0 {
                 return;
             }
             if self.shielded {
@@ -372,7 +405,14 @@ impl Enemies {
             self.hp = (self.hp - damage).max(0);
             self.hurt = 0.0;
             self.events.push(EnemyEvent::Hurt);
-            if self.hp == 0 {
+            if self.hp == 0 && self.revive > 0.0 && !self.revived {
+                // (his chrono revive: back, as he was a moment ago)
+                self.revived = true;
+                self.rewind = true;
+                self.grace = REVIVE_GRACE;
+                self.hp = ((self.revive * self.max_hp as f32).ceil() as i32).clamp(1, self.max_hp);
+                self.events.push(EnemyEvent::Revived);
+            } else if self.hp == 0 {
                 self.down = 0.0;
                 self.his_end = Some((kind, cut));
                 self.his_deaths += 1;
@@ -420,6 +460,7 @@ impl Enemies {
         }
         self.last = Some(him);
         self.hurt += dt;
+        self.grace = (self.grace - dt).max(0.0);
         if self.down >= 0.0 {
             self.down += dt;
         }

@@ -142,7 +142,10 @@
     },
     "hud": {
       "health": "Health",
-      "mana": "Mana"
+      "mana": "Mana",
+      "dash": "Dash",
+      "give_up": "Hold to give up",
+      "rewound": "Time rewound"
     },
     "defeat": {
       "title": "Defeated",
@@ -256,6 +259,10 @@
       "reaper": {
         "name": "Reaper",
         "what": "One more soul from each defeat"
+      },
+      "chrono": {
+        "name": "Chrono revive",
+        "what": "Once a run, a defeat rewinds time: back with 25% more health each level"
       }
     },
     "group": {
@@ -424,6 +431,14 @@
       "platform": "What the wizard flies on (also in the top bar).",
       "enemies": "Other wizards flying round him.",
       "enemy_seed": "Picks each enemy's looks, platform and circle colour."
+    },
+    "status": {
+      "hearth": "Hearth",
+      "hearth_what": "Health comes back, slowly",
+      "ley_line": "Ley line",
+      "ley_line_what": "Mana refills twice as fast",
+      "ancient_ward": "Ancient ward",
+      "ancient_ward_what": "Spells cool down half again as fast"
     }
   },
   "es": {
@@ -569,7 +584,10 @@
     },
     "hud": {
       "health": "Salud",
-      "mana": "Maná"
+      "mana": "Maná",
+      "dash": "Embestida",
+      "give_up": "Mantén para rendirte",
+      "rewound": "Tiempo rebobinado"
     },
     "defeat": {
       "title": "Derrotado",
@@ -683,6 +701,10 @@
       "reaper": {
         "name": "Segador",
         "what": "Un alma más por cada derrota"
+      },
+      "chrono": {
+        "name": "Renacer temporal",
+        "what": "Una vez por partida, una derrota rebobina el tiempo: vuelves con un 25% más de salud por nivel"
       }
     },
     "group": {
@@ -851,6 +873,14 @@
       "platform": "En qué vuela el mago (también en la barra superior).",
       "enemies": "Otros magos que vuelan a su alrededor.",
       "enemy_seed": "Elige el aspecto, la plataforma y el color del círculo de cada enemigo."
+    },
+    "status": {
+      "hearth": "Hogar",
+      "hearth_what": "La salud vuelve, poco a poco",
+      "ley_line": "Línea ley",
+      "ley_line_what": "El maná se rellena el doble de rápido",
+      "ancient_ward": "Guarda antigua",
+      "ancient_ward_what": "Los hechizos se enfrían un 50% más rápido"
     }
   }
 }

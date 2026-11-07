@@ -672,6 +672,45 @@ pub fn paint_lock(p: &egui::Painter, c: Pos2, r: f32, colour: Color32) {
 // skills.rs): a spell's glyph for the spells and what improves them, ringed
 // for a spell it unlocks; else its own (a heart, a drop, waves, a burst,
 // a skull, a soul).
+// A ring of radius r round c, `frac` (0..1) of it from the top, clockwise
+// (or back, anticlockwise).
+pub fn ring_arc(p: &egui::Painter, c: Pos2, r: f32, frac: f32, back: bool, stroke: Stroke) {
+    let n = (64.0 * frac).ceil().max(1.0) as usize;
+    let s = if back { -1.0 } else { 1.0 };
+    let pts = (0..=n)
+        .map(|k| {
+            let a = s * std::f32::consts::TAU * frac * k as f32 / n as f32;
+            c + Vec2::new(a.sin(), -a.cos()) * r
+        })
+        .collect();
+    p.add(Shape::line(pts, stroke));
+}
+
+// The dash's meter (left of the vitals): a ring filling as it comes ready
+// (`ready`, 0..1), two chevrons in it, lit once it is.
+pub fn dash_meter(ui: &mut Ui, ready: f32, size: f32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let p = ui.painter();
+    let c = rect.center();
+    let r = 0.5 * size - 2.0;
+    let on = ready >= 1.0;
+    let lit = Color32::from_rgb(0x9a, 0xe6, 0xff);
+    p.circle_filled(c, r, bg(0.55));
+    p.circle_stroke(c, r, Stroke::new(1.0, BORDER));
+    if !on {
+        ring_arc(p, c, r, ready, false, Stroke::new(2.5, lit.gamma_multiply(0.6)));
+    } else {
+        p.circle_stroke(c, r, Stroke::new(2.0, lit));
+    }
+    let ink = if on { lit } else { DIM };
+    for dx in [-0.22, 0.18] {
+        let o = c + Vec2::new(dx * r, 0.0);
+        p.line_segment([o + Vec2::new(-0.18 * r, -0.32 * r), o + Vec2::new(0.14 * r, 0.0)], Stroke::new(2.0, ink));
+        p.line_segment([o + Vec2::new(0.14 * r, 0.0), o + Vec2::new(-0.18 * r, 0.32 * r)], Stroke::new(2.0, ink));
+    }
+    resp
+}
+
 pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32) {
     let icon = |which: Icon| paint_icon(p, Rect::from_center_size(c, Vec2::splat(2.0 * r)), which, colour);
     let spell = |i: usize| paint_spell(p, c, r, i, colour);
@@ -680,6 +719,16 @@ pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32
         "soul" => icon(Icon::Soul),
         "vitality" => icon(Icon::Heart),
         "reaper" => icon(Icon::Skull),
+        "chrono" => {
+            // a clock, its hands, and an arrow round it going back
+            p.circle_stroke(c, 0.62 * r, Stroke::new(1.4, colour));
+            p.line_segment([c, c + Vec2::new(0.0, -0.45 * r)], Stroke::new(1.4, colour));
+            p.line_segment([c, c + Vec2::new(-0.3 * r, 0.12 * r)], Stroke::new(1.4, colour));
+            ring_arc(p, c, 0.95 * r, 0.7, true, Stroke::new(1.4, colour));
+            let a = -0.7 * std::f32::consts::TAU;
+            let tip = c + Vec2::new(a.sin(), -a.cos()) * 0.95 * r;
+            p.add(Shape::convex_polygon(vec![tip + Vec2::new(-0.22 * r, -0.05 * r), tip + Vec2::new(0.12 * r, -0.2 * r), tip + Vec2::new(0.05 * r, 0.18 * r)], colour, Stroke::NONE));
+        }
         "healing" => {
             spell(3);
             ring();

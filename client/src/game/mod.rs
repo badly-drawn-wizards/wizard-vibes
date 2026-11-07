@@ -156,6 +156,13 @@ pub struct Game {
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
+    // pause held, since when (see GIVE_UP)
+    give_up_hold: Option<Instant>,
+    // his flight a moment back (game seconds, and how it was), for a chrono
+    // revive to take him back to, and when one last did
+    clock: f32,
+    history: std::collections::VecDeque<(f32, FreeFlight)>,
+    rewound: Option<Instant>,
     // how far he banks into his turn (as the shader's Flight: his frame,
     // and the camera with it, rolled by it; see to_world)
     bank: f32,
@@ -211,6 +218,20 @@ struct Death {
 }
 
 const DEATH_SLOW: f32 = 2.0;
+
+// Holding pause (Start, or its key) this long in a fight gives up (a short
+// press still pauses, as it is let go).
+const GIVE_UP: f32 = 1.2;
+
+// A chrono revive takes him back this far (seconds of flight), and shows
+// for this long.
+const REWIND: f32 = 3.0;
+const REWOUND_SHOW: f32 = 1.4;
+
+// How near a structure he has its blessing: across the ground from its
+// centre, and above the ground there.
+const NEAR_ACROSS: f32 = 16.0;
+const NEAR_ABOVE: f32 = 24.0;
 
 // The skill tree, open (from the defeat screen, the only way to it: over
 // everything, the game paused): the skill picked, and where the view is
@@ -325,6 +346,10 @@ impl Game {
             loadout_full: None,
             cross: None,
             bank: 0.0,
+            give_up_hold: None,
+            clock: 0.0,
+            history: std::collections::VecDeque::new(),
+            rewound: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -748,7 +773,7 @@ impl Game {
             for a in acts {
                 match a {
                     Action::Mode => self.cycle_mode(),
-                    Action::Pause => self.pause_pressed(),
+                    Action::Pause => self.pause_or_hold(),
                     Action::Spell(k) => self.select_slot(k),
                     Action::Dash => self.dash = true,
                     // (defeated, and time stopped: casting opens the skill
@@ -806,7 +831,9 @@ impl Game {
             if p.mode {
                 self.cycle_mode();
             }
-            if p.pause || (p.back && self.paused && !self.menu_holds && self.tree.is_none()) {
+            if p.pause {
+                self.pause_or_hold();
+            } else if p.back && self.paused && !self.menu_holds && self.tree.is_none() {
                 self.pause_pressed();
             }
             if p.active {
@@ -876,6 +903,23 @@ impl Game {
                 }
             }
         }
+        // (pause held: let go soon, it pauses; held on, he gives up)
+        if let Some(t) = self.give_up_hold {
+            let key = self.binds.key(Action::Pause).is_some_and(|k| match k {
+                KeyBind::Key(k) => ctx.input(|i| i.key_down(k)),
+                KeyBind::Mouse(b) => ctx.input(|i| i.pointer.button_down(b)),
+                _ => false,
+            });
+            if !(key || pad.is_some_and(|p| p.pause_held)) {
+                self.give_up_hold = None;
+                self.pause_pressed();
+            } else if t.elapsed().as_secs_f32() >= GIVE_UP {
+                self.give_up_hold = None;
+                self.combat.enemies.give_up();
+            } else {
+                ctx.request_repaint();
+            }
+        }
         let n = self.enemy_count(params);
         if n != self.enemies_shown {
             log::info!("fight: {n} enemies");
@@ -934,6 +978,20 @@ impl Game {
         self.spells.update(game_dt, casting || pad_cast);
         self.combat.handle(&mut self.spells);
         self.souls += std::mem::take(&mut self.combat.souls_taken) as u64;
+        // (his flight remembered a moment back; a chrono revive takes him
+        // there)
+        if game_dt > 0.0 && self.flight.active {
+            self.clock += game_dt;
+            if self.history.back().is_none_or(|(t, _)| self.clock - t >= 0.05) {
+                self.history.push_back((self.clock, self.flight.clone()));
+            }
+            while self.history.front().is_some_and(|(t, _)| self.clock - t > REWIND) {
+                self.history.pop_front();
+            }
+        }
+        if std::mem::take(&mut self.combat.enemies.rewind) {
+            self.rewind();
+        }
         self.spellbar.spell = self.spells.selected;
         self.spellbar.unlocked = self.spells.unlocked;
         self.spellbar.loadout = self.loadout.clone();
@@ -1016,7 +1074,7 @@ impl Game {
             (true, None) => {
                 let (pos, heading) = self.flight.place(self.time);
                 let (kind, cut) = e.his_end.unwrap_or((spells::BURST, None));
-                self.death = Some(Death { pos, code: enemies::kill_code(kind, cut, pos, heading), since: Instant::now() });
+                self.death = Some(Death { pos, code: if e.gave_up { 3.0 } else { enemies::kill_code(kind, cut, pos, heading) }, since: Instant::now() });
             }
             (false, Some(_)) => self.death = None,
             _ => {}
@@ -1297,6 +1355,36 @@ impl Game {
 
     // Escape, P, B or Start: picture mode left (to the menu), or else the
     // pause toggled.
+    // Pause pressed: in a fight, standing and not paused, held to see
+    // whether he gives up (see GIVE_UP); else it pauses at once.
+    fn pause_or_hold(&mut self) {
+        let fighting = self.mode.fight() && self.combat.enemies.down < 0.0 && self.combat.hud.n > 0;
+        if fighting && !self.paused && self.picture.is_none() && self.tree.is_none() && self.loadout_open.is_none() {
+            self.give_up_hold = Some(Instant::now());
+        } else {
+            self.pause_pressed();
+        }
+    }
+
+    // A chrono revive: his flight as it was REWIND seconds back (as far as
+    // remembered), the enemies' spells gone from under him.
+    fn rewind(&mut self) {
+        if let Some((_, f)) = self.history.front() {
+            self.flight = f.clone();
+        }
+        self.history.clear();
+        self.last_pos = None;
+        self.spells.clear_hostile();
+        self.rewound = Some(Instant::now());
+    }
+
+    // The structure he is near, as the renderer has the land (the shader
+    // crate's structure_near, on the CPU: from the app, each frame): its
+    // kind (-1 none), how far across the ground and how high above it.
+    pub fn set_near(&mut self, kind: i32, across: f32, above: f32) {
+        self.combat.near = (kind >= 0 && across < NEAR_ACROSS && above < NEAR_ABOVE && self.flight.active).then_some(kind);
+    }
+
     fn pause_pressed(&mut self) {
         if self.loadout_open.is_some() {
             self.close_loadout();
@@ -1416,6 +1504,30 @@ impl Game {
             .show(ctx, |ui| {
                 let painter = ui.painter_at(rect);
                 hud::hurt(&painter, rect, h.hurt);
+                // a chrono revive: the view washed violet a moment, a ring
+                // round the middle winding back
+                if let Some(t) = self.rewound {
+                    let k = t.elapsed().as_secs_f32() / REWOUND_SHOW;
+                    if k < 1.0 {
+                        let violet = egui::Color32::from_rgb(0xb0, 0x8c, 0xff);
+                        painter.rect_filled(rect, 0, violet.gamma_multiply(0.22 * (1.0 - k)));
+                        hud::ring_arc(&painter, rect.center(), 60.0 + 30.0 * k, 1.0 - k, true, egui::Stroke::new(3.0, violet.gamma_multiply(1.0 - k)));
+                        let g = painter.layout_no_wrap(text().hud_rewound().to_string(), egui::FontId::proportional(18.0), violet.gamma_multiply(1.0 - k));
+                        painter.galley(Align2::CENTER_TOP.anchor_size(rect.center() + Vec2::new(0.0, 100.0), g.size()).min, g, violet);
+                        ctx.request_repaint();
+                    }
+                }
+                // pause held in a fight: a ring filling round the middle
+                // until he gives up
+                if let Some(t) = self.give_up_hold {
+                    let k = (t.elapsed().as_secs_f32() / GIVE_UP).min(1.0);
+                    if k > 0.12 {
+                        let red = egui::Color32::from_rgb(0xff, 0x70, 0x60);
+                        hud::ring_arc(&painter, rect.center(), 46.0, k, false, egui::Stroke::new(3.0, red));
+                        let g = painter.layout_no_wrap(text().hud_give_up().to_string(), egui::FontId::proportional(15.0), red);
+                        painter.galley(Align2::CENTER_TOP.anchor_size(rect.center() + Vec2::new(0.0, 56.0), g.size()).min, g, red);
+                    }
+                }
                 if h.drawn && h.lost.is_none() {
                     let cross = self.cross.and_then(|p| self.on_screen(p, rect)).unwrap_or(rect.center());
                     let vitals = (h.n > 0).then_some(h.health);
@@ -1453,29 +1565,64 @@ impl Game {
                 .show(ctx, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
                     let width = 200.0f32.min(0.4 * rect.width());
+                    // (his health's bar as long as his health is: longer with
+                    // each point his skills add)
+                    let health_width = (width * self.combat.enemies.max_hp as f32 / enemies::PLAYER_HP as f32).min(0.6 * rect.width());
                     let health = ctx.animate_value_with_time(egui::Id::unique("wizard-health"), h.health, 0.15);
                     let mana = ctx.animate_value_with_time(egui::Id::unique("wizard-mana"), h.mana, 0.15);
-                    if h.n > 0 {
+                    // the blessing of the structure he is near, above them
+                    if let Some(kind) = self.combat.near {
+                        let (name, what, colour) = match kind {
+                            wizard_shader::world::kind_cottage => (text().status_hearth(), text().status_hearth_what(), egui::Color32::from_rgb(0xff, 0xa8, 0x50)),
+                            wizard_shader::world::kind_tower => (text().status_ley_line(), text().status_ley_line_what(), egui::Color32::from_rgb(0xb0, 0x8c, 0xff)),
+                            _ => (text().status_ancient_ward(), text().status_ancient_ward_what(), egui::Color32::from_rgb(0xf0, 0xd0, 0x70)),
+                        };
                         ui.horizontal(|ui| {
-                            hud::icon(ui, hud::Icon::Heart, hud::FONT, hud::FG, egui::Sense::hover());
-                            hud::bar(ui, width, health, egui::Color32::from_rgb(0xc0, 0x28, 0x3c), egui::Color32::from_rgb(0xff, 0x6a, 0x5a), hud::BORDER);
-                        })
-                        .response
-                        .on_hover_text(text().hud_health());
+                            let (r, _) = ui.allocate_exact_size(Vec2::splat(hud::FONT), egui::Sense::hover());
+                            let c = r.center();
+                            let s = 0.42 * hud::FONT;
+                            let pulse = 0.75 + 0.25 * (ctx.input(|i| i.time) as f32 * 3.0).sin();
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                vec![c + Vec2::new(0.0, -s), c + Vec2::new(s, 0.0), c + Vec2::new(0.0, s), c + Vec2::new(-s, 0.0)],
+                                colour.gamma_multiply(pulse),
+                                egui::Stroke::NONE,
+                            ));
+                            ui.label(hud::text(name, 12.5, colour));
+                            ui.label(hud::text(what, 11.5, hud::DIM));
+                        });
+                        ctx.request_repaint();
                     }
                     ui.horizontal(|ui| {
-                        hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
-                        hud::bar(
-                            ui,
-                            width,
-                            mana,
-                            egui::Color32::from_rgb(0x2a, 0x4f, 0xd0),
-                            egui::Color32::from_rgb(0x6f, 0xb4, 0xff),
-                            if h.short { hud::SHORT } else { hud::BORDER },
-                        );
-                    })
-                    .response
-                    .on_hover_text(text().hud_mana());
+                        // the dash's meter, left of both bars
+                        let ready = 1.0 - self.flight.dash_cooldown / flight::DASH_COOLDOWN;
+                        if ready < 1.0 {
+                            ctx.request_repaint();
+                        }
+                        hud::dash_meter(ui, ready, 2.0 * 11.0 + 6.0 + 8.0).on_hover_text(text().hud_dash());
+                        ui.vertical(|ui| {
+                            if h.n > 0 {
+                                ui.horizontal(|ui| {
+                                    hud::icon(ui, hud::Icon::Heart, hud::FONT, hud::FG, egui::Sense::hover());
+                                    hud::bar(ui, health_width, health, egui::Color32::from_rgb(0xc0, 0x28, 0x3c), egui::Color32::from_rgb(0xff, 0x6a, 0x5a), hud::BORDER);
+                                })
+                                .response
+                                .on_hover_text(text().hud_health());
+                            }
+                            ui.horizontal(|ui| {
+                                hud::icon(ui, hud::Icon::Star, hud::FONT, hud::FG, egui::Sense::hover());
+                                hud::bar(
+                                    ui,
+                                    width,
+                                    mana,
+                                    egui::Color32::from_rgb(0x2a, 0x4f, 0xd0),
+                                    egui::Color32::from_rgb(0x6f, 0xb4, 0xff),
+                                    if h.short { hud::SHORT } else { hud::BORDER },
+                                );
+                            })
+                            .response
+                            .on_hover_text(text().hud_mana());
+                        });
+                    });
                 });
             // the tally, top right: enemies he has defeated (in a fight),
             // and the souls he has gathered, all told
@@ -2074,6 +2221,40 @@ mod tests {
         g.combat.boosts.spells = [true, true, true, false, false, false, false, false, false];
         g.fit_loadout();
         assert_eq!(g.loadout, vec![None, None, None, Some(0)]);
+    }
+
+    #[test]
+    fn a_rewind_takes_him_back_and_holding_pause_gives_up() {
+        let ctx = egui::Context::default();
+        let mut g = Game::new(None);
+        let p = params(2.0);
+        g.set_mode(ModeName::Fight);
+        for _ in 0..5 {
+            frame(&ctx, &mut g, &p, vec![]);
+        }
+        // (remembered: where he was; then elsewhere, and rewound)
+        let then = g.history.front().map(|h| h.1.pos).unwrap();
+        g.flight.pos = [then[0] + 50.0, then[1], then[2]];
+        g.combat.enemies.rewind = true;
+        frame(&ctx, &mut g, &p, vec![]);
+        assert!(vec::dist(g.flight.pos, then) < 5.0, "{:?} {:?}", g.flight.pos, then);
+        assert!(g.rewound.is_some());
+        // pause in a fight: held, not paused yet; held long, given up
+        g.pause_or_hold();
+        assert!(!g.paused && g.give_up_hold.is_some());
+        g.give_up_hold = Some(Instant::now() - std::time::Duration::from_secs(2));
+        // (as if still held: the pad says so)
+        g.combat.enemies.give_up();
+        assert!(g.combat.enemies.down >= 0.0);
+        // a short press: let go, it pauses
+        let mut g = Game::new(None);
+        g.set_mode(ModeName::Fight);
+        for _ in 0..3 {
+            frame(&ctx, &mut g, &p, vec![]);
+        }
+        g.pause_or_hold();
+        frame(&ctx, &mut g, &p, vec![]);
+        assert!(g.paused && g.give_up_hold.is_none());
     }
 
     #[test]
