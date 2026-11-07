@@ -36,6 +36,15 @@ edit the app and it is patched where it runs.
   once; shader settings rebuild it), navigable by keyboard and controller; quality levels, dynamic resolution scaling, FXAA or edge
   supersampling, debug views, a game controller.
 
+## Releases
+
+Tagged versions (`v*`) are built for Linux, Windows and macOS by
+`.github/workflows/release.yml` and published on the
+[releases page](https://github.com/badly-drawn-wizards/wizard-vibes/releases):
+unpack one and run `wizard` (`wizard.exe`) from it; the shader and
+parameters it needs are beside it. (The macOS build is not signed: allow it
+under System Settings > Privacy & Security.)
+
 ## Running
 
 Everything builds in the flake's dev shell (the first `nix develop` fetches

@@ -1,0 +1,121 @@
+# For a tag (v*): the native app built for Linux, Windows and macOS, each
+# packed with its shader (built once, on Linux, in the flake's shell: rust-gpu
+# needs its nightly; at the defaults, and for each quality level) and
+# params.json, and published as the tag's release. The app looks for those
+# beside itself (see root in client/src/lib.rs), so each archive runs as it
+# is unpacked.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  shaders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/shader-builder/target
+          key: shaders-${{ runner.os }}-${{ hashFiles('flake.lock', 'native/shader-builder/Cargo.lock') }}
+
+      - name: Build the shaders
+        run: |
+          build() { nix develop -c cargo run --release --quiet --manifest-path native/shader-builder/Cargo.toml -- --defaults --out "$@"; }
+          for level in low med high; do build "build/shader-$level" --preset "$level"; done
+          build build/shader
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shaders
+          path: build/
+
+  app:
+    needs: shaders
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-x86_64
+            exe: wizard
+          - os: windows-latest
+            name: windows-x86_64
+            exe: wizard.exe
+          - os: macos-latest
+            name: macos-arm64
+            exe: wizard
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # (Linux: what the app links against, and the linker .cargo/config.toml
+      # asks for: clang driving mold)
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+
+      # (the flake's nightly, as the app is built with in it)
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-15
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Build the app
+        env:
+          WIZARD_DEFAULTS: "1"
+        run: cargo build --release -p wizard --bin wizard
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: shaders
+          path: build
+
+      - name: Pack it
+        shell: bash
+        run: |
+          dir="wizard-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir -p "$dir"
+          cp "target/release/${{ matrix.exe }}" params.json LICENSE README.md "$dir/"
+          cp -r build "$dir/build"
+          if [ "$RUNNER_OS" = "Windows" ]; then 7z a "$dir.zip" "$dir" > /dev/null; else tar czf "$dir.tar.gz" "$dir"; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: wizard-*.*
+
+  release:
+    needs: app
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

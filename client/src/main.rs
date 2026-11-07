@@ -1,6 +1,6 @@
 // The app natively: a window (eframe on winit, wgpu on Vulkan, Metal or
 // DX12), reading the shader builds from the repository (run from it, or set
-// WIZARD_ROOT). Or headless, with the same shader and passes (headless.rs):
+// WIZARD_ROOT), or from beside it (unpacked from a release). Or headless, with the same shader and passes (headless.rs):
 //
 // usage: wizard
 //        wizard --shot FILE.ppm [--size WxH] [--t0 T] [--wgsl] [--set PARAM=VALUE ...]
@@ -8,6 +8,9 @@
 //
 // --wgsl runs naga's WGSL of the shader even where the SPIR-V could run as
 // it is (to see what the browser gets).
+
+// (a release on Windows: no console window behind it)
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 #[cfg(not(target_arch = "wasm32"))]
 fn die(msg: &str) -> ! {

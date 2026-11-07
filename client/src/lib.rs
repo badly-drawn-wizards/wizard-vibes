@@ -22,6 +22,12 @@ pub fn root() -> Result<std::path::PathBuf, String> {
     if let Ok(r) = std::env::var("WIZARD_ROOT") {
         return Ok(r.into());
     }
+    // (unpacked from a release: beside the app itself)
+    if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
+        if d.join("params.json").exists() && d.join("build").is_dir() {
+            return Ok(d);
+        }
+    }
     let mut d = std::env::current_dir().map_err(|e| e.to_string())?;
     loop {
         if d.join("params.json").exists() {
