@@ -156,8 +156,10 @@ pub struct Game {
     // where his spell will go, aim assisted (see assist), for the
     // crosshair's cross
     cross: Option<V3>,
-    // pause held, since when (see GIVE_UP)
+    // pause held, since when (see GIVE_UP); the mode's button, likewise
+    // (see PICTURE_HOLD: the scene still meanwhile)
     give_up_hold: Option<Instant>,
+    picture_hold: Option<Instant>,
     // his flight a moment back (game seconds, and how it was), for a chrono
     // revive to take him back to, and when one last did
     clock: f32,
@@ -224,6 +226,11 @@ struct Death {
 }
 
 const DEATH_SLOW: f32 = 2.0;
+
+// Holding the mode's button (View, or F) this long goes to picture mode, of
+// the instant it went down (the scene held still from then; let go sooner,
+// it cycles the mode).
+const PICTURE_HOLD: f32 = 0.4;
 
 // Holding pause (Start, or its key) this long in a fight gives up (a short
 // press still pauses, as it is let go).
@@ -353,6 +360,7 @@ impl Game {
             cross: None,
             bank: 0.0,
             give_up_hold: None,
+            picture_hold: None,
             assist_k: 0.0,
             assist_at: None,
             lead_vel: [0.0; 3],
@@ -809,7 +817,7 @@ impl Game {
             }
             for a in acts {
                 match a {
-                    Action::Mode => self.cycle_mode(),
+                    Action::Mode => self.mode_or_hold(),
                     Action::Pause => self.pause_or_hold(),
                     Action::Spell(k) => self.select_slot(k),
                     Action::Dash => self.dash = true,
@@ -840,7 +848,7 @@ impl Game {
         if self.paused && !picture || self.tree.is_some() || self.loadout_open.is_some() || !ctx.input(|i| i.focused) {
             self.look.release(ctx);
         }
-        if !self.paused {
+        if !self.paused && self.picture_hold.is_none() {
             self.time += dt * self.time_scale();
         }
         self.orbit.idle(dt);
@@ -866,7 +874,7 @@ impl Game {
             // (the mode's button cycles the mode; pause's pauses, B resumes,
             // unless the menu has a slider held)
             if p.mode {
-                self.cycle_mode();
+                self.mode_or_hold();
             }
             if p.pause {
                 self.pause_or_hold();
@@ -940,14 +948,22 @@ impl Game {
                 }
             }
         }
+        // (the mode's button held: let go soon, it cycles the mode; held on,
+        // picture mode of the instant it went down)
+        if let Some(t) = self.picture_hold {
+            if !(self.key_held(ctx, Action::Mode) || pad.is_some_and(|p| p.mode_held)) {
+                self.picture_hold = None;
+                self.cycle_mode();
+            } else if t.elapsed().as_secs_f32() >= PICTURE_HOLD {
+                self.picture_hold = None;
+                self.enter_picture();
+            } else {
+                ctx.request_repaint();
+            }
+        }
         // (pause held: let go soon, it pauses; held on, he gives up)
         if let Some(t) = self.give_up_hold {
-            let key = self.binds.key(Action::Pause).is_some_and(|k| match k {
-                KeyBind::Key(k) => ctx.input(|i| i.key_down(k)),
-                KeyBind::Mouse(b) => ctx.input(|i| i.pointer.button_down(b)),
-                _ => false,
-            });
-            if !(key || pad.is_some_and(|p| p.pause_held)) {
+            if !(self.key_held(ctx, Action::Pause) || pad.is_some_and(|p| p.pause_held)) {
                 self.give_up_hold = None;
                 self.pause_pressed();
             } else if t.elapsed().as_secs_f32() >= GIVE_UP {
@@ -963,7 +979,7 @@ impl Game {
             self.enemies_shown = n;
         }
         let pad_cast = pad.is_some_and(|p| p.cast);
-        let game_dt = if self.paused { 0.0 } else { dt * self.time_scale() };
+        let game_dt = if self.paused || self.picture_hold.is_some() { 0.0 } else { dt * self.time_scale() };
         // (his bank, as the shader works it out: the camera rolls with it)
         let gain = params.f32("bank");
         self.bank = if self.flight.active { (gain * self.flight.turn).clamp(-0.35, 0.35) } else { wizard_shader::world::flight_at(gain, self.time).bank };
@@ -1392,6 +1408,26 @@ impl Game {
 
     // Escape, P, B or Start: picture mode left (to the menu), or else the
     // pause toggled.
+    // Whether `a`'s key (or mouse button) is held down.
+    fn key_held(&self, ctx: &egui::Context, a: Action) -> bool {
+        self.binds.key(a).is_some_and(|k| match k {
+            KeyBind::Key(k) => ctx.input(|i| i.key_down(k)),
+            KeyBind::Mouse(b) => ctx.input(|i| i.pointer.button_down(b)),
+            _ => false,
+        })
+    }
+
+    // The mode's button pressed: in play, the scene held still at once, and
+    // held to see whether it is picture mode (see PICTURE_HOLD); else (in a
+    // menu, say) the mode cycled at once.
+    fn mode_or_hold(&mut self) {
+        if !self.paused && self.picture.is_none() && self.tree.is_none() && self.loadout_open.is_none() {
+            self.picture_hold = Some(Instant::now());
+        } else {
+            self.cycle_mode();
+        }
+    }
+
     // Pause pressed: in a fight, standing and not paused, held to see
     // whether he gives up (see GIVE_UP); else it pauses at once.
     fn pause_or_hold(&mut self) {
@@ -2260,6 +2296,34 @@ mod tests {
         assert!(!g.picture() && g.paused() && o.paused);
         assert_eq!(g.orbit.cam, cam);
         assert_eq!(frame(&ctx, &mut g, &p, vec![]).drive.picture, 0.0);
+    }
+
+    #[test]
+    fn holding_the_mode_s_button_takes_a_picture_of_that_instant() {
+        let ctx = egui::Context::default();
+        let mut g = Game::new(None);
+        let p = params(0.0);
+        for _ in 0..3 {
+            frame(&ctx, &mut g, &p, vec![]);
+        }
+        let mode = g.mode.name;
+        // F down (and held): the scene still from then
+        let f = egui::Event::Key { key: Key::F, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+        let t = frame(&ctx, &mut g, &p, vec![f]).time;
+        for _ in 0..5 {
+            assert_eq!(frame(&ctx, &mut g, &p, vec![]).time, t);
+        }
+        // held long enough: picture mode, of that instant, the mode as it was
+        g.picture_hold = Some(Instant::now() - std::time::Duration::from_secs(1));
+        let o = frame(&ctx, &mut g, &p, vec![]);
+        assert!(g.picture() && o.time == t && g.mode.name == mode);
+        // a tap, out of it: no picture, the scene going on (the mode cycled,
+        // where there is another to go to)
+        frame(&ctx, &mut g, &p, key(Key::Escape));
+        g.paused = false;
+        let t = frame(&ctx, &mut g, &p, key(Key::F)).time;
+        assert!(!g.picture() && g.picture_hold.is_none());
+        assert!(frame(&ctx, &mut g, &p, vec![]).time > t);
     }
 
     #[test]

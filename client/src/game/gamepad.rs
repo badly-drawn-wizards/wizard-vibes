@@ -23,6 +23,7 @@ pub struct Pad {
     pub boost: bool,          // the dash button held (picture mode's speed)
     pub dash: bool,           // the dash button pressed since the last read
     pub mode: bool,           // the mode's button pressed since the last read
+    pub mode_held: bool,      // and held (held long, picture mode)
     pub pause: bool,          // pause's button pressed since the last read
     pub pause_held: bool,     // and held (held long, in a fight, he gives up)
     pub back: bool,           // B pressed since the last read
@@ -169,6 +170,7 @@ impl Pads {
             boost: held(Action::Dash),
             dash: pressed(Action::Dash),
             mode: pressed(Action::Mode),
+            mode_held: held(Action::Mode),
             pause: pressed(Action::Pause),
             pause_held: held(Action::Pause),
             back: hit(PadButton::B),
