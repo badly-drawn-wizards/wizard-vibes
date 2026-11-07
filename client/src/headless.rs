@@ -57,7 +57,7 @@ fn load(root: &Path, spv: bool) -> Result<ShaderFiles, String> {
 }
 
 pub fn run(root: &Path, o: &Options) -> Result<(), String> {
-    let schema: Schema = serde_json::from_str(&std::fs::read_to_string(root.join("params.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let schema: Schema = crate::source::schema();
     let mut values: ParamValues = ParamValues(schema.params().iter().filter(|p| !p.compile).map(|p| (p.id.clone(), p.default.clone())).collect());
     // (outside fight mode there are no enemies)
     values.0.insert("enemies".into(), Value::Num(0.0));

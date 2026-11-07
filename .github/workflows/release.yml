@@ -1,9 +1,9 @@
 # For a tag (v*): the native app built for Linux, Windows and macOS, each
 # packed with its shader (built once, on Linux, in the flake's shell: rust-gpu
-# needs its nightly; at the defaults, and for each quality level) and
-# params.json, and published as the tag's release. The app looks for those
-# beside itself (see root in client/src/lib.rs), so each archive runs as it
-# is unpacked.
+# needs its nightly; at the defaults, and for each quality level), and
+# published as the tag's release. The app looks for its shader beside itself
+# (see root in client/src/lib.rs), so each archive runs as it is unpacked.
+# (params.json is compiled in.)
 
 name: Release
 
@@ -96,7 +96,7 @@ jobs:
         run: |
           dir="wizard-${GITHUB_REF_NAME}-${{ matrix.name }}"
           mkdir -p "$dir"
-          cp "target/release/${{ matrix.exe }}" params.json LICENSE README.md "$dir/"
+          cp "target/release/${{ matrix.exe }}" LICENSE README.md "$dir/"
           cp -r build "$dir/build"
           if [ "$RUNNER_OS" = "Windows" ]; then 7z a "$dir.zip" "$dir" > /dev/null; else tar czf "$dir.tar.gz" "$dir"; fi
 

@@ -94,6 +94,13 @@ pub struct ShaderFiles {
     pub entry_wgsl: HashMap<String, String>,
 }
 
+// The parameters' schema: params.json, compiled in (as the shader crate has
+// it: a change to it rebuilds both; the web app reloads with it).
+pub fn schema() -> Schema {
+    static SCHEMA: std::sync::OnceLock<Schema> = std::sync::OnceLock::new();
+    SCHEMA.get_or_init(|| serde_json::from_str(include_str!("../../params.json")).expect("params.json")).clone()
+}
+
 pub enum Event {
     Schema(Schema),
     Shader(ShaderFiles),
@@ -159,14 +166,14 @@ mod native {
     }
 
     impl Source {
-        // `root`: the repository (where params.json is). `want_spv`: also
+        // `root`: where the shader builds are (build/...). `want_spv`: also
         // read the SPIR-V (to run it as it is, where the device can).
         pub fn new(root: PathBuf, want_spv: bool, ctx: egui::Context) -> Source {
             let (tx, rx) = mpsc::channel();
+            let _ = tx.send(Event::Schema(schema()));
             let follow = std::sync::Arc::new(std::sync::Mutex::new(build_dir(None)));
             let (r, f) = (root.clone(), follow.clone());
             std::thread::spawn(move || {
-                let mut seen_schema = None;
                 let mut seen: Option<(String, Option<SystemTime>)> = None;
                 // the dev server's id (it writes build/devserver-id as it starts)
                 let mut server: Option<String> = None;
@@ -174,24 +181,10 @@ mod native {
                     if let Ok(id) = std::fs::read_to_string(r.join("build/devserver-id")) {
                         if server.as_ref().is_some_and(|s| *s != id) {
                             log::info!("dev server restarted: reloading");
-                            (seen_schema, seen) = (None, None);
+                            seen = None;
                             let _ = tx.send(Event::ServerChanged);
                         }
                         server = Some(id);
-                    }
-                    let schema_path = r.join("params.json");
-                    let t = mtime(&schema_path);
-                    if t != seen_schema {
-                        seen_schema = t;
-                        match std::fs::read_to_string(&schema_path).map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())) {
-                            Ok(s) => {
-                                let _ = tx.send(Event::Schema(s));
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Event::Error(format!("params.json: {e}")));
-                            }
-                        }
-                        ctx.request_repaint();
                     }
                     let dir = f.lock().unwrap().clone();
                     let t = mtime(&r.join(&dir).join("shader.json"));
@@ -374,17 +367,7 @@ mod web {
             let base = base.trim_end_matches('/').to_string();
             let queue = Rc::new(RefCell::new(VecDeque::new()));
             let preset: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-            {
-                let (q, c, b) = (queue.clone(), ctx.clone(), base.clone());
-                wasm_bindgen_futures::spawn_local(async move {
-                    let ev = match fetch_text(&format!("{b}/params.json")).await.and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())) {
-                        Ok(s) => Event::Schema(s),
-                        Err(e) => Event::Error(format!("params.json: {e}")),
-                    };
-                    q.borrow_mut().push_back(ev);
-                    c.request_repaint();
-                });
-            }
+            queue.borrow_mut().push_back(Event::Schema(schema()));
             let level = search.trim_start_matches('?').split('&').find_map(|kv| kv.strip_prefix("level=")).map(String::from);
             // the dev server's events (a static site has none)
             let events = web_sys::EventSource::new(&format!("{base}/events")).ok();
@@ -449,19 +432,6 @@ mod web {
                         if built == *p.borrow() {
                             load(b.clone(), build_dir(built.as_deref()), q.clone(), c.clone());
                         }
-                    }),
-                );
-                let (q, c, b) = (queue.clone(), ctx.clone(), base.clone());
-                add(
-                    "params",
-                    Box::new(move |_| {
-                        let (q, c, b) = (q.clone(), c.clone(), b.clone());
-                        wasm_bindgen_futures::spawn_local(async move {
-                            if let Ok(s) = fetch_text(&format!("{b}/params.json")).await.and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())) {
-                                q.borrow_mut().push_back(Event::Schema(s));
-                                c.request_repaint();
-                            }
-                        });
                     }),
                 );
             }

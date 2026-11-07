@@ -14,19 +14,18 @@
 //
 // HTTP (port 8080, or --port N):
 //   GET  /                 the page (client/web/index.html), /pkg/* its wasm
-//   GET  /params.json      the parameters' schema
 //   GET  /build/shader*/*  the shader builds
 //   GET  /events           server-sent events: hello {id} (first; the id is
 //                          new each run: build/devserver-id has it too),
 //                          building, failed {message}, shader {preset},
-//                          params, reload
+//                          reload
 //   POST /config           compile-time parameter changes (JSON object),
 //                          saved to config.local.json (which rebuilds)
 //   POST /preset           a quality level ("low", "med", "high") to build;
 //                          answers once it is built
 //
 // With --static DIR it instead builds a self-contained site into DIR (the
-// page, its wasm, params.json, the shader with the compile-time defaults and
+// page, its wasm, the shader with the compile-time defaults and
 // one build per quality level) and exits: no dev server behind it, so no
 // hot reload or shader settings, and it can sit under any sub-path.
 //
@@ -280,7 +279,7 @@ async fn build_static(root: &Path, dir: &Path) -> Result<(), String> {
     run(root, "cargo", &["build", "--release", "--quiet", "-p", "wizard", "--lib", "--target", "wasm32-unknown-unknown", "--config", "env.WIZARD_DEFAULTS=\"1\""]).await?;
     run(root, "wasm-bindgen", &["--target", "web", "--no-typescript", "--out-dir", dir.join("pkg").to_str().unwrap(), "target/wasm32-unknown-unknown/release/wizard.wasm"]).await?;
     log("web app built");
-    for (from, to) in [("client/web/index.html", "index.html"), ("params.json", "params.json"), ("LICENSE", "LICENSE")] {
+    for (from, to) in [("client/web/index.html", "index.html"), ("LICENSE", "LICENSE")] {
         std::fs::copy(root.join(from), dir.join(to)).map_err(|e| format!("{from}: {e}"))?;
     }
     // (the native SPIR-V is not needed in the browser)
@@ -326,8 +325,9 @@ async fn main() {
         let _ = s.jobs.send(Job::Web);
     }
 
-    // the watcher: changed files to jobs; params.json is also told to the
-    // app (its drawer); build/want-preset is the native app asking for a level
+    // the watcher: changed files to jobs (params.json, compiled into the
+    // shader and the app, rebuilds both); build/want-preset is the native app
+    // asking for a level
     let (fs_tx, mut fs_rx) = mpsc::unbounded_channel();
     let mut watcher = notify::recommended_watcher(move |r: notify::Result<notify::Event>| {
         if let Ok(e) = r {
@@ -347,9 +347,6 @@ async fn main() {
         let s = s.clone();
         tokio::spawn(async move {
             while let Some(p) = fs_rx.recv().await {
-                if p.ends_with("params.json") {
-                    s.note("params", serde_json::json!({}));
-                }
                 if p == s.root.join("build/want-preset") {
                     if let Ok(level) = std::fs::read_to_string(&p) {
                         let level = level.trim().to_string();
@@ -372,7 +369,6 @@ async fn main() {
         .route("/config", post(config))
         .route("/preset", post(preset))
         .route_service("/", tower_http::services::ServeFile::new(root.join("client/web/index.html")))
-        .route_service("/params.json", tower_http::services::ServeFile::new(root.join("params.json")))
         .nest_service("/pkg", tower_http::services::ServeDir::new(root.join("build/web")))
         .nest_service("/build", tower_http::services::ServeDir::new(root.join("build")))
         .layer(no_store)

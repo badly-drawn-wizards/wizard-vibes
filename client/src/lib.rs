@@ -24,7 +24,7 @@ pub fn root() -> Result<std::path::PathBuf, String> {
     }
     // (unpacked from a release: beside the app itself)
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
-        if d.join("params.json").exists() && d.join("build").is_dir() {
+        if d.join("build/shader/shader.json").is_file() {
             return Ok(d);
         }
     }
