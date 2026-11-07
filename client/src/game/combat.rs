@@ -68,6 +68,8 @@ pub struct Hud {
     pub hurt: f32, // the red flash's opacity
     pub locked: bool,
     pub shielded: bool,
+    // a boss standing: its health (0..1)
+    pub boss: Option<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -432,6 +434,7 @@ impl Combat {
         self.hud.health = self.enemies.hp as f32 / self.enemies.max_hp as f32;
         self.hud.mana = self.mana.value / self.mana.max;
         self.hud.defeated = self.enemies.defeated;
+        self.hud.boss = self.enemies.boss(self.hud.n);
     }
 
     // The fizzle of a cast short of mana (not more than every half second,
@@ -453,9 +456,16 @@ impl Combat {
                 }
                 EnemyEvent::Hurt => sfx::here(sfx::HURT),
                 EnemyEvent::Revived => sfx::here(sfx::APPEAR),
-                EnemyEvent::Defeat(pos, his) => {
+                EnemyEvent::Defeat(pos, his, rank) => {
+                    // (its souls: more from an elite, many from a boss,
+                    // spread about where it stood)
                     if his {
-                        self.souls.push(super::vec::add(pos, [0.0, 1.3, 0.0]));
+                        let k = rank.souls();
+                        for j in 0..k {
+                            let a = std::f32::consts::TAU * j as f32 / k as f32;
+                            let r = if k > 1 { 0.6 * rank.size() } else { 0.0 };
+                            self.souls.push(super::vec::add(pos, [r * a.cos(), 1.3 * rank.size(), r * a.sin()]));
+                        }
                     }
                     self.placed(sfx::DEFEAT, pos)
                 }

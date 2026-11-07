@@ -21,7 +21,67 @@ use std::f32::consts::PI;
 // enemy_slots and wizard_slots in the shader's materials.rs.
 pub const ENEMY_SLOTS: usize = 6;
 pub const WIZARD_SLOTS: usize = ENEMY_SLOTS + 1;
+// An enemy's rank: a plain one; an elite (tougher, bigger, quicker to
+// cast, a gold circle); or a boss (far tougher, bigger still, casting
+// volleys, crimson), one every BOSS_EVERY defeats, from BOSS_FIRST on. The
+// renderer has it in the state (see foes) and draws it so.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rank {
+    #[default]
+    Normal,
+    Elite,
+    Boss,
+}
+
+impl Rank {
+    fn code(self) -> i32 {
+        match self {
+            Rank::Normal => wizard_shader::enemies::rank_normal,
+            Rank::Elite => wizard_shader::enemies::rank_elite,
+            Rank::Boss => wizard_shader::enemies::rank_boss,
+        }
+    }
+
+    pub fn hp(self) -> i32 {
+        match self {
+            Rank::Normal => HP,
+            Rank::Elite => 7,
+            Rank::Boss => 24,
+        }
+    }
+
+    // How big it stands (as the renderer draws it).
+    pub fn size(self) -> f32 {
+        wizard_shader::enemies::rank_size(self.code())
+    }
+
+    // Its time between spells, times a plain one's.
+    fn pace(self) -> f32 {
+        match self {
+            Rank::Normal => 1.0,
+            Rank::Elite => 0.7,
+            Rank::Boss => 0.55,
+        }
+    }
+
+    // The souls its defeat brings.
+    pub fn souls(self) -> usize {
+        match self {
+            Rank::Normal => 1,
+            Rank::Elite => 3,
+            Rank::Boss => 8,
+        }
+    }
+}
+
 const HP: i32 = 3;
+const BOSS_FIRST: u32 = 8; // his defeats before the first boss comes
+const BOSS_EVERY: u32 = 10; // and between bosses
+// (the chance of an elite: rising with his defeats, to a most)
+const ELITE_CHANCE: f32 = 0.08;
+const ELITE_RISE: f32 = 0.02;
+const ELITE_MOST: f32 = 0.4;
+const VOLLEY: f32 = 0.14; // radians between a boss's bolts
 const APPEAR: f32 = wizard_shader::enemies::appear_time; // seconds
 const REVIVE_GRACE: f32 = 2.0; // seconds he cannot be hurt after a chrono revive
 const RESPAWN: f32 = 5.0; // seconds after a defeat until the next one appears
@@ -132,8 +192,11 @@ const SHIELD_R: f32 = wizard_shader::shading::shield_radius;
 
 // The spheres that stand for a wizard on his platform at `pos` (the
 // platform's top): his body, and the platform.
-pub fn spheres(pos: V3, side: i32) -> [Target; 2] {
-    [Target { c: add(pos, [0.0, 1.1, 0.0]), r: super::spells::BODY_R, side }, Target { c: add(pos, [0.0, -0.8, 0.0]), r: 1.4, side }]
+pub fn spheres(pos: V3, side: i32, size: f32) -> [Target; 2] {
+    [
+        Target { c: add(pos, [0.0, 1.1 * size, 0.0]), r: super::spells::BODY_R * size, side, body: true },
+        Target { c: add(pos, [0.0, -0.8 * size, 0.0]), r: 1.4 * size, side, body: false },
+    ]
 }
 
 // What happened, for the sound and the shield.
@@ -142,7 +205,7 @@ pub enum EnemyEvent {
     Block,
     Hurt,
     // (and whether he defeated it)
-    Defeat(V3, bool),
+    Defeat(V3, bool, Rank),
     Appear(V3),
     // his chrono revive took him back
     Revived,
@@ -192,6 +255,7 @@ const FAST_BLADE: f32 = 0.14;
 #[derive(Clone, Debug)]
 struct Slot {
     generation: i64,
+    rank: Rank,
     hp: i32,
     wear: f32, // damage short of a whole point (see wear_down)
     kill: f32, // what defeated it (a kill code: see kill_code)
@@ -214,10 +278,11 @@ struct Slot {
 }
 
 impl Slot {
-    fn new(generation: i64, appear: f32, cast_in: f32, pos: V3) -> Slot {
+    fn new(generation: i64, rank: Rank, appear: f32, cast_in: f32, pos: V3) -> Slot {
         Slot {
             generation,
-            hp: HP,
+            rank,
+            hp: rank.hp(),
             wear: 0.0,
             kill: 0.0,
             appear,
@@ -275,6 +340,8 @@ pub struct Enemies {
     // crate's enemy_orb_at, on the CPU: set each frame), where it casts
     // from
     pub orbs: [Option<V3>; ENEMY_SLOTS],
+    // his defeats at which the next boss comes
+    next_boss: u32,
 }
 
 impl Default for Enemies {
@@ -288,7 +355,8 @@ impl Default for Enemies {
             shielded: false,
             arena: [0.0, ARENA_FLOOR, 12.0],
             events: Vec::new(),
-            slots: (0..ENEMY_SLOTS).map(|i| Slot::new(0, 0.0, 5.0 + i as f32 * 2.0, [0.0; 3])).collect(),
+            slots: (0..ENEMY_SLOTS).map(|i| Slot::new(0, Rank::Normal, 0.0, 5.0 + i as f32 * 2.0, [0.0; 3])).collect(),
+            next_boss: BOSS_FIRST,
             seen: (0, 0.0, [0.0; 3]),
             last: None,
             vel: [0.0; 3],
@@ -313,7 +381,7 @@ impl Enemies {
         let mut f = [0.0; WIZARD_SLOTS];
         for (i, s) in self.slots.iter().enumerate() {
             let phase = if s.down >= 0.0 { 8.0 + s.down.min(7.9) } else { s.appear.min(7.9) };
-            f[i] = 16.0 * s.generation as f32 + phase;
+            f[i] = 64.0 * s.generation as f32 + 16.0 * s.rank.code() as f32 + phase;
         }
         f
     }
@@ -336,6 +404,11 @@ impl Enemies {
         f
     }
 
+    // The boss standing, if one is: its health (0..1).
+    pub fn boss(&self, n: usize) -> Option<f32> {
+        self.slots.iter().take(n).find(|s| s.rank == Rank::Boss && s.down < 0.0 && s.appear < 0.5).map(|s| s.hp.max(0) as f32 / Rank::Boss.hp() as f32)
+    }
+
     // How fast enemy `side` is going (for aiming at it), if it stands.
     pub fn velocity(&self, side: i32) -> Option<V3> {
         self.slots.get(side as usize).filter(|s| s.down < 0.0).map(|s| s.vel)
@@ -347,15 +420,15 @@ impl Enemies {
         let mut out = Vec::new();
         if self.down < 0.0 {
             if self.shielded {
-                out.push(Target { c: add(him, SHIELD_C), r: SHIELD_R, side: HIS });
+                out.push(Target { c: add(him, SHIELD_C), r: SHIELD_R, side: HIS, body: false });
             } else {
-                out.extend(spheres(him, HIS));
+                out.extend(spheres(him, HIS, 1.0));
             }
         }
         self.seen = (seed, secs, him);
         for (i, s) in self.slots.iter().take(n).enumerate() {
             if s.down < 0.0 && s.appear < 0.5 {
-                out.extend(spheres(s.pos, i as i32));
+                out.extend(spheres(s.pos, i as i32, s.rank.size()));
             }
         }
         out
@@ -370,6 +443,7 @@ impl Enemies {
         self.down = -1.0;
         self.defeated = 0;
         self.revived = false;
+        self.next_boss = BOSS_FIRST;
         self.rewind = false;
         self.grace = 0.0;
         self.gave_up = false;
@@ -377,7 +451,7 @@ impl Enemies {
         let (seed, secs, _) = self.seen;
         for (i, s) in self.slots.iter_mut().enumerate() {
             let generation = s.generation + 1;
-            *s = Slot::new(generation, APPEAR, 5.0 + i as f32 * 2.0, home(seed, generation, i, secs, self.arena));
+            *s = Slot::new(generation, Rank::Normal, APPEAR, 5.0 + i as f32 * 2.0, home(seed, generation, i, secs, self.arena));
         }
         self.placed = true;
     }
@@ -453,7 +527,7 @@ impl Enemies {
                     self.defeated += 1;
                 }
                 s.kill = kill_code(kind, cut, s.pos, facing(s.pos, him));
-                self.events.push(EnemyEvent::Defeat(s.pos, his));
+                self.events.push(EnemyEvent::Defeat(s.pos, his, s.rank));
             }
         }
     }
@@ -498,6 +572,8 @@ impl Enemies {
             let arena = self.arena;
             let missiles = spells.missiles_at(i as i32);
         let wells = spells.wells();
+        // (whether a boss stands: one at a time)
+        let mut boss_up = self.slots.iter().take(n).any(|s| s.rank == Rank::Boss && s.down < 0.0);
             let s = &mut self.slots[i];
             if s.down >= 0.0 {
                 // (a telegraph cut short)
@@ -508,7 +584,18 @@ impl Enemies {
                 if s.down >= RESPAWN {
                     let generation = s.generation + 1;
                     let pos = home(seed, generation, i, secs, arena);
-                    *s = Slot::new(generation, APPEAR, 4.0 + 4.0 * rng.uniform(), pos);
+                    // (its rank: a boss once he has defeated enough, else
+                    // an elite now and then, the more as he goes on)
+                    let rank = if i < n && !boss_up && self.defeated >= self.next_boss {
+                        self.next_boss = self.defeated + BOSS_EVERY;
+                        boss_up = true;
+                        Rank::Boss
+                    } else if rng.uniform() < (ELITE_CHANCE + ELITE_RISE * self.defeated as f32).min(ELITE_MOST) {
+                        Rank::Elite
+                    } else {
+                        Rank::Normal
+                    };
+                    *s = Slot::new(generation, rank, APPEAR, 4.0 + 4.0 * rng.uniform(), pos);
                     if i < n {
                         self.events.push(EnemyEvent::Appear(pos));
                     }
@@ -660,7 +747,7 @@ impl Enemies {
                         s.act = Act::Warming;
                     } else {
                         // (a strike is marked first: its own telegraph)
-                        s.cast_in = 6.0 + 6.0 * rng.uniform() + n as f32;
+                        s.cast_in = (6.0 + 6.0 * rng.uniform() + n as f32) * s.rank.pace();
                         let lead = 1.1;
                         let (mx, mz) = (miss(rng), miss(rng));
                         let at = add(add(at, scale(lead, at_vel)), [mx, 0.6, mz]);
@@ -676,12 +763,16 @@ impl Enemies {
                     let power = ENEMY_POWER * (c / 1.4).min(1.0);
                     let speed = 30.0 * (1.0 + 0.6 * power);
                     let aim = aim_at(chest, orb, at_vel, speed, rng);
-                    if spells.launch(FIRE, orb, aim, i as i32, None, rng) {
-                        spells.empower_last(power);
-                        self.events.push(EnemyEvent::Cast(FIRE, orb));
+                    // (a boss's, a volley of three, fanned)
+                    let fan: &[f32] = if s.rank == Rank::Boss { &[-VOLLEY, 0.0, VOLLEY] } else { &[0.0] };
+                    for &a in fan {
+                        if spells.launch(FIRE, orb, turn(a, aim), i as i32, None, rng) {
+                            spells.empower_last(power);
+                        }
                     }
+                    self.events.push(EnemyEvent::Cast(FIRE, orb));
                     s.act = Act::Idle;
-                    s.cast_in = 5.0 + 5.0 * rng.uniform() + n as f32;
+                    s.cast_in = (5.0 + 5.0 * rng.uniform() + n as f32) * s.rank.pace();
                 }
                 Act::Warming if s.act_t >= WARMUP => {
                     if let Some(id) = s.telegraph.take() {
@@ -703,7 +794,7 @@ impl Enemies {
                     s.act = if left > 1 {
                         Act::Blades { left: left - 1, next: SLOW_BLADE + (FAST_BLADE - SLOW_BLADE) * spun, shot: shot + 1 }
                     } else {
-                        s.cast_in = 6.0 + 6.0 * rng.uniform() + n as f32;
+                        s.cast_in = (6.0 + 6.0 * rng.uniform() + n as f32) * s.rank.pace();
                         Act::Idle
                     };
                 }
@@ -783,26 +874,57 @@ mod tests {
     }
 
     #[test]
+    fn a_boss_comes_once_enough_are_defeated() {
+        let mut e = Enemies::default();
+        e.reset([0.0, 0.0, 0.0]);
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(5);
+        e.update(2.0, 3, 1, 0.0, [0.0, 12.0, 0.0], &mut spells, &mut rng);
+        e.defeated = BOSS_FIRST;
+        // (one defeated: its place taken, after a while, by a boss)
+        e.hit_with(0, STRIKE, None, 99.0, HIS);
+        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, true, Rank::Normal))));
+        for _ in 0..(RESPAWN as usize + 4) {
+            e.update(1.0, 3, 1, 0.0, [0.0, 12.0, 0.0], &mut spells, &mut rng);
+        }
+        assert_eq!((e.slots[0].rank, e.slots[0].hp), (Rank::Boss, 24));
+        // (its rank in its state, as the renderer reads it: 16 a rank)
+        let f = e.foes()[0];
+        assert_eq!(((f - 64.0 * (f / 64.0).floor()) / 16.0).floor(), 2.0);
+        assert_eq!(e.boss(3), Some(1.0));
+        // (its body as big as it is drawn)
+        let t = e.targets(3, 1, 0.0, [0.0, 12.0, 0.0]);
+        let body = t.iter().find(|t| t.side == 0 && t.body).unwrap();
+        assert!((body.r - super::super::spells::BODY_R * Rank::Boss.size()).abs() < 1e-4);
+        // (the next not a boss too, while it stands)
+        e.hit_with(1, STRIKE, None, 99.0, HIS);
+        for _ in 0..(RESPAWN as usize + 4) {
+            e.update(1.0, 3, 1, 0.0, [0.0, 12.0, 0.0], &mut spells, &mut rng);
+        }
+        assert_ne!(e.slots[1].rank, Rank::Boss);
+    }
+
+    #[test]
     fn foes_and_defeat() {
         let mut e = Enemies::default();
         e.reset([0.0, 0.0, 0.0]);
         assert_eq!(e.arena[1], ARENA_FLOOR);
-        assert_eq!(e.foes()[0], 16.0 + 1.5);
+        assert_eq!(e.foes()[0], 64.0 + 1.5);
         let mut spells = Spells::default();
         let mut rng = Rng::new(5);
         e.update(2.0, 3, 1, 0.0, [0.0, 12.0, 0.0], &mut spells, &mut rng);
-        assert_eq!(e.foes()[1], 16.0);
+        assert_eq!(e.foes()[1], 64.0);
         let t = e.targets(3, 1, 0.0, [0.0, 12.0, 0.0]);
         assert_eq!(t.len(), 2 + 3 * 2);
         for _ in 0..3 {
             e.hit(1, WIND);
         }
         assert_eq!(e.defeated, 1);
-        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, true))));
-        assert_eq!(e.foes()[1], 16.0 + 8.0);
+        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, true, _))));
+        assert_eq!(e.foes()[1], 64.0 + 8.0);
         // it comes back, a generation on
         e.update(5.0, 3, 1, 0.0, [0.0, 12.0, 0.0], &mut spells, &mut rng);
-        assert_eq!(e.foes()[1], 32.0 + 1.5);
+        assert_eq!(e.foes()[1], 128.0 + 1.5);
         assert!(matches!(e.events.last(), Some(EnemyEvent::Appear(_))));
     }
 
@@ -816,7 +938,7 @@ mod tests {
         assert_eq!(e.slots[0].aggro[1], AGGRO_OTHER + AGGRO_HIT);
         e.hit_with(0, STRIKE, None, 2.0, 1);
         assert_eq!(e.defeated, 0);
-        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, false))));
+        assert!(matches!(e.events.last(), Some(EnemyEvent::Defeat(_, false, _))));
     }
 
     #[test]

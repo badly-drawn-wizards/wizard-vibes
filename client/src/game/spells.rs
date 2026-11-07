@@ -117,17 +117,17 @@ pub struct Target {
     pub c: V3,
     pub r: f32,
     pub side: i32,
+    // a wizard's body (not the platform under it, nor a shield): what
+    // aiming aims at
+    pub body: bool,
 }
 
-// (a wizard's body's sphere is this big, its platform's and a shield's
-// bigger: see enemies::spheres)
+// (a plain wizard's body's sphere: see enemies::spheres)
 pub const BODY_R: f32 = 0.9;
 
 impl Target {
-    // Whether it is a wizard's body (not the platform under it, nor a
-    // shield): what aiming aims at.
     pub fn body(&self) -> bool {
-        self.r <= BODY_R
+        self.body
     }
 }
 
@@ -584,7 +584,7 @@ impl Spells {
     // fast), for it to dodge.
     pub fn missiles_at(&self, side: i32) -> Vec<(V3, V3)> {
         let ffa = self.ffa;
-        let t = Target { c: [0.0; 3], r: 0.0, side };
+        let t = Target { c: [0.0; 3], r: 0.0, side, body: true };
         self.items.iter().filter(|s| (s.kind == FIRE || s.kind == WIND) && Self::opposed(ffa, s.owner, &t)).map(|s| (s.pos, s.vel)).collect()
     }
 
@@ -1030,7 +1030,7 @@ mod tests {
     fn bolt_hits_and_bursts() {
         let mut rng = Rng::new(1);
         let mut s = Spells { selected: 0, ..Default::default() };
-        s.targets = vec![Target { c: [0.0, 0.0, 10.0], r: 0.9, side: 0 }, Target { c: [0.0, 0.0, 9.0], r: 1.4, side: 0 }];
+        s.targets = vec![Target { c: [0.0, 0.0, 10.0], r: 0.9, side: 0, body: true }, Target { c: [0.0, 0.0, 9.0], r: 1.4, side: 0, body: false }];
         assert!(s.cast_fire([0.0; 3], [0.0, 0.0, 1.0], 0.0, [0.0; 3], &mut rng));
         assert!(!s.ready(FIRE as usize)); // cooling down
         for _ in 0..20 {
@@ -1050,7 +1050,7 @@ mod tests {
         // reach, in a fully charged one's (and harder near its heart)
         for (power, far, near) in [(0.0, None, 1.0), (1.0, Some(2.0), 3.0)] {
             let mut s = Spells::default();
-            s.targets = vec![Target { c: [4.5, 0.0, 0.0], r: 0.5, side: 0 }, Target { c: [0.0, 0.5, 0.0], r: 0.5, side: 1 }];
+            s.targets = vec![Target { c: [4.5, 0.0, 0.0], r: 0.5, side: 0, body: true }, Target { c: [0.0, 0.5, 0.0], r: 0.5, side: 1, body: true }];
             let mut rng = Rng::new(1);
             s.cast_fire([0.0; 3], [0.0, 0.0, 1.0], power, [0.0; 3], &mut rng);
             Spells::burst(&mut s.items[0], &mut Vec::new());
@@ -1091,7 +1091,7 @@ mod tests {
     fn lock_on_and_limit() {
         let mut rng = Rng::new(3);
         let mut s = Spells { limit: 2, ..Default::default() };
-        s.targets = vec![Target { c: [0.5, 0.0, 20.0], r: 0.9, side: 2 }, Target { c: [0.0, 0.0, 5.0], r: 0.9, side: HIS }];
+        s.targets = vec![Target { c: [0.5, 0.0, 20.0], r: 0.9, side: 2, body: true }, Target { c: [0.0, 0.0, 5.0], r: 0.9, side: HIS, body: true }];
         assert_eq!(s.lock_on([0.0; 3], [0.0, 0.0, 1.0]), Some([0.5, 0.0, 20.0]));
         assert_eq!(s.lock_on([0.0; 3], [1.0, 0.0, 0.0]), None);
         assert!(s.launch(FIRE, [0.0; 3], [1.0, 0.0, 0.0], 0, None, &mut rng));
@@ -1105,7 +1105,7 @@ mod tests {
         let mut rng = Rng::new(3);
         let mut s = Spells::default();
         assert!(s.launch(MARK, [0.0; 3], [0.0, 1.0, 0.0], 0, Some([1.0, 2.0, 3.0]), &mut rng));
-        s.targets = vec![Target { c: [1.0, 3.0, 3.0], r: 0.9, side: HIS }];
+        s.targets = vec![Target { c: [1.0, 3.0, 3.0], r: 0.9, side: HIS, body: true }];
         for _ in 0..12 {
             s.update(0.1, false);
         }
@@ -1118,7 +1118,7 @@ mod tests {
     fn frost_pierces_one_after_another() {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
-        s.targets = vec![Target { c: [0.0, 0.0, 6.0], r: 0.9, side: 0 }, Target { c: [0.0, 0.0, 12.0], r: 0.9, side: 1 }];
+        s.targets = vec![Target { c: [0.0, 0.0, 6.0], r: 0.9, side: 0, body: true }, Target { c: [0.0, 0.0, 12.0], r: 0.9, side: 1, body: true }];
         assert!(s.cast_frost([0.0; 3], [0.0, 0.0, 1.0], [0.0; 3], &mut rng));
         assert!(!s.ready(FROST_LANCE));
         for _ in 0..30 {
@@ -1132,7 +1132,7 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
         // (off to the side of where they are cast)
-        s.targets = vec![Target { c: [6.0, 0.0, 8.0], r: 0.9, side: 2 }];
+        s.targets = vec![Target { c: [6.0, 0.0, 8.0], r: 0.9, side: 2, body: true }];
         let targets = s.aimed_all([0.0; 3], [0.0, 0.0, 1.0], 0.9);
         assert_eq!(targets.len(), 1);
         assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], &targets, &mut rng));
@@ -1148,10 +1148,10 @@ mod tests {
         let mut s = Spells::default();
         // (three ahead, spread across; one far off to the side)
         s.targets = vec![
-            Target { c: [-4.0, 0.0, 12.0], r: BODY_R, side: 0 },
-            Target { c: [0.5, 0.0, 12.0], r: BODY_R, side: 1 },
-            Target { c: [4.0, 0.0, 12.0], r: BODY_R, side: 2 },
-            Target { c: [20.0, 0.0, 0.0], r: BODY_R, side: 3 },
+            Target { c: [-4.0, 0.0, 12.0], r: BODY_R, side: 0, body: true },
+            Target { c: [0.5, 0.0, 12.0], r: BODY_R, side: 1, body: true },
+            Target { c: [4.0, 0.0, 12.0], r: BODY_R, side: 2, body: true },
+            Target { c: [20.0, 0.0, 0.0], r: BODY_R, side: 3, body: true },
         ];
         let targets = s.aimed_all([0.0; 3], [0.0, 0.0, 1.0], 0.6);
         let mut sides: Vec<i32> = targets.iter().map(|t| t.0).collect();
@@ -1171,7 +1171,7 @@ mod tests {
     fn a_meteor_falls_and_bursts() {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
-        s.targets = vec![Target { c: [1.0, 0.5, 0.0], r: 0.9, side: 0 }];
+        s.targets = vec![Target { c: [1.0, 0.5, 0.0], r: 0.9, side: 0, body: true }];
         assert!(s.cast_meteor([0.0; 3], &mut rng));
         for _ in 0..90 {
             s.update(1.0 / 60.0, false);
@@ -1183,7 +1183,7 @@ mod tests {
     fn the_familiar_shoots() {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
-        s.targets = vec![Target { c: [0.0, 2.0, 10.0], r: 0.9, side: 0 }];
+        s.targets = vec![Target { c: [0.0, 2.0, 10.0], r: 0.9, side: 0, body: true }];
         assert!(s.summon(&mut rng));
         for _ in 0..300 {
             s.update(1.0 / 60.0, false);

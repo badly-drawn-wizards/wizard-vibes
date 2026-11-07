@@ -145,7 +145,8 @@
       "mana": "Mana",
       "dash": "Dash",
       "give_up": "Hold to give up",
-      "rewound": "Time rewound"
+      "rewound": "Time rewound",
+      "boss": "Archmage"
     },
     "defeat": {
       "title": "Defeated",
@@ -587,7 +588,8 @@
       "mana": "Maná",
       "dash": "Embestida",
       "give_up": "Mantén para rendirte",
-      "rewound": "Tiempo rebobinado"
+      "rewound": "Tiempo rebobinado",
+      "boss": "Archimago"
     },
     "defeat": {
       "title": "Derrotado",

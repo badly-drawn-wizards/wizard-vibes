@@ -158,6 +158,7 @@ pub trait Text: Sync {
     fn hud_health(&self) -> &'static str; // Health
     fn hud_mana(&self) -> &'static str; // Mana
     fn hud_dash(&self) -> &'static str; // Dash
+    fn hud_boss(&self) -> &'static str; // Archmage
     fn hud_give_up(&self) -> &'static str; // Hold to give up
     fn hud_rewound(&self) -> &'static str; // Time rewound
 

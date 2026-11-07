@@ -17,7 +17,8 @@ pub struct Foes {
 }
 
 // Whether he has been defeated (the slot after the enemies' says so, as
-// an enemy's would: see enemy_at), and is coming apart.
+// an enemy's would: see enemy_at; its phase, modulo 16 whatever its
+// generation and rank), and is coming apart.
 #[inline]
 pub fn him_dying(fs: Foes) -> bool {
     let s = foe_state(fs, fs.him);

@@ -1120,7 +1120,7 @@ impl Game {
         // with more of them, may have been defeated)
         match &self.death {
             Some(d) => {
-                drive.foe[n] = 16.0 * e.his_deaths as f32 + 8.0 + e.down.min(7.9);
+                drive.foe[n] = 64.0 * e.his_deaths as f32 + 8.0 + e.down.min(7.9);
                 drive.kill[n] = d.code;
                 drive.foe_pos[n] = d.pos;
             }
@@ -1661,6 +1661,22 @@ impl Game {
                         });
                     });
                 });
+            // a boss standing: its name and health, top middle, wide
+            if let Some(b) = h.boss {
+                egui::Area::new(egui::Id::unique("wizard-boss"))
+                    .pivot(Align2::CENTER_TOP)
+                    .fixed_pos(rect.center_top() + Vec2::new(0.0, 40.0))
+                    .interactable(false)
+                    .show(ctx, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            let crimson = egui::Color32::from_rgb(0xff, 0x46, 0x50);
+                            ui.label(hud::text(text().hud_boss(), 1.15 * hud::FONT, crimson));
+                            let b = ctx.animate_value_with_time(egui::Id::unique("wizard-boss-health"), b, 0.2);
+                            hud::bar(ui, (0.4 * rect.width()).min(520.0), b, egui::Color32::from_rgb(0x70, 0x08, 0x18), crimson, hud::BORDER);
+                        });
+                    });
+            }
             // the tally, top right: enemies he has defeated (in a fight),
             // and the souls he has gathered, all told
             egui::Area::new(egui::Id::unique("wizard-tally"))
@@ -2323,7 +2339,7 @@ mod tests {
         // (an enemy's body just off his aim, its platform below it)
         let c = vec::add(eye, vec::scale(30.0, view));
         let c = vec::add(c, [0.3, 0.0, 0.0]);
-        g.spells.targets = enemies::spheres(vec::sub(c, [0.0, 1.1, 0.0]), 0).to_vec();
+        g.spells.targets = enemies::spheres(vec::sub(c, [0.0, 1.1, 0.0]), 0, 1.0).to_vec();
         let (origin, dir) = g.cast_from();
         let mut last: Option<V3> = None;
         let mut most: f32 = 0.0;

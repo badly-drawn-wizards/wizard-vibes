@@ -33,6 +33,31 @@ pub const enemy_centre: Vec3 = Vec3::new(0.0, 0.1, 0.0);
 pub const enemy_radius: f32 = 3.0;
 
 pub const appear_time: f32 = 1.5; // seconds an enemy takes to appear
+
+// An enemy's rank (in its state: see enemy_at): a plain one, an elite
+// (bigger, its circle gold), or a boss (bigger still, crimson and black).
+pub const rank_normal: i32 = 0;
+pub const rank_elite: i32 = 1;
+pub const rank_boss: i32 = 2;
+
+// How big an enemy of a rank stands (times a plain one).
+pub fn rank_size(rank: i32) -> f32 {
+    if rank == rank_boss {
+        1.9
+    } else if rank == rank_elite {
+        1.3
+    } else {
+        1.0
+    }
+}
+
+// Its rank, from its state (64 a generation, 16 a rank, then its phase).
+#[inline]
+pub fn foe_rank(fs: Foes, i: i32) -> i32 {
+    let s = foe_state(fs, i);
+    let r = s - 64.0 * (s / 64.0).floor();
+    ftoi((r / 16.0).floor())
+}
 pub const fall_time: f32 = 3.0; // and a defeated one to fall out of sight
 
 // Random number k (in [0, 1)) of enemy i, generation g.
@@ -69,8 +94,11 @@ pub const tumble_axis: Vec3 = Vec3::new(0.0, 0.5, 0.0);
 
 pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
     let state = foe_state(fs, i);
-    let gf = (state / 16.0).floor();
-    let phase = state - 16.0 * gf;
+    // (64 a generation, 16 a rank, then the phase)
+    let gf = (state / 64.0).floor();
+    let rest = state - 64.0 * gf;
+    let rank = ftoi((rest / 16.0).floor());
+    let phase = rest - 16.0 * rank as f32;
     let r#gen = ftoi(gf);
     let appear = if phase < 8.0 { saturate(phase / appear_time) } else { 0.0 };
     let dying = if phase >= 8.0 { phase - 8.0 } else { -1.0 };
@@ -78,7 +106,7 @@ pub fn enemy_at(seed: i32, fs: Foes, i: i32, secs: f32, fl: Flight) -> Enemy {
     // (a defeated one falls, faster and faster, tumbling over, and shrinks
     // away at the end; a new one grows in)
     let fall = if dying >= 0.0 { 2.5 * dying * dying } else { 0.0 };
-    let size = if dying >= 0.0 { smoothstep(fall_time, fall_time - 1.0, dying) } else { 1.0 - 0.95 * appear * appear };
+    let size = rank_size(rank) * if dying >= 0.0 { smoothstep(fall_time, fall_time - 1.0, dying) } else { 1.0 - 0.95 * appear * appear };
     let pos = foe_pos(fs, i);
     // (him, defeated: where he stood, turned his way, not falling)
     let him = i == fs.him;
@@ -530,7 +558,17 @@ pub fn looks_in(prm: Params, fs: Foes, g: i32, i: i32) -> Looks {
             spell: 1,
         }
     } else {
-        looks_of(prm.enemy_seed, g, i)
+        // (an elite's circle gold; a boss's crimson, and it in black and
+        // crimson)
+        let lk = looks_of(prm.enemy_seed, g, i);
+        let rank = foe_rank(fs, i);
+        if rank == rank_boss {
+            Looks { circle: vec(1.0, 0.18, 0.22), robe: vec(0.14, 0.02, 0.04), hat: vec(0.04, 0.04, 0.06), ..lk }
+        } else if rank == rank_elite {
+            Looks { circle: vec(1.0, 0.78, 0.3), ..lk }
+        } else {
+            lk
+        }
     }
 }
 
