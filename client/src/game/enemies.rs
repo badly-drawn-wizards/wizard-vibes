@@ -534,7 +534,8 @@ impl Enemies {
             }
             wear_down(&mut s.hp, &mut s.wear, damage);
             if kind == FROST {
-                s.slow = FROST_SLOW;
+                // (a charged lance's frost the longer: see cast_frost)
+                s.slow = FROST_SLOW * scale.max(1.0);
             }
             if s.hp > 0 {
                 s.aggro[if owner == HIS { ENEMY_SLOTS } else { (owner as usize).min(ENEMY_SLOTS) }] += AGGRO_HIT;

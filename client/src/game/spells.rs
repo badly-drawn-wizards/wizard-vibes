@@ -251,6 +251,8 @@ pub struct Spells {
     // seconds his fire bolt has been charging (or -1), and the orb, where
     // it charges
     pub charge: f32,
+    // which spell is charging (the fire bolt, or the frost lance: its look)
+    pub charging: usize,
     pub orb: V3,
     pub gatling: Gatling,
     // free for all: the enemies' spells hit each other too
@@ -280,6 +282,7 @@ impl Default for Spells {
             here: [0.0; 3],
             lock: None,
             charge: -1.0,
+            charging: 0,
             orb: [0.0; 3],
             gatling: Gatling::default(),
             ffa: false,
@@ -353,14 +356,18 @@ impl Spells {
         true
     }
 
-    // His frost lance from `origin` along `dir`, carried on by his own
-    // velocity, with its cooldown.
-    pub fn cast_frost(&mut self, origin: V3, dir: V3, carry: V3, rng: &mut Rng) -> bool {
+    // His frost lance from `origin` along `dir`, charged by `power` (0..1:
+    // faster, bigger, harder, and its frost the longer), carried on by his
+    // own velocity, with its cooldown.
+    pub fn cast_frost(&mut self, origin: V3, dir: V3, power: f32, carry: V3, rng: &mut Rng) -> bool {
         if !self.launch(FROST, origin, dir, HIS, None, rng) {
             return false;
         }
         let s = self.items.last_mut().unwrap();
-        s.vel = super::vec::add(super::vec::scale(FROST_SPEED, dir), carry);
+        s.power = power.clamp(0.0, 1.0);
+        s.vel = super::vec::add(super::vec::scale(FROST_SPEED * (1.0 + 0.5 * s.power), dir), carry);
+        // (the renderer reads its charge from its seed, as a fire bolt's)
+        s.seed += 100000.0 * (100.0 * s.power).round();
         self.cooled(FROST_LANCE);
         true
     }
@@ -654,7 +661,7 @@ impl Spells {
                     let bit = 1u32 << (t.side + 1).clamp(0, 31);
                     if Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r && s.struck & bit == 0 {
                         s.struck |= bit;
-                        events.push(SpellEvent::Hit { side: t.side, kind: FROST, owner: s.owner, cut: None, scale: 1.0 });
+                        events.push(SpellEvent::Hit { side: t.side, kind: FROST, owner: s.owner, cut: None, scale: 1.0 + s.power });
                     }
                 }
                 continue;
@@ -997,7 +1004,9 @@ impl Spells {
         if self.charge >= 0.0 && self.limit > 0 {
             let i = free;
             let [x, y, z] = self.orb;
-            let slot = [CHARGE as f32, x, y, z, 0.0, 0.0, 0.0, self.charge, CHARGE_TIME, 5.0];
+            // (b: 1 for the frost lance's, its look icy)
+            let frost = if self.charging == FROST_LANCE { 1.0 } else { 0.0 };
+            let slot = [CHARGE as f32, x, y, z, 0.0, frost, 0.0, self.charge, CHARGE_TIME, 5.0];
             out[i * STRIDE..(i + 1) * STRIDE].copy_from_slice(&slot);
         }
         // (channelling, the healing round him: in the first free slot, or
@@ -1119,7 +1128,7 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut s = Spells::default();
         s.targets = vec![Target { c: [0.0, 0.0, 6.0], r: 0.9, side: 0, body: true }, Target { c: [0.0, 0.0, 12.0], r: 0.9, side: 1, body: true }];
-        assert!(s.cast_frost([0.0; 3], [0.0, 0.0, 1.0], [0.0; 3], &mut rng));
+        assert!(s.cast_frost([0.0; 3], [0.0, 0.0, 1.0], 0.0, [0.0; 3], &mut rng));
         assert!(!s.ready(FROST_LANCE));
         for _ in 0..30 {
             s.update(1.0 / 60.0, false);

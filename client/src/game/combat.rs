@@ -219,15 +219,16 @@ impl Combat {
         }
         let can = able && !self.shield.raised_now();
         let selected = spells.selected;
-        // the fire bolt: pressed, it charges at the orb while held (its cost
-        // as it starts, then mana drained while it grows: short of it, it
-        // stops growing; none comes back while it is held), and flies when
-        // let go, as charged (a press let go before it could start: as soon
-        // as it can, uncharged)
-        let firing = selected == FIRE as usize;
-        if firing && can {
-            let cost = SPELL_COST[FIRE as usize];
-            if spells.charge < 0.0 && self.buffered > 0.0 && spells.ready(FIRE as usize) {
+        // the fire bolt and the frost lance: pressed, it charges at the orb
+        // while held (its cost as it starts, then mana drained while it
+        // grows: short of it, it stops growing; none comes back while it is
+        // held), and flies when let go, as charged (a press let go before it
+        // could start: as soon as it can, uncharged)
+        let charged = selected == FIRE as usize || selected == FROST_LANCE;
+        if charged && can {
+            let cost = SPELL_COST[selected];
+            spells.charging = selected;
+            if spells.charge < 0.0 && self.buffered > 0.0 && spells.ready(selected) {
                 if self.mana.value >= cost {
                     self.mana.spend(cost);
                     spells.charge = 0.0;
@@ -247,9 +248,14 @@ impl Combat {
                     }
                     spells.since_cast = 0.0;
                 } else {
-                    spells.cast_fire(m.origin, m.dir, spells.charge / CHARGE_TIME, m.vel, rng);
+                    let power = spells.charge / CHARGE_TIME;
+                    if selected == FROST_LANCE {
+                        spells.cast_frost(m.origin, m.dir, power, m.vel, rng);
+                    } else {
+                        spells.cast_fire(m.origin, m.dir, power, m.vel, rng);
+                    }
                     spells.charge = -1.0;
-                    self.sfx.push(sfx::here(CAST_SOUND[FIRE as usize]));
+                    self.sfx.push(sfx::here(CAST_SOUND[selected]));
                 }
             }
         } else {
@@ -313,14 +319,12 @@ impl Combat {
         } else {
             spells.lock = None;
         }
-        // the frost lance, arcane missiles, gravity well and spirit
-        // familiar: pressed, cast at once (remembered a moment, as the
-        // others: see BUFFER)
-        if matches!(selected, FROST_LANCE | ARCANE | GRAVITY | FAMILIAR) && can && self.buffered > 0.0 && spells.ready(selected) {
+        // the arcane missiles, gravity well and spirit familiar: pressed,
+        // cast at once (remembered a moment, as the others: see BUFFER)
+        if matches!(selected, ARCANE | GRAVITY | FAMILIAR) && can && self.buffered > 0.0 && spells.ready(selected) {
             let cost = SPELL_COST[selected];
             if self.mana.value >= cost {
                 let cast = match selected {
-                    FROST_LANCE => spells.cast_frost(m.origin, m.dir, m.vel, rng),
                     ARCANE => {
                         let targets = spells.aimed_all(m.origin, m.dir, 0.6);
                         spells.cast_missiles(m.origin, m.dir, &targets, rng)

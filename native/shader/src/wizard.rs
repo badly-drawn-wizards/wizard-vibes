@@ -68,9 +68,12 @@ pub fn finish_pixel(prm: Params, vw: i32, h: i32, x: f32, y: f32, c: Vec3) -> Ve
 #[inline]
 pub fn sample(prm: Params, dr: Drive, spells: &[f32], n_spells: i32, target: Vec3, vw: i32, h: i32, tm: f32, yaw: f32, pitch: f32, dst: f32, x: f32, y: f32) -> (Vec3, f32) {
     let (c, seen) = shade_pixel(prm, dr, target, vw, h, tm, yaw, pitch, dst, x, y);
-    // the spells shine in front of whatever the ray sees
     let (ro, rd) = camera_ray_of(dr, target, vw, h, yaw, pitch, dst, x, y);
     let fl = flight_of(prm, dr, tm);
+    // the frost lances, solid ice in front of whatever the ray sees
+    let (ft, fnrm, fpow) = frost_hit(spells, n_spells, to_world(fl, ro), to_world_dir(fl, rd), seen);
+    let (c, seen) = if ft < seen { (lance_ice(c, to_world_dir(fl, rd), fnrm, fpow), ft) } else { (c, seen) };
+    // the spells shine in front of whatever the ray sees
     let orb = to_world(fl, held_orb(prm, dr, tm));
     let c = c + spell_glow(prm, spells, n_spells, tm, to_world(fl, ro), to_world_dir(fl, rd), seen, orb);
     // and round each enemy's orb, the glow his has; and every orb, small on

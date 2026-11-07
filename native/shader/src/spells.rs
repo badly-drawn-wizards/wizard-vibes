@@ -204,10 +204,13 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
             embers = embers + (-(ed * ed) / 0.0004).exp();
             j += 1;
         }
-        scale(
-            flick * seen(t, behind, 0.3),
-            scale(4.0 * core, mix(vec(1.0, 0.42, 0.08), vec(1.0, 0.92, 0.65), hot)) + scale(0.2 * halo, vec(1.0, 0.35, 0.05)) + scale(2.5 * f * embers, vec(1.0, 0.6, 0.2)),
-        )
+        // (b: a frost lance's charge, icy, its embers flakes of frost)
+        let (deep, white, glow, spark) = if q.y > 0.5 {
+            (vec(0.35, 0.7, 1.0), vec(0.85, 0.97, 1.0), vec(0.2, 0.55, 1.0), vec(0.7, 0.9, 1.0))
+        } else {
+            (vec(1.0, 0.42, 0.08), vec(1.0, 0.92, 0.65), vec(1.0, 0.35, 0.05), vec(1.0, 0.6, 0.2))
+        };
+        scale(flick * seen(t, behind, 0.3), scale(4.0 * core, mix(deep, white, hot)) + scale(0.2 * halo, glow) + scale(2.5 * f * embers, spark))
     } else if kind == spell_windup {
         // gusts swirling in round the orb: arcs circling it, tighter, faster
         // and brighter as it warms up
@@ -250,15 +253,14 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
         let (_, t, behind) = ray_segment(o, d, tmax, p, q);
         scale(flick * seen(t, behind, 0.3) * wisp_tail(o, d, tmax, secs, seed, p, q, age, life), vec(0.82, 0.95, 1.0))
     } else if kind == spell_frost {
-        // a shard of ice, long along its flight, pale and bright, a frosty
-        // trail behind it
+        // a shard of ice (solid: see frost_hit), a cold haze about it and a
+        // frosty trail behind it
         let dir = normalise(q + vec(0.0, 1e-4, 0.0));
         let (dist, t, behind) = ray_segment(o, d, tmax, p - scale(0.55, dir), p + scale(0.12, dir));
-        let (core, halo) = glow_line(0.03, 0.25, dist);
+        let (_, halo) = glow_line(0.03, 0.3, dist);
         let (td, _, _) = ray_segment(o, d, tmax, p - scale(1.6, dir), p);
         let trail = (-(td * td) / 0.01).exp();
-        let glint = 0.8 + 0.2 * (secs * 23.0 + i as f32).sin();
-        scale(fade * seen(t, behind, 0.3), scale(4.0 * glint * core, vec(0.8, 0.95, 1.0)) + scale(0.5 * halo + 0.35 * trail, vec(0.45, 0.8, 1.0)))
+        scale(fade * seen(t, behind, 0.3), scale(0.35 * halo + 0.35 * trail, vec(0.45, 0.8, 1.0)))
     } else if kind == spell_missile {
         // a small violet bolt, a short trail behind it
         let tail = p - scale(0.05, q);
@@ -510,6 +512,80 @@ pub fn spell_light(fog: f32, view_distance: f32, secs: f32, o: Vec3, d: Vec3, tm
     } else {
         splat(0.0)
     }
+}
+
+// A frost lance's shard: its centre, axis, half-length and half-width,
+// from its slot (its head at p, flying along q, its charge in its seed: see
+// the client's cast_frost).
+#[inline]
+fn shard_of(p: Vec3, q: Vec3, seed: i32) -> (Vec3, Vec3, f32, f32) {
+    let power = saturate((seed / 100000) as f32 / 100.0);
+    let dir = normalise(q + vec(0.0, 1e-4, 0.0));
+    let half = 0.38 * (1.0 + 0.5 * power);
+    (p - scale(half - 0.12, dir), dir, half, 0.075 * (1.0 + 0.4 * power))
+}
+
+// Where the world-space ray o + t d first meets a frost lance, solid ice,
+// nearer than tmax: (t, its normal, its charge), t INFINITY if nowhere.
+// Each is a long four-sided crystal (two pyramids, base to base, along its
+// flight): the ray tried against its bounding sphere, then sphere-traced
+// within it (each lance costs a ray once, not every step of the march).
+pub fn frost_hit(spells: &[f32], n: i32, o: Vec3, d: Vec3, tmax: f32) -> (f32, Vec3, f32) {
+    let mut best = (f32::INFINITY, vec(0.0, 1.0, 0.0), 0.0);
+    let mut i = 0;
+    while i < n {
+        if ftoi(at(spells, i, 0)) == spell_frost {
+            let p = vec(at(spells, i, 1), at(spells, i, 2), at(spells, i, 3));
+            let q = vec(at(spells, i, 4), at(spells, i, 5), at(spells, i, 6));
+            let seed = ftoi(at(spells, i, 9));
+            let (c, ax, half, w) = shard_of(p, q, seed);
+            let r = half + w;
+            let oc = o - c;
+            let b = dot(oc, d);
+            let disc = b * b - (dot(oc, oc) - r * r);
+            if disc > 0.0 {
+                let s = disc.sqrt();
+                let (t0, t1) = ((-b - s).maximum(0.0), (-b + s).minimum(tmax.minimum(best.0)));
+                // (its frame: across it, u and v)
+                let u = normalise(cross(ax, if ax.y.abs() < 0.9 { vec(0.0, 1.0, 0.0) } else { vec(1.0, 0.0, 0.0) }));
+                let v = cross(ax, u);
+                // (|x| / w + |y| / w + |z| / half - 1, scaled to a lower
+                // bound on the distance)
+                let k = w / (2.0 + (w / half) * (w / half)).sqrt();
+                let mut t = t0;
+                let mut j = 0;
+                while j < 32 && t < t1 {
+                    let x = o + scale(t, d) - c;
+                    let (a, bb, z) = (dot(x, u), dot(x, v), dot(x, ax));
+                    let f = (a.abs() / w + bb.abs() / w + z.abs() / half - 1.0) * k;
+                    if f < 1e-3 {
+                        let nrm = normalise(scale(sgn(a) / w, u) + scale(sgn(bb) / w, v) + scale(sgn(z) / half, ax));
+                        best = (t, nrm, saturate((seed / 100000) as f32 / 100.0));
+                        j = 32;
+                    } else {
+                        t += f;
+                    }
+                    j += 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    best
+}
+
+// What a frost lance's ice shows where the ray (direction d) meets it, with
+// normal nrm and charge `power`: what is behind it, tinted and dimmed through
+// it; the sky-ish light its facets catch, more at a glance; a cold light
+// within, brighter charged.
+pub fn lance_ice(behind: Vec3, d: Vec3, nrm: Vec3, power: f32) -> Vec3 {
+    let cos = dot(d, nrm).abs();
+    let fres = 0.04 + 0.96 * (1.0 - cos).powf(5.0);
+    let rr = reflect(d, nrm);
+    let sky = mix(vec(0.05, 0.07, 0.15), vec(0.6, 0.75, 1.0), saturate(0.5 * rr.y + 0.5));
+    let glint = 3.0 * saturate(dot(rr, normalise(vec(0.3, 0.8, 0.5)))).powf(40.0);
+    let through = behind * vec(0.5, 0.78, 1.0) * 0.85;
+    scale(1.0 - fres, through) + scale(fres, sky) + splat(glint) + scale(0.35 * (1.0 + power) * (1.0 - cos), vec(0.4, 0.75, 1.0))
 }
 
 #[inline]

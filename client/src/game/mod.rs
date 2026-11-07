@@ -567,12 +567,13 @@ impl Game {
         self.lead_vel = vec::add(self.lead_vel, vec::scale(1.0 - (-dt / LEAD_EASE).exp(), vec::sub(self.vel, self.lead_vel)));
         self.cross = None;
         let sel = self.spells.selected as u32;
+        let charge = self.spells.charge.max(0.0) / spells::CHARGE_TIME;
         let speed = if sel == spells::FIRE {
-            30.0 * (1.0 + 0.6 * (self.spells.charge.max(0.0) / spells::CHARGE_TIME))
+            30.0 * (1.0 + 0.6 * charge)
         } else if sel == spells::WIND {
             24.0
         } else if self.spells.selected == spells::FROST_LANCE {
-            spells::FROST_SPEED
+            spells::FROST_SPEED * (1.0 + 0.5 * charge)
         } else {
             self.assist_k = 0.0;
             self.assist_at = None;
