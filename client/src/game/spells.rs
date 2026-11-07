@@ -99,7 +99,7 @@ const LIFE: [f32; 18] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5,
 pub const WARMUP: f32 = 0.5; // seconds wind blades warm up before the first flies
 pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
 const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s, by kind (fire, strike, wind)
-const COOLDOWN: [f32; N_SPELLS] = [0.9, 2.0, 0.0, 0.0, 0.7, 2.5, 6.0, 8.0, 15.0]; // seconds before the spell's next cast (wind: see Gatling)
+const COOLDOWN: [f32; N_SPELLS] = [0.9, 2.0, 0.0, 0.0, 1.1, 3.0, 8.0, 8.0, 15.0]; // seconds before the spell's next cast (wind: see Gatling)
 const GATLING_LIFE: f32 = 0.75; // seconds a gatling's blade flies (then fades, not bursting)
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
 const STRIKE_HEIGHT: f32 = 25.0; // it comes down from this far above the orb
@@ -366,16 +366,28 @@ impl Spells {
     }
 
     // His arcane missiles: three, fanned out from `origin` along `dir`,
-    // homing in on `target` (a side) if there is one, with their cooldown.
-    pub fn cast_missiles(&mut self, origin: V3, dir: V3, target: Option<i32>, rng: &mut Rng) -> bool {
+    // homing in on the enemies near his aim (aimed_all), each on another
+    // where there are enough (round them again where not), the fan's left
+    // on the leftmost, so their ways do not cross; with their cooldown.
+    pub fn cast_missiles(&mut self, origin: V3, dir: V3, targets: &[(i32, V3)], rng: &mut Rng) -> bool {
         let side = super::vec::normalise([dir[2], 0.0, -dir[0]]);
+        let mut aims: Vec<(i32, V3)> = targets.iter().take(3).copied().collect();
+        aims.sort_by(|a, b| dot(sub(a.1, origin), side).total_cmp(&dot(sub(b.1, origin), side)));
         let mut any = false;
-        for k in [-1.0f32, 0.0, 1.0] {
+        for (i, k) in [-1.0f32, 0.0, 1.0].into_iter().enumerate() {
             let d = super::vec::normalise(super::vec::add(dir, super::vec::add(super::vec::scale(0.35 * k, side), [0.0, 0.25 * (1.0 - k.abs()), 0.0])));
+            // (one each across the fan; fewer, shared, the middle's the nearest's)
+            let target = match aims.len() {
+                0 => NO_TARGET,
+                1 => aims[0].0,
+                2 => aims[if i == 0 { 0 } else if i == 2 { 1 } else { 0 }].0,
+                _ => aims[i].0,
+            };
             if self.launch(MISSILE, origin, d, HIS, None, rng) {
                 let s = self.items.last_mut().unwrap();
                 s.vel = super::vec::scale(MISSILE_SPEED, d);
-                s.target = target.unwrap_or(NO_TARGET);
+                s.target = target;
+                s.power = 1.0;
                 any = true;
             }
         }
@@ -429,6 +441,23 @@ impl Spells {
 
     // The enemy nearest his aim (within `cone` radians of it, in reach): its
     // side and centre.
+    // The enemies within `cone` (radians) of `dir` from `origin`, their
+    // bodies, nearest the aim first (as aimed).
+    pub fn aimed_all(&self, origin: V3, dir: V3, cone: f32) -> Vec<(i32, V3)> {
+        let mut out: Vec<(f32, i32, V3)> = self
+            .targets
+            .iter()
+            .filter(|t| t.side >= 0 && t.body() && dist(t.c, origin) < STRIKE_RANGE * 1.5)
+            .map(|t| {
+                let v = sub(t.c, origin);
+                ((dot(v, dir) / len(v)).clamp(-1.0, 1.0).acos(), t.side, t.c)
+            })
+            .filter(|(a, _, _)| *a < cone)
+            .collect();
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out.into_iter().map(|(_, s, c)| (s, c)).collect()
+    }
+
     pub fn aimed(&self, origin: V3, dir: V3, cone: f32) -> Option<(i32, V3)> {
         self.targets
             .iter()
@@ -633,7 +662,7 @@ impl Spells {
             // an arcane missile: gone into what it meets
             if s.kind == MISSILE {
                 if let Some(t) = targets.iter().find(|t| Self::opposed(ffa, s.owner, t) && dist(s.pos, t.c) < t.r) {
-                    events.push(SpellEvent::Hit { side: t.side, kind: MISSILE, owner: s.owner, cut: None, scale: 1.0 });
+                    events.push(SpellEvent::Hit { side: t.side, kind: MISSILE, owner: s.owner, cut: None, scale: s.power });
                     s.age = s.life;
                 }
                 continue;
@@ -842,6 +871,8 @@ impl Spells {
                 let s = self.items.last_mut().unwrap();
                 s.vel = super::vec::scale(MISSILE_SPEED, dir);
                 s.target = side;
+                // (its familiar's: half an arcane missile's)
+                s.power = 0.5;
             }
         }
         self.collide();
@@ -1102,11 +1133,38 @@ mod tests {
         let mut s = Spells::default();
         // (off to the side of where they are cast)
         s.targets = vec![Target { c: [6.0, 0.0, 8.0], r: 0.9, side: 2 }];
-        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], Some(2), &mut rng));
+        let targets = s.aimed_all([0.0; 3], [0.0, 0.0, 1.0], 0.9);
+        assert_eq!(targets.len(), 1);
+        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], &targets, &mut rng));
         for _ in 0..120 {
             s.update(1.0 / 60.0, false);
         }
         assert_eq!(hits(&s), vec![(2, MISSILE); 3]);
+    }
+
+    #[test]
+    fn missiles_split_across_the_enemies_near_the_aim() {
+        let mut rng = Rng::new(1);
+        let mut s = Spells::default();
+        // (three ahead, spread across; one far off to the side)
+        s.targets = vec![
+            Target { c: [-4.0, 0.0, 12.0], r: BODY_R, side: 0 },
+            Target { c: [0.5, 0.0, 12.0], r: BODY_R, side: 1 },
+            Target { c: [4.0, 0.0, 12.0], r: BODY_R, side: 2 },
+            Target { c: [20.0, 0.0, 0.0], r: BODY_R, side: 3 },
+        ];
+        let targets = s.aimed_all([0.0; 3], [0.0, 0.0, 1.0], 0.6);
+        let mut sides: Vec<i32> = targets.iter().map(|t| t.0).collect();
+        assert_eq!(sides[0], 1);
+        sides.sort();
+        assert_eq!(sides, vec![0, 1, 2]);
+        assert!(s.cast_missiles([0.0; 3], [0.0, 0.0, 1.0], &targets, &mut rng));
+        for _ in 0..120 {
+            s.update(1.0 / 60.0, false);
+        }
+        let mut got = hits(&s);
+        got.sort();
+        assert_eq!(got, vec![(0, MISSILE), (1, MISSILE), (2, MISSILE)]);
     }
 
     #[test]

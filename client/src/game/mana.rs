@@ -7,7 +7,7 @@ const PAUSE: f32 = 0.6; // seconds after spending before it refills
 
 // What each spell costs (fire bolt, lightning strike, wind blade; healing
 // costs by the second instead: HEAL_DRAIN).
-pub const SPELL_COST: [f32; super::spells::N_SPELLS] = [7.0, 15.0, 2.5, 0.0, 8.0, 12.0, 20.0, 15.0, 20.0]; // (wind: each of a gatling's blades)
+pub const SPELL_COST: [f32; super::spells::N_SPELLS] = [7.0, 15.0, 2.5, 0.0, 10.0, 14.0, 25.0, 15.0, 20.0]; // (wind: each of a gatling's blades)
 pub const HEAL_DRAIN: f32 = 12.0; // a second, while channelling healing
 pub const CHARGE_DRAIN: f32 = 12.0; // a second, while charging a fire bolt (on top of its cost)
 

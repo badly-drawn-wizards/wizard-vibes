@@ -66,12 +66,22 @@ pub fn kill_code(kind: u32, cut: Option<Cut>, pos: V3, yaw: f32) -> f32 {
     (k + 4 * (a + 64 * (e + 64 * o)) + (push << 20)) as f32
 }
 
-fn damage(kind: u32) -> i32 {
+fn damage(kind: u32) -> f32 {
     match kind {
-        BURST | WIND | FROST | MISSILE => 1,
-        STRIKE => 2,
-        _ => 0,
+        BURST | WIND | FROST => 1.0,
+        MISSILE => 0.6,
+        STRIKE => 2.0,
+        _ => 0.0,
     }
+}
+
+// Health taken by `damage` (fractional): its whole points at once, the rest
+// worn away in `wear` until it makes another.
+fn wear_down(hp: &mut i32, wear: &mut f32, damage: f32) {
+    *wear += damage;
+    let whole = wear.floor();
+    *wear -= whole;
+    *hp -= whole as i32;
 }
 
 // Random number k of enemy i, generation `generation` (the renderer's own:
@@ -183,6 +193,7 @@ const FAST_BLADE: f32 = 0.14;
 struct Slot {
     generation: i64,
     hp: i32,
+    wear: f32, // damage short of a whole point (see wear_down)
     kill: f32, // what defeated it (a kill code: see kill_code)
     appear: f32, // seconds still to appear
     down: f32,   // seconds since its defeat, or -1
@@ -207,6 +218,7 @@ impl Slot {
         Slot {
             generation,
             hp: HP,
+            wear: 0.0,
             kill: 0.0,
             appear,
             down: -1.0,
@@ -231,6 +243,7 @@ impl Slot {
 #[derive(Clone, Debug)]
 pub struct Enemies {
     pub hp: i32,
+    wear: f32, // his damage short of a whole point
     pub defeated: u32, // enemies he has defeated
     pub hurt: f32,     // seconds since he was last hit
     pub down: f32,     // seconds since he was defeated (until a reset), or -1
@@ -268,6 +281,7 @@ impl Default for Enemies {
     fn default() -> Self {
         Enemies {
             hp: PLAYER_HP,
+            wear: 0.0,
             defeated: 0,
             hurt: 99.0,
             down: -1.0,
@@ -352,6 +366,7 @@ impl Enemies {
     pub fn reset(&mut self, arena: V3) {
         self.arena = [arena[0], arena[1].max(ARENA_FLOOR), arena[2]];
         self.hp = self.max_hp;
+        self.wear = 0.0;
         self.down = -1.0;
         self.defeated = 0;
         self.revived = false;
@@ -384,13 +399,10 @@ impl Enemies {
     }
 
     // The same, a wind blade's cut with it (a point and normal, world), its
-    // damage scaled by `scale` (rounded; at least 1, if it does any), cast
+    // damage scaled by `scale` (fractions wearing away: see wear_down), cast
     // by `owner` (only his defeats count).
     pub fn hit_with(&mut self, side: i32, kind: u32, cut: Option<Cut>, scale: f32, owner: i32) {
-        let damage = match damage(kind) {
-            0 => 0,
-            d => ((d as f32 * scale).round() as i32).max(1),
-        };
+        let damage = damage(kind) * scale;
         if side == HIS {
             if self.down >= 0.0 || self.grace > 0.0 {
                 return;
@@ -399,10 +411,11 @@ impl Enemies {
                 self.events.push(EnemyEvent::Block);
                 return;
             }
-            if damage == 0 {
+            if damage <= 0.0 {
                 return;
             }
-            self.hp = (self.hp - damage).max(0);
+            wear_down(&mut self.hp, &mut self.wear, damage);
+            self.hp = self.hp.max(0);
             self.hurt = 0.0;
             self.events.push(EnemyEvent::Hurt);
             if self.hp == 0 && self.revive > 0.0 && !self.revived {
@@ -423,7 +436,7 @@ impl Enemies {
             if s.down >= 0.0 {
                 return;
             }
-            s.hp -= damage;
+            wear_down(&mut s.hp, &mut s.wear, damage);
             if kind == FROST {
                 s.slow = FROST_SLOW;
             }

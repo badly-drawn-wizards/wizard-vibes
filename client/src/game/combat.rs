@@ -320,8 +320,8 @@ impl Combat {
                 let cast = match selected {
                     FROST_LANCE => spells.cast_frost(m.origin, m.dir, m.vel, rng),
                     ARCANE => {
-                        let target = spells.aimed(m.origin, m.dir, 0.35).map(|t| t.0);
-                        spells.cast_missiles(m.origin, m.dir, target, rng)
+                        let targets = spells.aimed_all(m.origin, m.dir, 0.6);
+                        spells.cast_missiles(m.origin, m.dir, &targets, rng)
                     }
                     GRAVITY => {
                         // (at the enemy aimed at, else ahead, short of the
