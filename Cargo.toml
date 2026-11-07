@@ -20,3 +20,10 @@ debug = false
 [profile.dev.package."*"]
 opt-level = 2
 debug = false
+
+# dx serve --hotpatch's own (as dev): its own build directory
+# (target/hotpatch), so a cargo build, run or test, which share dev's, never
+# leaves the app built ahead of it; else cargo has nothing to link, and dx
+# none of the link to capture ("Missing linker args for fat link")
+[profile.hotpatch]
+inherits = "dev"

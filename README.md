@@ -53,7 +53,7 @@ without restarting. To hot-patch the native app's own code as well, run it
 under Dioxus's [Subsecond](https://dioxuslabs.com/blog/release-070):
 
 ```sh
-nix develop -c dx serve --hotpatch -p wizard --bin wizard --platform desktop
+nix develop -c dx serve --hotpatch --profile hotpatch -p wizard --bin wizard --platform desktop
 ```
 
 Headless, with the same shader and passes:
