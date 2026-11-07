@@ -996,6 +996,7 @@ impl Game {
         let dir = self.assist(origin, dir, game_dt);
         self.spells.ffa = self.ffa;
         self.combat.boosts = self.skills.boosts();
+        self.flight.dash_scale = self.combat.boosts.dash;
         // (the spells he has, in his slots; one not in them out of his hand)
         self.spells.unlocked = self.combat.boosts.spells;
         self.fit_loadout();
@@ -1694,7 +1695,7 @@ impl Game {
                     }
                     ui.horizontal(|ui| {
                         // the dash's meter, left of both bars
-                        let ready = 1.0 - self.flight.dash_cooldown / flight::DASH_COOLDOWN;
+                        let ready = 1.0 - self.flight.dash_cooldown / (flight::DASH_COOLDOWN * self.flight.dash_scale);
                         if ready < 1.0 {
                             ctx.request_repaint();
                         }

@@ -110,7 +110,7 @@ const SPIRIT_PACE: f32 = 1.2; // his strike's lightning jumping on to another en
 // CHAIN_RANGE, and so on, CHAIN_JUMPS times, each doing CHAIN_DAMAGE of its
 // damage)
 const CHAIN_RANGE: f32 = 9.0;
-const CHAIN_JUMPS: usize = 2;
+
 const CHAIN_DAMAGE: f32 = 0.5;
 // (a soul's tail: how much of its path it trails, units, and how far apart
 // the points of its path are kept)
@@ -282,6 +282,11 @@ pub struct Spells {
     // the arcane missiles' locks so far (an enemy's side each: one on it
     // more than once, more than one missile at it)
     pub missile_locks: Vec<i32>,
+    // his skills': his chain lightning's leaps; his familiar's stay and
+    // pace, times; his gravity wells' reach and harm, times
+    pub chain_jumps: usize,
+    pub familiar: f32,
+    pub well_power: (f32, f32),
     pub orb: V3,
     pub gatling: Gatling,
     // free for all: the enemies' spells hit each other too
@@ -314,6 +319,9 @@ impl Default for Spells {
             charge: -1.0,
             charging: 0,
             missile_locks: Vec::new(),
+            chain_jumps: 2,
+            familiar: 1.0,
+            well_power: (1.0, 1.0),
             orb: [0.0; 3],
             gatling: Gatling::default(),
             ffa: false,
@@ -452,6 +460,7 @@ impl Spells {
         let s = self.items.last_mut().unwrap();
         s.vel = super::vec::scale(WELL_SPEED, dir);
         s.life = 1e3; // (until it has burst: see well_phase)
+        s.power = self.well_power.0; // (its reach, times)
         self.cooled(GRAVITY);
         true
     }
@@ -464,12 +473,12 @@ impl Spells {
         }
         let t = s.age - s.settled;
         if t < WELL_OPEN {
-            (1, t, WELL_REACH * (0.25 + 0.75 * (t / 0.6).min(1.0)))
+            (1, t, s.power * WELL_REACH * (0.25 + 0.75 * (t / 0.6).min(1.0)))
         } else if t < WELL_OPEN + WELL_IMPLODE {
             let f = (t - WELL_OPEN) / WELL_IMPLODE;
-            (2, t, WELL_REACH * (1.0 - 0.85 * f * f))
+            (2, t, s.power * WELL_REACH * (1.0 - 0.85 * f * f))
         } else {
-            (3, t, WELL_BURST * ((t - WELL_OPEN - WELL_IMPLODE) / WELL_AFTER).min(1.0))
+            (3, t, s.power * WELL_BURST * ((t - WELL_OPEN - WELL_IMPLODE) / WELL_AFTER).min(1.0))
         }
     }
 
@@ -486,6 +495,11 @@ impl Spells {
         let at = super::vec::add(self.here, [SPIRIT_ORBIT, 2.4, 0.0]);
         if !self.launch(SPIRIT, at, [0.0, 1.0, 0.0], HIS, None, rng) {
             return false;
+        }
+        // (staying the longer for his skills)
+        let familiar = self.familiar;
+        if let Some(s) = self.items.last_mut() {
+            s.life *= familiar;
         }
         self.cooled(FAMILIAR);
         true
@@ -766,7 +780,7 @@ impl Spells {
                 if s.kind == STRIKE && s.owner == HIS && !hits.is_empty() {
                     let mut from = s.pos;
                     let mut struck: Vec<i32> = hits.iter().map(|h| h.0).collect();
-                    for _ in 0..CHAIN_JUMPS {
+                    for _ in 0..self.chain_jumps {
                         let next = targets
                             .iter()
                             .filter(|t| t.side >= 0 && t.body() && !struck.contains(&t.side) && dist(t.c, from) < CHAIN_RANGE)
@@ -815,6 +829,7 @@ impl Spells {
         let wells = self.wells();
         let mut shots: Vec<(V3, V3, i32)> = Vec::new();
         let (here, targets, ffa) = (self.here, &self.targets, self.ffa);
+        let (familiar, well_harm) = (self.familiar, self.well_power.1);
         for s in &mut self.items {
             s.age += dt;
             // (an arcane missile turns towards its target, if it still stands)
@@ -840,11 +855,11 @@ impl Spells {
                     s.done = true;
                     s.life = s.age + WELL_AFTER;
                     for t in targets.iter().filter(|t| Self::opposed(ffa, s.owner, t) && t.body) {
-                        if dist(t.c, s.pos) - t.r < WELL_BURST {
-                            self.events.push(SpellEvent::Hit { side: t.side, kind: WELL, owner: s.owner, cut: None, scale: 1.0 });
+                        if dist(t.c, s.pos) - t.r < s.power * WELL_BURST {
+                            self.events.push(SpellEvent::Hit { side: t.side, kind: WELL, owner: s.owner, cut: None, scale: well_harm });
                         }
                     }
-                    self.pushes.push((s.pos, WELL_BURST));
+                    self.pushes.push((s.pos, s.power * WELL_BURST));
                     self.events.push(SpellEvent::Sound { what: Sound::Burst, pos: s.pos });
                 }
             }
@@ -870,7 +885,7 @@ impl Spells {
                 s.pos = at;
                 s.next_shot -= dt;
                 if s.next_shot <= 0.0 {
-                    s.next_shot = SPIRIT_PACE;
+                    s.next_shot = SPIRIT_PACE / familiar;
                     let near = targets.iter().filter(|t| t.side >= 0 && t.body() && dist(t.c, at) < SPIRIT_REACH).min_by(|a, b| dist(a.c, at).total_cmp(&dist(b.c, at)));
                     if let Some(t) = near {
                         shots.push((at, super::vec::normalise(sub(t.c, at)), t.side));

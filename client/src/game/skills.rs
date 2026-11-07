@@ -53,6 +53,14 @@ pub const SKILLS: &[Skill] = &[
     Skill { id: "arcane", name: |t| t.spell_arcane_missiles(), what: |t| t.skill_arcane_what(), costs: &[8], needs: &[&[("soul", 1), ("lightning", 1)]], at: (0.0, 1.0) },
     Skill { id: "familiar", name: |t| t.spell_spirit_familiar(), what: |t| t.skill_familiar_what(), costs: &[15], needs: &[&[("arcane", 1), ("reaper", 1)]], at: (0.0, 2.0) },
     Skill { id: "reaper", name: |t| t.skill_reaper_name(), what: |t| t.skill_reaper_what(), costs: &[8, 16, 30], needs: &[&[("soul", 1)], &[("slot2", 1)], &[("familiar", 1)]], at: (-1.0, 1.0) },
+    Skill { id: "glacier", name: |t| t.skill_glacier_name(), what: |t| t.skill_glacier_what(), costs: &[6, 10, 16], needs: &[&[("frost", 1)], &[("cool", 2)], &[]], at: (2.0, 2.0) },
+    Skill { id: "singularity", name: |t| t.skill_singularity_name(), what: |t| t.skill_singularity_what(), costs: &[12, 20], needs: &[&[("gravity", 1)], &[("glacier", 2)]], at: (4.0, 1.0) },
+    Skill { id: "volley", name: |t| t.skill_volley_name(), what: |t| t.skill_volley_what(), costs: &[8, 13, 20], needs: &[&[("arcane", 1)], &[("static", 1)], &[("familiar", 1)]], at: (-1.0, 2.0) },
+    Skill { id: "fork", name: |t| t.skill_fork_name(), what: |t| t.skill_fork_what(), costs: &[8, 15], needs: &[&[("static", 1)], &[("volley", 1)]], at: (1.0, 3.0) },
+    Skill { id: "kindred", name: |t| t.skill_kindred_name(), what: |t| t.skill_kindred_what(), costs: &[12, 20], needs: &[&[("familiar", 1)], &[("reaper", 2)]], at: (0.0, 3.0) },
+    Skill { id: "swift", name: |t| t.skill_swift_name(), what: |t| t.skill_swift_what(), costs: &[3, 6, 10], needs: &[&[("soul", 1)], &[("vitality", 1)], &[("wind", 1)]], at: (-2.0, 1.0) },
+    Skill { id: "aegis", name: |t| t.skill_aegis_name(), what: |t| t.skill_aegis_what(), costs: &[5, 10], needs: &[&[("well", 1)], &[("flow", 2)]], at: (2.0, -1.0) },
+    Skill { id: "starfall", name: |t| t.skill_starfall_name(), what: |t| t.skill_starfall_what(), costs: &[12, 20], needs: &[&[("meteor", 1)], &[("inferno", 2)]], at: (-4.0, -1.0) },
     Skill { id: "slot2", name: |t| t.skill_slot_name(), what: |t| t.skill_slot2_what(), costs: &[5], needs: &[&[("soul", 1)]], at: (0.0, -1.0) },
     Skill { id: "slot3", name: |t| t.skill_slot_name(), what: |t| t.skill_slot3_what(), costs: &[14], needs: &[&[("slot2", 1), ("vitality", 2)]], at: (0.0, -2.0) },
     Skill { id: "slot4", name: |t| t.skill_slot_name(), what: |t| t.skill_slot4_what(), costs: &[30], needs: &[&[("slot3", 1), ("flow", 1)]], at: (0.0, -3.0) },
@@ -89,6 +97,15 @@ pub struct Boosts {
     pub spells: [bool; super::spells::N_SPELLS], // the spells he can cast (the fire bolt always)
     pub slots: usize,      // his spell slots (1 to 4)
     pub revive: f32,       // the part of his health a chrono revive brings him back with (0: none)
+    pub frost: f32,        // a frost lance's chill, times
+    pub well_reach: f32,   // a gravity well's reach, times
+    pub well_harm: f32,    // and its burst's harm, times
+    pub locks: usize,      // more arcane missile locks
+    pub chain: usize,      // more leaps of his chain lightning
+    pub familiar: f32,     // his familiar's stay, and its pace, times
+    pub dash: f32,         // the dash's cooldown, times
+    pub shield: f32,       // the shield's mana, times
+    pub meteor: f32,       // a meteor's calling down, times
 }
 
 impl Skills {
@@ -147,6 +164,15 @@ impl Skills {
                 self.level("familiar") > 0,
             ],
             revive: 0.25 * l("chrono"),
+            frost: 1.0 + 0.3 * l("glacier"),
+            well_reach: 1.0 + 0.2 * l("singularity"),
+            well_harm: 1.0 + 0.5 * l("singularity"),
+            locks: self.level("volley") as usize,
+            chain: self.level("fork") as usize,
+            familiar: 1.0 + 0.3 * l("kindred"),
+            dash: 0.85f32.powf(l("swift")),
+            shield: 0.8f32.powf(l("aegis")),
+            meteor: 0.75f32.powf(l("starfall")),
             slots: 1 + ["slot2", "slot3", "slot4"].iter().filter(|s| self.level(s) > 0).count(),
         }
     }
@@ -192,6 +218,15 @@ mod tests {
                 assert!(at >= 1 && at <= k.levels(), "{} needs {id} {at}", s.id);
             }
         }
+    }
+
+    #[test]
+    fn the_upgrades_reach_their_spells() {
+        let b = Skills::restored("volley:2,fork:1,swift:1,glacier:3,singularity:1,kindred:2,aegis:1,starfall:2").boosts();
+        assert_eq!((b.locks, b.chain), (2, 1));
+        assert!((b.dash - 0.85).abs() < 1e-6 && (b.frost - 1.9).abs() < 1e-6 && (b.familiar - 1.6).abs() < 1e-6);
+        assert!((b.well_reach - 1.2).abs() < 1e-6 && (b.well_harm - 1.5).abs() < 1e-6);
+        assert!((b.shield - 0.8).abs() < 1e-6 && (b.meteor - 0.5625).abs() < 1e-6);
     }
 
     #[test]

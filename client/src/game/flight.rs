@@ -86,6 +86,7 @@ pub struct FreeFlight {
     climb: f32,   // vertical speed, smoothed
     time: f32,    // the animation time, as of the last update
     pub dash_cooldown: f32, // seconds until he can dash again
+    pub dash_scale: f32,    // its cooldown, times (his skills)
 }
 
 impl Default for FreeFlight {
@@ -101,6 +102,7 @@ impl Default for FreeFlight {
             climb: 0.0,
             time: 0.0,
             dash_cooldown: 0.0,
+            dash_scale: 1.0,
         }
     }
 }
@@ -177,7 +179,7 @@ impl FreeFlight {
             for i in 0..3 {
                 self.vel[i] += d[i] * DASH;
             }
-            self.dash_cooldown = DASH_COOLDOWN;
+            self.dash_cooldown = DASH_COOLDOWN * self.dash_scale;
         }
         let steering = (thrust / THRUST).abs().max((side / SIDE).abs());
         for i in 0..3 {

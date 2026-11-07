@@ -284,6 +284,38 @@ pub trait Text: Sync {
     fn skill_chrono_name(&self) -> &'static str; // Chrono revive
     fn skill_chrono_what(&self) -> &'static str; // Once a run, a defeat rewinds time
 
+    // skill.glacier
+    fn skill_glacier_name(&self) -> &'static str; // Deep frost
+    fn skill_glacier_what(&self) -> &'static str; // Frost lances' chill lasts 30% longer
+
+    // skill.singularity
+    fn skill_singularity_name(&self) -> &'static str; // Singularity
+    fn skill_singularity_what(&self) -> &'static str; // Gravity wells reach 20% further and burst 50% harder
+
+    // skill.volley
+    fn skill_volley_name(&self) -> &'static str; // Arcane volley
+    fn skill_volley_what(&self) -> &'static str; // One more arcane missile lock
+
+    // skill.fork
+    fn skill_fork_name(&self) -> &'static str; // Forked lightning
+    fn skill_fork_what(&self) -> &'static str; // Chain lightning leaps to one more
+
+    // skill.kindred
+    fn skill_kindred_name(&self) -> &'static str; // Kindred spirit
+    fn skill_kindred_what(&self) -> &'static str; // Your familiar stays 30% longer and casts 30% faster
+
+    // skill.swift
+    fn skill_swift_name(&self) -> &'static str; // Fleet foot
+    fn skill_swift_what(&self) -> &'static str; // Dash comes back 15% sooner
+
+    // skill.aegis
+    fn skill_aegis_name(&self) -> &'static str; // Aegis
+    fn skill_aegis_what(&self) -> &'static str; // The shield costs 20% less mana
+
+    // skill.starfall
+    fn skill_starfall_name(&self) -> &'static str; // Starfall
+    fn skill_starfall_what(&self) -> &'static str; // Meteors are called down 25% faster
+
     // skill.reaper
     fn skill_reaper_name(&self) -> &'static str; // Reaper
     fn skill_reaper_what(&self) -> &'static str; // One more soul from each defeat

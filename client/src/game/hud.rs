@@ -815,6 +815,58 @@ pub fn paint_skill(p: &egui::Painter, c: Pos2, r: f32, id: &str, colour: Color32
             }
             p.circle_filled(c, 0.18 * r, colour);
         }
+        // (a spell's upgrade: its glyph, and a mark of what it does)
+        "glacier" | "singularity" | "volley" | "fork" | "kindred" | "starfall" => {
+            let (i, mark) = match id {
+                "glacier" => (4, 0),
+                "singularity" => (7, 1),
+                "volley" => (5, 2),
+                "fork" => (1, 3),
+                "kindred" => (8, 1),
+                _ => (6, 2),
+            };
+            spell(i);
+            let m = c + Vec2::new(0.78 * r, -0.62 * r);
+            match mark {
+                // (frost: a flake)
+                0 => {
+                    for k in 0..3 {
+                        let a = std::f32::consts::PI * k as f32 / 3.0;
+                        let d = Vec2::new(a.cos(), a.sin()) * 0.3 * r;
+                        p.line_segment([m - d, m + d], Stroke::new(1.2, colour));
+                    }
+                }
+                // (more: a ring round it)
+                1 => {
+                    ring();
+                }
+                // (more of them: a plus)
+                2 => {
+                    p.line_segment([m - Vec2::new(0.28 * r, 0.0), m + Vec2::new(0.28 * r, 0.0)], Stroke::new(1.6, colour));
+                    p.line_segment([m - Vec2::new(0.0, 0.28 * r), m + Vec2::new(0.0, 0.28 * r)], Stroke::new(1.6, colour));
+                }
+                // (a fork)
+                _ => {
+                    p.line_segment([m + Vec2::new(0.0, 0.3 * r), m], Stroke::new(1.3, colour));
+                    p.line_segment([m, m + Vec2::new(-0.25 * r, -0.3 * r)], Stroke::new(1.3, colour));
+                    p.line_segment([m, m + Vec2::new(0.25 * r, -0.3 * r)], Stroke::new(1.3, colour));
+                }
+            }
+        }
+        "swift" => {
+            // two chevrons, the dash's
+            for dx in [-0.3, 0.25] {
+                let o = c + Vec2::new(dx * r, 0.0);
+                p.line_segment([o + Vec2::new(-0.25 * r, -0.45 * r), o + Vec2::new(0.2 * r, 0.0)], Stroke::new(1.8, colour));
+                p.line_segment([o + Vec2::new(0.2 * r, 0.0), o + Vec2::new(-0.25 * r, 0.45 * r)], Stroke::new(1.8, colour));
+            }
+        }
+        "aegis" => {
+            // a shield
+            let pts = vec![c + Vec2::new(-0.55 * r, -0.55 * r), c + Vec2::new(0.55 * r, -0.55 * r), c + Vec2::new(0.5 * r, 0.1 * r), c + Vec2::new(0.0, 0.7 * r), c + Vec2::new(-0.5 * r, 0.1 * r)];
+            p.add(Shape::closed_line(pts, Stroke::new(1.6, colour)));
+            p.line_segment([c + Vec2::new(0.0, -0.4 * r), c + Vec2::new(0.0, 0.45 * r)], Stroke::new(1.2, colour));
+        }
         _ => {
             p.circle_stroke(c, 0.5 * r, Stroke::new(1.5, colour));
         }

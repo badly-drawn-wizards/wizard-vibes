@@ -264,6 +264,38 @@
       "chrono": {
         "name": "Chrono revive",
         "what": "Once a run, a defeat rewinds time: back with 25% more health each level"
+      },
+      "glacier": {
+        "name": "Deep frost",
+        "what": "Frost lances' chill lasts 30% longer"
+      },
+      "singularity": {
+        "name": "Singularity",
+        "what": "Gravity wells reach 20% further and burst 50% harder"
+      },
+      "volley": {
+        "name": "Arcane volley",
+        "what": "One more arcane missile lock"
+      },
+      "fork": {
+        "name": "Forked lightning",
+        "what": "Chain lightning leaps to one more"
+      },
+      "kindred": {
+        "name": "Kindred spirit",
+        "what": "Your familiar stays 30% longer and casts 30% faster"
+      },
+      "swift": {
+        "name": "Fleet foot",
+        "what": "Dash comes back 15% sooner"
+      },
+      "aegis": {
+        "name": "Aegis",
+        "what": "The shield costs 20% less mana"
+      },
+      "starfall": {
+        "name": "Starfall",
+        "what": "Meteors are called down 25% faster"
       }
     },
     "group": {
@@ -707,6 +739,38 @@
       "chrono": {
         "name": "Renacer temporal",
         "what": "Una vez por partida, una derrota rebobina el tiempo: vuelves con un 25% más de salud por nivel"
+      },
+      "glacier": {
+        "name": "Escarcha profunda",
+        "what": "El frío de la lanza de escarcha dura un 30% más"
+      },
+      "singularity": {
+        "name": "Singularidad",
+        "what": "Los pozos de gravedad alcanzan un 20% más y estallan un 50% más fuerte"
+      },
+      "volley": {
+        "name": "Andanada arcana",
+        "what": "Un fijado más de misiles arcanos"
+      },
+      "fork": {
+        "name": "Rayo bifurcado",
+        "what": "El rayo encadenado salta a uno más"
+      },
+      "kindred": {
+        "name": "Espíritu afín",
+        "what": "Tu familiar se queda un 30% más y lanza un 30% más rápido"
+      },
+      "swift": {
+        "name": "Pies ligeros",
+        "what": "La embestida vuelve un 15% antes"
+      },
+      "aegis": {
+        "name": "Égida",
+        "what": "El escudo cuesta un 20% menos de maná"
+      },
+      "starfall": {
+        "name": "Lluvia de estrellas",
+        "what": "Los meteoros caen un 25% más rápido"
       }
     },
     "group": {

@@ -23,6 +23,8 @@ const CAST_SOUND: [usize; super::spells::N_SPELLS] =
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
 const METEOR_CHANNEL: f32 = 1.2; // seconds a meteor takes to call down (held)
 const SOUL_MANA: f32 = 30.0;
+// (the leaps of his chain lightning, without skills: see spells.rs)
+const CHAIN_JUMPS: usize = 2;
 // (the arcane missiles' locks: at most so many, one each so often, on an
 // enemy within so many radians of his aim)
 const MISSILE_LOCKS: usize = 6;
@@ -172,6 +174,11 @@ impl Combat {
         self.enemies.max_hp = PLAYER_HP + b.health;
         self.mana.max = MANA + b.mana;
         self.enemies.revive = b.revive;
+        self.enemies.frost = b.frost;
+        self.shield.cost = b.shield;
+        spells.chain_jumps = CHAIN_JUMPS + b.chain;
+        spells.familiar = b.familiar;
+        spells.well_power = (b.well_reach, b.well_harm);
         let near = self.near;
         self.mana.regen = b.regen * if near == Some(wizard_shader::world::kind_tower) { 2.0 } else { 1.0 };
         spells.cool_rate = if near == Some(wizard_shader::world::kind_pyramid) { 1.5 } else { 1.0 };
@@ -281,7 +288,7 @@ impl Combat {
         // longer to lock; he cannot speed up meanwhile: see Game::step)
         let striking = selected == STRIKE as usize || selected == METEOR;
         if selected == METEOR {
-            spells.lock_time = METEOR_CHANNEL;
+            spells.lock_time = METEOR_CHANNEL * self.boosts.meteor;
         }
         if striking && can && m.casting {
             if spells.lock.is_none() && self.buffered > 0.0 && spells.ready(selected) {
@@ -345,7 +352,7 @@ impl Combat {
                 if self.locking {
                     self.lock_tick -= m.dt;
                     spells.since_cast = 0.0;
-                    if self.lock_tick <= 0.0 && spells.missile_locks.len() < MISSILE_LOCKS {
+                    if self.lock_tick <= 0.0 && spells.missile_locks.len() < MISSILE_LOCKS + self.boosts.locks {
                         if let Some((side, _)) = spells.aimed(m.origin, m.dir, MISSILE_LOCK_CONE) {
                             if self.mana.value >= SPELL_COST[ARCANE] {
                                 self.mana.spend(SPELL_COST[ARCANE]);

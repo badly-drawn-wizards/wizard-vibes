@@ -354,6 +354,8 @@ pub struct Enemies {
     // cannot be hurt
     pub revive: f32,
     revived: bool,
+    // how long his frost lances' chill lasts, times (his skills)
+    pub frost: f32,
     pub rewind: bool,
     pub grace: f32,
     // he gave up (held Start): defeated by nothing in particular
@@ -390,6 +392,7 @@ impl Default for Enemies {
             orbs: [None; ENEMY_SLOTS],
             revive: 0.0,
             revived: false,
+            frost: 1.0,
             rewind: false,
             grace: 0.0,
             gave_up: false,
@@ -528,6 +531,7 @@ impl Enemies {
             }
         } else {
             let him = self.seen.2;
+            let frost = self.frost;
             let Some(s) = self.slots.get_mut(side as usize) else { return };
             if s.down >= 0.0 {
                 return;
@@ -535,7 +539,7 @@ impl Enemies {
             wear_down(&mut s.hp, &mut s.wear, damage);
             if kind == FROST {
                 // (a charged lance's frost the longer: see cast_frost)
-                s.slow = FROST_SLOW * scale.max(1.0);
+                s.slow = FROST_SLOW * scale.max(1.0) * if owner == HIS { frost } else { 1.0 };
             }
             if s.hp > 0 {
                 s.aggro[if owner == HIS { ENEMY_SLOTS } else { (owner as usize).min(ENEMY_SLOTS) }] += AGGRO_HIT;

@@ -17,6 +17,7 @@ pub struct Shield {
     pub amount: f32,    // 0 down .. 1 up
     pub since_hit: f32, // seconds since it stopped a spell
     pub wanted: bool,   // R held
+    pub cost: f32,      // its mana, times (his skills)
     raised: bool,       // paid for and held
     // the sounds of raising and dropping it (sfx kinds), for the caller
     pub sounds: Vec<usize>,
@@ -24,7 +25,8 @@ pub struct Shield {
 
 impl Default for Shield {
     fn default() -> Self {
-        Shield { amount: 0.0, since_hit: 10.0, wanted: false, raised: false, sounds: Vec::new() }
+        Shield {
+            cost: 1.0, amount: 0.0, since_hit: 10.0, wanted: false, raised: false, sounds: Vec::new() }
     }
 }
 
@@ -42,7 +44,7 @@ impl Shield {
     // A spell hit it.
     pub fn block(&mut self, mana: &mut Mana) {
         self.since_hit = 0.0;
-        if !mana.drain(BLOCK_COST) {
+        if !mana.drain(BLOCK_COST * self.cost) {
             self.drop_it();
         }
     }
@@ -52,13 +54,13 @@ impl Shield {
     pub fn update(&mut self, dt: f32, held: bool, can: bool, mana: &mut Mana) {
         self.since_hit += dt;
         let want = (self.wanted || held) && can;
-        if want && !self.raised && mana.spend(RAISE_COST) {
+        if want && !self.raised && mana.spend(RAISE_COST * self.cost) {
             self.raised = true;
             self.sounds.push(sfx::SHIELD_UP);
         } else if !want && self.raised {
             self.drop_it();
         }
-        if self.raised && !mana.drain(HOLD_COST * dt) {
+        if self.raised && !mana.drain(HOLD_COST * self.cost * dt) {
             self.drop_it();
         }
         self.amount += ((if self.raised { 1.0 } else { 0.0 }) - self.amount) * (1.0 - (-dt * UP_RATE).exp());
