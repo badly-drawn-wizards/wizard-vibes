@@ -144,7 +144,8 @@ pub fn kill_code(kind: u32, cut: Option<Cut>, pos: V3, yaw: f32) -> f32 {
 
 fn damage(kind: u32) -> f32 {
     match kind {
-        BURST | WIND | FROST | super::spells::WELL => 1.0,
+        BURST | WIND | FROST => 1.0,
+        super::spells::WELL => 1.5,
         MISSILE => 0.6,
         STRIKE => 2.0,
         _ => 0.0,

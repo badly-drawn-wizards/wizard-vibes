@@ -8,18 +8,16 @@
 // until he tries again (its button, Enter, or the reset button).
 
 use super::enemies::{EnemyEvent, Enemies, PLAYER_HP, WIZARD_SLOTS};
-use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA, SPELL_COST};
+use super::mana::{Mana, CHARGE_DRAIN, HEAL_DRAIN, MANA};
 use super::shield::Shield;
 use super::sfx;
 use super::spells::{
-    aim_ground, Lock, Sound, SpellEvent, Spells, ARCANE, CHARGE_TIME, FAMILIAR, FIRE, FROST_LANCE, GRAVITY, HEALING, LOCK_TIME, MARK, METEOR, STRIKE, WARMUP, WIND,
+    aim_ground, Cast, Lock, Sound, SpellEvent, Spells, ARCANE, SPELLS, CHARGE_TIME, FIRE, FROST_LANCE, GRAVITY, HEALING, LOCK_TIME, MARK, METEOR, STRIKE, WARMUP, WIND,
 };
 use super::vec::V3;
 use super::Rng;
 use crate::types::SfxEvent;
 
-const CAST_SOUND: [usize; super::spells::N_SPELLS] =
-    [sfx::CAST_FIRE, sfx::CAST_STRIKE, sfx::CAST_WIND, sfx::SHIELD_UP, sfx::CAST_WIND, sfx::CAST_STRIKE, sfx::CAST_FIRE, sfx::GUST, sfx::APPEAR];
 const HEAL_RATE: f32 = 1.4; // health a second, channelling
 const METEOR_CHANNEL: f32 = 1.2; // seconds a meteor takes to call down (held)
 const SOUL_MANA: f32 = 30.0;
@@ -204,7 +202,7 @@ impl Combat {
             if channel {
                 if spells.channel < 0.0 {
                     spells.channel = 0.0;
-                    self.sfx.push(sfx::here(CAST_SOUND[HEALING]));
+                    self.sfx.push(sfx::here(SPELLS[HEALING].sound));
                 }
                 spells.channel += m.dt;
                 spells.since_cast = 0.0;
@@ -241,9 +239,9 @@ impl Combat {
         // grows: short of it, it stops growing; none comes back while it is
         // held), and flies when let go, as charged (a press let go before it
         // could start: as soon as it can, uncharged)
-        let charged = selected == FIRE as usize || selected == FROST_LANCE;
+        let charged = SPELLS[selected].cast == Cast::Charged;
         if charged && can {
-            let cost = SPELL_COST[selected];
+            let cost = SPELLS[selected].cost;
             spells.charging = selected;
             if spells.charge < 0.0 && self.buffered > 0.0 && spells.ready(selected) {
                 if self.mana.value >= cost {
@@ -272,7 +270,7 @@ impl Combat {
                         spells.cast_fire(m.origin, m.dir, power, m.vel, rng);
                     }
                     spells.charge = -1.0;
-                    self.sfx.push(sfx::here(CAST_SOUND[selected]));
+                    self.sfx.push(sfx::here(SPELLS[selected].sound));
                 }
             }
         } else {
@@ -286,13 +284,13 @@ impl Combat {
         // before, and it is not cast
         // (the meteor likewise: held, called down on what it locks on to,
         // longer to lock; he cannot speed up meanwhile: see Game::step)
-        let striking = selected == STRIKE as usize || selected == METEOR;
+        let striking = SPELLS[selected].cast == Cast::Locked;
         if selected == METEOR {
             spells.lock_time = METEOR_CHANNEL * self.boosts.meteor;
         }
         if striking && can && m.casting {
             if spells.lock.is_none() && self.buffered > 0.0 && spells.ready(selected) {
-                if self.mana.value >= SPELL_COST[selected] {
+                if self.mana.value >= SPELLS[selected].cost {
                     spells.lock = Some(match spells.lock_target(m.origin, m.dir) {
                         Some((c, side)) => Lock { age: 0.0, target: Some(c), side, ground: None },
                         None => Lock { age: 0.0, target: None, side: -1, ground: Some((aim_ground(m.origin, m.dir), None)) },
@@ -317,7 +315,7 @@ impl Combat {
                 spells.lock = Some(lock);
                 if lock.age >= spells.lock_time {
                     spells.lock = None;
-                    if self.mana.spend(SPELL_COST[selected]) {
+                    if self.mana.spend(SPELLS[selected].cost) {
                         let at = lock.target.or(lock.ground.and_then(|(g, y)| y.map(|y| [g[0], y, g[2]])));
                         if selected == METEOR {
                             // (the ground not yet found: where he aimed, at
@@ -327,7 +325,7 @@ impl Combat {
                         } else {
                             spells.cast_at(m.origin, m.dir, at, rng);
                         }
-                        self.sfx.push(sfx::here(CAST_SOUND[selected]));
+                        self.sfx.push(sfx::here(SPELLS[selected].sound));
                     } else {
                         self.fizzle(m.time);
                     }
@@ -341,7 +339,7 @@ impl Combat {
         // one locks on to it again), each lock its cost as it is made, as
         // many as MISSILE_LOCKS; let go, a missile for each lock (none
         // locked: nothing cast, nothing spent)
-        if selected == ARCANE && can {
+        if SPELLS[selected].cast == Cast::Volley && can {
             if m.casting {
                 if !self.locking && self.buffered > 0.0 && spells.ready(ARCANE) {
                     self.locking = true;
@@ -354,8 +352,8 @@ impl Combat {
                     spells.since_cast = 0.0;
                     if self.lock_tick <= 0.0 && spells.missile_locks.len() < MISSILE_LOCKS + self.boosts.locks {
                         if let Some((side, _)) = spells.aimed(m.origin, m.dir, MISSILE_LOCK_CONE) {
-                            if self.mana.value >= SPELL_COST[ARCANE] {
-                                self.mana.spend(SPELL_COST[ARCANE]);
+                            if self.mana.value >= SPELLS[ARCANE].cost {
+                                self.mana.spend(SPELLS[ARCANE].cost);
                                 spells.missile_locks.push(side);
                                 self.lock_tick = MISSILE_LOCK_EVERY;
                                 self.sfx.push(sfx::here(sfx::MARK));
@@ -368,7 +366,7 @@ impl Combat {
             } else if std::mem::take(&mut self.locking) {
                 let locks = std::mem::take(&mut spells.missile_locks);
                 if !locks.is_empty() && spells.cast_missiles(m.origin, m.dir, &locks, rng) {
-                    self.sfx.push(sfx::here(CAST_SOUND[ARCANE]));
+                    self.sfx.push(sfx::here(SPELLS[ARCANE].sound));
                 }
             }
         } else {
@@ -377,8 +375,8 @@ impl Combat {
         }
         // the gravity well and spirit familiar: pressed, cast at once
         // (remembered a moment, as the others: see BUFFER)
-        if matches!(selected, GRAVITY | FAMILIAR) && can && self.buffered > 0.0 && spells.ready(selected) {
-            let cost = SPELL_COST[selected];
+        if SPELLS[selected].cast == Cast::Instant && can && self.buffered > 0.0 && spells.ready(selected) {
+            let cost = SPELLS[selected].cost;
             if self.mana.value >= cost {
                 let cast = match selected {
                     GRAVITY => spells.cast_well(m.origin, m.dir, rng),
@@ -386,7 +384,7 @@ impl Combat {
                 };
                 if cast {
                     self.mana.spend(cost);
-                    self.sfx.push(sfx::here(CAST_SOUND[selected]));
+                    self.sfx.push(sfx::here(SPELLS[selected].sound));
                 }
                 self.buffered = 0.0;
                 self.short = false;
@@ -414,10 +412,10 @@ impl Combat {
             spells.since_cast = 0.0;
         }
         if spinning && spells.gatling.next <= 0.0 && spells.ready(WIND as usize) {
-            let cost = SPELL_COST[WIND as usize];
+            let cost = SPELLS[WIND as usize].cost;
             if self.mana.value >= cost && spells.cast_blade(m.origin, m.dir, rng) {
                 self.mana.spend(cost);
-                self.sfx.push(sfx::here(CAST_SOUND[WIND as usize]));
+                self.sfx.push(sfx::here(SPELLS[WIND as usize].sound));
                 self.buffered = 0.0;
                 self.short = false;
                 let g = &mut spells.gatling;
@@ -660,7 +658,7 @@ mod tests {
         let m = Moment { casting: false, n: 0, ..moment() };
         c.update(&m, &mut s, &mut rng);
         assert_eq!(s.count(), 1);
-        assert_eq!(c.mana.value, MANA - SPELL_COST[FIRE as usize]);
+        assert_eq!(c.mana.value, MANA - SPELLS[FIRE as usize].cost);
         assert_eq!(c.sfx.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![sfx::CAST_FIRE]);
         // not from behind the shield
         let m = Moment { casting: true, shielding: true, n: 0, dt: 1.0, ..moment() };
@@ -684,7 +682,7 @@ mod tests {
         assert_eq!(s.charge, CHARGE_TIME);
         assert_eq!(s.count(), 0);
         let spent = MANA - c.mana.value;
-        let want = SPELL_COST[FIRE as usize] + CHARGE_DRAIN * CHARGE_TIME;
+        let want = SPELLS[FIRE as usize].cost + CHARGE_DRAIN * CHARGE_TIME;
         assert!((spent - want).abs() < 0.5, "{spent} {want}");
         // let go: it flies, faster for its charge, and carried along by
         // his own velocity; its charge, for the renderer, in its seed

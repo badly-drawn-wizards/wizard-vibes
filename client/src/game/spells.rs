@@ -26,20 +26,54 @@ use super::Rng;
 // His spells, by number (a spell's number is not a kind of spell in flight,
 // below, though the first three are the same).
 pub const N_SPELLS: usize = 9;
+
+// How a spell is cast (Combat::update goes by it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cast {
+    // held, charging at the orb; let go, it flies (the fire bolt, the frost lance)
+    Charged,
+    // held, locking on; landing once locked (the strike, the meteor)
+    Locked,
+    // held, his aim swept over them locking on; let go, one at each lock
+    // (the arcane missiles)
+    Volley,
+    // held, a run of blades, faster and faster (the wind blades)
+    Gatling,
+    // held, channelled (healing)
+    Channel,
+    // pressed, cast at once (the gravity well, the familiar)
+    Instant,
+}
+
+// A spell: its name; its mana (as it is cast: for a gatling's, each blade;
+// a volley's, each lock); its cooldown (seconds before it can be cast
+// again); how it is cast; and the sound of its casting.
+pub struct SpellDef {
+    pub name: fn(&dyn crate::i18n::Text) -> &'static str,
+    pub cost: f32,
+    pub cooldown: f32,
+    pub cast: Cast,
+    pub sound: usize,
+}
+
+pub const SPELLS: [SpellDef; N_SPELLS] = {
+    use super::sfx::*;
+    [
+        SpellDef { name: |t| t.spell_fire_bolt(), cost: 7.0, cooldown: 0.9, cast: Cast::Charged, sound: CAST_FIRE },
+        SpellDef { name: |t| t.spell_lightning_strike(), cost: 18.0, cooldown: 2.0, cast: Cast::Locked, sound: CAST_STRIKE },
+        SpellDef { name: |t| t.spell_wind_blade(), cost: 2.5, cooldown: 0.0, cast: Cast::Gatling, sound: CAST_WIND },
+        SpellDef { name: |t| t.spell_healing(), cost: 0.0, cooldown: 0.0, cast: Cast::Channel, sound: SHIELD_UP },
+        SpellDef { name: |t| t.spell_frost_lance(), cost: 10.0, cooldown: 1.1, cast: Cast::Charged, sound: CAST_WIND },
+        SpellDef { name: |t| t.spell_arcane_missiles(), cost: 4.0, cooldown: 3.0, cast: Cast::Volley, sound: CAST_STRIKE },
+        SpellDef { name: |t| t.spell_meteor(), cost: 25.0, cooldown: 8.0, cast: Cast::Locked, sound: CAST_FIRE },
+        SpellDef { name: |t| t.spell_gravity_well(), cost: 15.0, cooldown: 8.0, cast: Cast::Instant, sound: GUST },
+        SpellDef { name: |t| t.spell_spirit_familiar(), cost: 20.0, cooldown: 15.0, cast: Cast::Instant, sound: APPEAR },
+    ]
+};
+
 // Each spell's name, in the language chosen.
 pub fn spell_name(i: usize) -> &'static str {
-    let t = crate::i18n::text();
-    match i {
-        0 => t.spell_fire_bolt(),
-        1 => t.spell_lightning_strike(),
-        2 => t.spell_wind_blade(),
-        3 => t.spell_healing(),
-        FROST_LANCE => t.spell_frost_lance(),
-        ARCANE => t.spell_arcane_missiles(),
-        METEOR => t.spell_meteor(),
-        GRAVITY => t.spell_gravity_well(),
-        _ => t.spell_spirit_familiar(),
-    }
+    (SPELLS[i.min(N_SPELLS - 1)].name)(crate::i18n::text())
 }
 pub const FROST_LANCE: usize = 4;
 pub const ARCANE: usize = 5;
@@ -111,7 +145,7 @@ const SPIRIT_PACE: f32 = 1.2; // his strike's lightning jumping on to another en
 // damage)
 const CHAIN_RANGE: f32 = 9.0;
 
-const CHAIN_DAMAGE: f32 = 0.5;
+const CHAIN_DAMAGE: f32 = 0.4;
 // (a soul's tail: how much of its path it trails, units, and how far apart
 // the points of its path are kept)
 const TAIL: f32 = 1.8;
@@ -122,7 +156,6 @@ const LIFE: [f32; 18] = [3.0, 0.9, 1.5, 1.4, 1.1, 1.1, 1e3, LOCK_TIME, 1.0, 0.5,
 pub const WARMUP: f32 = 0.5; // seconds wind blades warm up before the first flies
 pub const LOCK_TIME: f32 = 0.6; // seconds his strike takes to lock on (cast held)
 const SPEED: [f32; 4] = [30.0, 0.0, 24.0, 0.0]; // units/s, by kind (fire, strike, wind)
-const COOLDOWN: [f32; N_SPELLS] = [0.9, 2.0, 0.0, 0.0, 1.1, 3.0, 8.0, 8.0, 15.0]; // seconds before the spell's next cast (wind: see Gatling)
 const GATLING_LIFE: f32 = 0.75; // seconds a gatling's blade flies (then fades, not bursting)
 const STRIKE_RANGE: f32 = 45.0; // furthest a strike lands
 const STRIKE_HEIGHT: f32 = 25.0; // it comes down from this far above the orb
@@ -360,7 +393,7 @@ impl Spells {
 
     // How much of spell i's cooldown is left (1 just cast .. 0 ready).
     pub fn cooling(&self, i: usize) -> f32 {
-        if COOLDOWN[i] > 0.0 { (self.cooldowns[i] / COOLDOWN[i]).clamp(0.0, 1.0) } else { 0.0 }
+        if SPELLS[i].cooldown > 0.0 { (self.cooldowns[i] / SPELLS[i].cooldown).clamp(0.0, 1.0) } else { 0.0 }
     }
 
     // Casts one of his gatling's wind blades from `origin` along the unit
@@ -390,7 +423,7 @@ impl Spells {
         s.vel = super::vec::add(s.vel.map(|v| v * k), carry);
         // (the renderer reads its charge from its seed: see pack)
         s.seed += 100000.0 * (100.0 * s.power).round();
-        self.cooldowns[FIRE as usize] = COOLDOWN[FIRE as usize];
+        self.cooldowns[FIRE as usize] = SPELLS[FIRE as usize].cooldown;
         self.since_cast = 0.0;
         true
     }
@@ -551,7 +584,7 @@ impl Spells {
     }
 
     fn cooled(&mut self, spell: usize) {
-        self.cooldowns[spell] = COOLDOWN[spell];
+        self.cooldowns[spell] = SPELLS[spell].cooldown;
         self.since_cast = 0.0;
     }
 
@@ -561,7 +594,7 @@ impl Spells {
         if !self.launch(STRIKE, origin, dir, HIS, at, rng) {
             return false;
         }
-        self.cooldowns[STRIKE as usize] = COOLDOWN[STRIKE as usize];
+        self.cooldowns[STRIKE as usize] = SPELLS[STRIKE as usize].cooldown;
         self.since_cast = 0.0;
         true
     }
