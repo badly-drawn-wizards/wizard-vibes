@@ -41,11 +41,19 @@ edit the app and it is patched where it runs.
 Tagged versions (`v*`) are built for Linux, Windows and macOS by
 `.github/workflows/release.yml` and published on the
 [releases page](https://github.com/badly-drawn-wizards/wizard-vibes/releases):
-unpack one and run `wizard` (`wizard.exe`) from it; the shader and
-parameters it needs are beside it. (The macOS build is not signed: allow it
+unpack one and run `wizard` (`wizard.exe`) from it; the shaders it needs
+are beside it. (The macOS build is not signed: allow it
 under System Settings > Privacy & Security.)
 
 ## Running
+
+With Nix, the app (its shaders built in, with rust-gpu) is the flake's
+default package:
+
+```sh
+nix run github:badly-drawn-wizards/wizard-vibes   # or, here: nix run
+nix build .#wizard-dev                            # the dev server (run from the repository)
+```
 
 Everything builds in the flake's dev shell (the first `nix develop` fetches
 rust-gpu's nightly toolchain).
