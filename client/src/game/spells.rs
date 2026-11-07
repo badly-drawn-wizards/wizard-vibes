@@ -119,6 +119,18 @@ pub struct Target {
     pub side: i32,
 }
 
+// (a wizard's body's sphere is this big, its platform's and a shield's
+// bigger: see enemies::spheres)
+pub const BODY_R: f32 = 0.9;
+
+impl Target {
+    // Whether it is a wizard's body (not the platform under it, nor a
+    // shield): what aiming aims at.
+    pub fn body(&self) -> bool {
+        self.r <= BODY_R
+    }
+}
+
 // Where his aim meets sea level, within a strike's range (the probe finds
 // the ground beneath).
 pub fn aim_ground(origin: V3, dir: V3) -> V3 {
@@ -420,7 +432,7 @@ impl Spells {
     pub fn aimed(&self, origin: V3, dir: V3, cone: f32) -> Option<(i32, V3)> {
         self.targets
             .iter()
-            .filter(|t| t.side >= 0 && t.r < 1.0 && dist(t.c, origin) < STRIKE_RANGE * 1.5)
+            .filter(|t| t.side >= 0 && t.body() && dist(t.c, origin) < STRIKE_RANGE * 1.5)
             .map(|t| {
                 let v = sub(t.c, origin);
                 ((dot(v, dir) / len(v)).clamp(-1.0, 1.0).acos(), t)
@@ -662,7 +674,7 @@ impl Spells {
                     for _ in 0..CHAIN_JUMPS {
                         let next = targets
                             .iter()
-                            .filter(|t| t.side >= 0 && t.r < 1.0 && !struck.contains(&t.side) && dist(t.c, from) < CHAIN_RANGE)
+                            .filter(|t| t.side >= 0 && t.body() && !struck.contains(&t.side) && dist(t.c, from) < CHAIN_RANGE)
                             .min_by(|a, b| dist(a.c, from).total_cmp(&dist(b.c, from)));
                         let Some(t) = next else { break };
                         events.push(SpellEvent::Hit { side: t.side, kind: STRIKE, owner: HIS, cut: None, scale: CHAIN_DAMAGE });
@@ -712,7 +724,7 @@ impl Spells {
             s.age += dt;
             // (an arcane missile turns towards its target, if it still stands)
             if s.kind == MISSILE {
-                if let Some(t) = targets.iter().filter(|t| t.side == s.target && t.r < 1.0).min_by(|a, b| dist(a.c, s.pos).total_cmp(&dist(b.c, s.pos))) {
+                if let Some(t) = targets.iter().filter(|t| t.side == s.target && t.body()).min_by(|a, b| dist(a.c, s.pos).total_cmp(&dist(b.c, s.pos))) {
                     let want = super::vec::scale(MISSILE_SPEED / dist(t.c, s.pos).max(1e-3), sub(t.c, s.pos));
                     let k = 1.0 - (-dt * MISSILE_TURN).exp();
                     for j in 0..3 {
@@ -743,7 +755,7 @@ impl Spells {
                 s.next_shot -= dt;
                 if s.next_shot <= 0.0 {
                     s.next_shot = SPIRIT_PACE;
-                    let near = targets.iter().filter(|t| t.side >= 0 && t.r < 1.0 && dist(t.c, at) < SPIRIT_REACH).min_by(|a, b| dist(a.c, at).total_cmp(&dist(b.c, at)));
+                    let near = targets.iter().filter(|t| t.side >= 0 && t.body() && dist(t.c, at) < SPIRIT_REACH).min_by(|a, b| dist(a.c, at).total_cmp(&dist(b.c, at)));
                     if let Some(t) = near {
                         shots.push((at, super::vec::normalise(sub(t.c, at)), t.side));
                     }

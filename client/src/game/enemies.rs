@@ -123,7 +123,7 @@ const SHIELD_R: f32 = wizard_shader::shading::shield_radius;
 // The spheres that stand for a wizard on his platform at `pos` (the
 // platform's top): his body, and the platform.
 pub fn spheres(pos: V3, side: i32) -> [Target; 2] {
-    [Target { c: add(pos, [0.0, 1.1, 0.0]), r: 0.9, side }, Target { c: add(pos, [0.0, -0.8, 0.0]), r: 1.4, side }]
+    [Target { c: add(pos, [0.0, 1.1, 0.0]), r: super::spells::BODY_R, side }, Target { c: add(pos, [0.0, -0.8, 0.0]), r: 1.4, side }]
 }
 
 // What happened, for the sound and the shield.

@@ -163,6 +163,12 @@ pub struct Game {
     clock: f32,
     history: std::collections::VecDeque<(f32, FreeFlight)>,
     rewound: Option<Instant>,
+    // the aim assist, smoothed: how far it turns his aim, and towards
+    // which enemy, where (see assist)
+    assist_k: f32,
+    assist_at: Option<(i32, V3)>,
+    // his velocity as the assist leads by it: smoothed (see LEAD_EASE)
+    lead_vel: V3,
     // how far he banks into his turn (as the shader's Flight: his frame,
     // and the camera with it, rolled by it; see to_world)
     bank: f32,
@@ -347,6 +353,9 @@ impl Game {
             cross: None,
             bank: 0.0,
             give_up_hold: None,
+            assist_k: 0.0,
+            assist_at: None,
+            lead_vel: [0.0; 3],
             clock: 0.0,
             history: std::collections::VecDeque::new(),
             rewound: None,
@@ -535,12 +544,19 @@ impl Game {
 
     // Aim assist: with an enemy near his aim (within ASSIST_CONE of the
     // view), a fire bolt, wind blade or frost lance is turned towards where
-    // the enemy will be when the spell gets there (its motion against his,
-    // for a bolt he carries along): all the way within the cone's inner
-    // half, less and less beyond. Where the spell then goes shows as the
+    // the enemy's body (its middle, not its platform's) will be when the
+    // spell gets there (its motion against his, for a bolt he carries
+    // along): all the way within the cone's inner half, less and less
+    // beyond. Both how far and where are eased over ASSIST_EASE seconds (his
+    // own speed, from frame to frame, is a jittery thing to lead by), so it
+    // neither jumps nor shakes. Where the spell then goes shows as the
     // crosshair's cross (see cross).
-    fn assist(&mut self, origin: V3, dir: V3) -> V3 {
+    fn assist(&mut self, origin: V3, dir: V3, dt: f32) -> V3 {
         const ASSIST_CONE: f32 = 0.12;
+        const ASSIST_EASE: f32 = 0.12;
+        const LEAD_EASE: f32 = 0.3;
+        let ease = 1.0 - (-dt / ASSIST_EASE).exp();
+        self.lead_vel = vec::add(self.lead_vel, vec::scale(1.0 - (-dt / LEAD_EASE).exp(), vec::sub(self.vel, self.lead_vel)));
         self.cross = None;
         let sel = self.spells.selected as u32;
         let speed = if sel == spells::FIRE {
@@ -550,6 +566,8 @@ impl Game {
         } else if self.spells.selected == spells::FROST_LANCE {
             spells::FROST_SPEED
         } else {
+            self.assist_k = 0.0;
+            self.assist_at = None;
             return dir;
         };
         let (eye, view) = self.eye_and_view();
@@ -557,22 +575,41 @@ impl Game {
             .spells
             .targets
             .iter()
-            .filter(|t| t.side >= 0 && t.r < 1.0)
+            .filter(|t| t.side >= 0 && t.body())
             .map(|t| {
                 let v = vec::sub(t.c, eye);
                 ((vec::dot(v, view) / vec::len(v)).clamp(-1.0, 1.0).acos(), t)
             })
             .filter(|(a, _)| *a < ASSIST_CONE)
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        let Some((angle, t)) = best else { return dir };
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(a, t)| (a, *t));
+        // (none: the help eases off, towards where it last was)
+        let Some((angle, t)) = best else {
+            self.assist_k *= 1.0 - ease;
+            let Some((_, at)) = self.assist_at.filter(|_| self.assist_k > 0.02) else {
+                self.assist_at = None;
+                return dir;
+            };
+            let to = vec::normalise(vec::sub(at, origin));
+            return vec::normalise(vec::add(vec::scale(1.0 - self.assist_k, dir), vec::scale(self.assist_k, to)));
+        };
         let ev = self.combat.enemies.velocity(t.side).unwrap_or([0.0; 3]);
-        let rel = if sel == spells::FIRE { vec::sub(ev, self.vel) } else { ev };
+        let rel = if sel == spells::FIRE { vec::sub(ev, self.lead_vel) } else { ev };
         let mut at = t.c;
         for _ in 0..3 {
             let time = vec::dist(at, origin) / speed;
             at = vec::add(t.c, vec::scale(time, rel));
         }
+        // (eased: the same enemy, towards its new lead; another, from its
+        // body, the help easing over)
+        let at = match self.assist_at {
+            Some((side, was)) if side == t.side => vec::add(was, vec::scale(ease, vec::sub(at, was))),
+            _ => at,
+        };
+        self.assist_at = Some((t.side, at));
         let k = (2.0 - 2.0 * angle / ASSIST_CONE).clamp(0.0, 1.0);
+        self.assist_k += (k - self.assist_k) * ease;
+        let k = self.assist_k;
         let to = vec::normalise(vec::sub(at, origin));
         let d = vec::normalise(vec::add(vec::scale(1.0 - k, dir), vec::scale(k, to)));
         self.cross = Some(vec::add(origin, vec::scale(vec::dist(at, origin), d)));
@@ -607,7 +644,7 @@ impl Game {
             .spells
             .targets
             .iter()
-            .filter(|t| t.side >= 0)
+            .filter(|t| t.side >= 0 && t.body())
             .filter_map(|t| {
                 // (the ray against its sphere: the nearer crossing, ahead)
                 let v = vec::sub(t.c, eye);
@@ -939,7 +976,7 @@ impl Game {
             self.vel = if vec::len(v) < 60.0 { v } else { [0.0; 3] };
             self.last_pos = Some(him);
         }
-        let dir = self.assist(origin, dir);
+        let dir = self.assist(origin, dir, game_dt);
         self.spells.ffa = self.ffa;
         self.combat.boosts = self.skills.boosts();
         // (the spells he has, in his slots; one not in them out of his hand)
@@ -2255,6 +2292,35 @@ mod tests {
         g.pause_or_hold();
         frame(&ctx, &mut g, &p, vec![]);
         assert!(g.paused && g.give_up_hold.is_none());
+    }
+
+    #[test]
+    fn the_assist_leads_the_body_steadily() {
+        let mut g = Game::new(None);
+        g.spells.select(0);
+        let (eye, view) = g.eye_and_view();
+        // (an enemy's body just off his aim, its platform below it)
+        let c = vec::add(eye, vec::scale(30.0, view));
+        let c = vec::add(c, [0.3, 0.0, 0.0]);
+        g.spells.targets = enemies::spheres(vec::sub(c, [0.0, 1.1, 0.0]), 0).to_vec();
+        let (origin, dir) = g.cast_from();
+        let mut last: Option<V3> = None;
+        let mut most: f32 = 0.0;
+        for k in 0..120 {
+            // (his own speed, read from frame to frame: jittery)
+            g.vel = [if k % 2 == 0 { 4.0 } else { -4.0 }, 0.0, 0.0];
+            let d = g.assist(origin, dir, 1.0 / 60.0);
+            if let Some(l) = last.filter(|_| k > 30) {
+                most = most.max(vec::dot(l, d).clamp(-1.0, 1.0).acos());
+            }
+            last = Some(d);
+        }
+        // (settled on the body, not the platform: the cross within its
+        // sphere, and steady from frame to frame)
+        let cross = g.cross.unwrap();
+        let to_body = vec::normalise(vec::sub(c, origin));
+        assert!(vec::dot(vec::normalise(vec::sub(cross, origin)), to_body) > 0.999, "{cross:?}");
+        assert!(most < 0.002, "{most}");
     }
 
     #[test]
