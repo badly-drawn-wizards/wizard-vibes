@@ -78,14 +78,66 @@ fn main() -> eframe::Result {
         wgpu_options: wizard::app::wgpu_options(),
         ..Default::default()
     };
-    eframe::run_native(
+    // (our own event loop, eframe's app run in it: asking it first, as it
+    // starts, for the monitors: the fastest's refresh is the highest
+    // target frame rate)
+    let event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build().unwrap_or_else(|e| die(&e.to_string()));
+    let app = eframe::create_native(
         "wizard",
         options,
         Box::new(move |cc| {
             let source = wizard::source::Source::new(root, true, cc.egui_ctx.clone());
             Ok(Box::new(wizard::app::App::new(cc, source)))
         }),
-    )
+        &event_loop,
+    );
+    let mut app = Monitors { app, asked: false };
+    event_loop.run_app(&mut app).map_err(|e| eframe::Error::AppCreation(Box::new(e)))
+}
+
+// eframe's app, passed everything, but first asked of the monitors (see
+// main).
+#[cfg(not(target_arch = "wasm32"))]
+struct Monitors<'a> {
+    app: eframe::EframeWinitApplication<'a>,
+    asked: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl winit::application::ApplicationHandler<eframe::UserEvent> for Monitors<'_> {
+    fn new_events(&mut self, el: &winit::event_loop::ActiveEventLoop, cause: winit::event::StartCause) {
+        if !std::mem::replace(&mut self.asked, true) {
+            if let Some(mhz) = el.available_monitors().filter_map(|m| m.refresh_rate_millihertz()).max() {
+                log::info!("fastest monitor: {:.0} Hz", mhz as f32 / 1000.0);
+                wizard::scale::set_display_hz((mhz as f32 / 1000.0).round());
+            }
+        }
+        self.app.new_events(el, cause);
+    }
+    fn resumed(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        self.app.resumed(el);
+    }
+    fn user_event(&mut self, el: &winit::event_loop::ActiveEventLoop, event: eframe::UserEvent) {
+        self.app.user_event(el, event);
+    }
+    fn window_event(&mut self, el: &winit::event_loop::ActiveEventLoop, id: winit::window::WindowId, event: winit::event::WindowEvent) {
+        self.app.window_event(el, id, event);
+    }
+    fn device_event(&mut self, el: &winit::event_loop::ActiveEventLoop, id: winit::event::DeviceId, event: winit::event::DeviceEvent) {
+        self.app.device_event(el, id, event);
+    }
+    fn about_to_wait(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        self.app.about_to_wait(el);
+    }
+    fn suspended(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        self.app.suspended(el);
+    }
+    fn exiting(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        self.app.exiting(el);
+    }
+    fn memory_warning(&mut self, el: &winit::event_loop::ActiveEventLoop) {
+        self.app.memory_warning(el);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

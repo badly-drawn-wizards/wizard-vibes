@@ -560,11 +560,11 @@ impl App {
             nav.row();
             ui.horizontal(|ui| {
                 let mut fps = scale.target_fps;
-                let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(&mut fps, crate::scale::TARGET_MIN..=crate::scale::TARGET_MAX).step_by(1.0).show_value(false));
+                let r = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::Slider::new(&mut fps, crate::scale::TARGET_MIN..=crate::scale::target_max()).step_by(1.0).show_value(false));
                 let steps = nav.slider(ui, &r);
                 ui.monospace(format!("{fps:>3.0}"));
                 if r.changed() || steps != 0 {
-                    scale.set_target((fps + 5.0 * steps as f32).clamp(crate::scale::TARGET_MIN, crate::scale::TARGET_MAX));
+                    scale.set_target((fps + 5.0 * steps as f32).clamp(crate::scale::TARGET_MIN, crate::scale::target_max()));
                 }
             });
             ui.end_row();
@@ -785,6 +785,27 @@ impl App {
         let ctx = ui.ctx().clone();
         #[cfg(not(target_arch = "wasm32"))]
         self.screenshot(&ctx);
+        // (natively, a target under the fastest monitor's refresh: frames
+        // not held to the display's (vsync would let the frame rate be only
+        // the refresh over a whole number: 60, 30, at 60 Hz, so a target
+        // between could not be held), mailbox where there is one (no
+        // tearing), and no faster than the target, the rest of the frame's
+        // time slept; at it, vsync)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let vsync = self.scale.target_fps >= crate::scale::target_max() - 0.5;
+            if let Some(mut c) = frame.wgpu_surface_config() {
+                let want = if vsync { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
+                if c.present_mode != want {
+                    c.present_mode = want;
+                    frame.set_wgpu_surface_config(c);
+                }
+            }
+            let rest = 1.0 / self.scale.target_fps.max(1.0) - (Instant::now() - self.last).as_secs_f32();
+            if !vsync && rest > 0.0 {
+                std::thread::sleep(std::time::Duration::from_secs_f32(rest));
+            }
+        }
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;

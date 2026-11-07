@@ -17,7 +17,22 @@ pub const MAX: f32 = 1.0;
 const STEP: f32 = 1.0 / 32.0;
 pub const TARGET_FPS: f32 = 60.0;
 pub const TARGET_MIN: f32 = 30.0;
+// (the highest target, unless the monitors' fastest refresh is known: see
+// set_display_hz)
 pub const TARGET_MAX: f32 = 144.0;
+
+// The fastest refresh rate of the monitors (natively, as the app starts:
+// the most a target can usefully be).
+static DISPLAY_HZ: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+
+pub fn set_display_hz(hz: f32) {
+    let _ = DISPLAY_HZ.set(hz);
+}
+
+// The highest target frame rate: the fastest monitor's refresh.
+pub fn target_max() -> f32 {
+    DISPLAY_HZ.get().copied().filter(|&hz| hz >= TARGET_MIN).unwrap_or(TARGET_MAX)
+}
 const SLOW: f32 = 1.12; // of the target: too slow
 const FAST: f32 = 1.04; // of the target: at it (or faster)
 const SMOOTH: f32 = 0.25; // the frame time's smoothing, in seconds
@@ -70,7 +85,7 @@ impl RenderScale {
         if !self.dynamic || !counting || dt <= 0.0 || dt >= HITCH {
             return;
         }
-        let target = 1.0 / self.target_fps.clamp(TARGET_MIN, TARGET_MAX);
+        let target = 1.0 / self.target_fps.clamp(TARGET_MIN, target_max());
         self.frame_time += (dt - self.frame_time) * (1.0 - (-dt / SMOOTH).exp());
         self.ceiling_for -= dt;
         if self.ceiling_for <= 0.0 {
@@ -123,7 +138,7 @@ impl RenderScale {
 
     // A new target frame rate (judged afresh).
     pub fn set_target(&mut self, fps: f32) {
-        self.target_fps = fps.clamp(TARGET_MIN, TARGET_MAX).round();
+        self.target_fps = fps.clamp(TARGET_MIN, target_max()).round();
         self.ceiling = MAX + STEP;
         self.frame_time = 1.0 / self.target_fps;
     }

@@ -32,6 +32,8 @@ wizard-shader = { path = "../native/shader" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 keepawake = "0.6"
+# (the monitors' refresh rates, for the target frame rate's range)
+winit = { version = "0.30", default-features = false }
 # (connects to dx for Subsecond's patches; nothing without dx)
 dioxus-devtools = "=0.7.10"
 pollster = "0.4"
