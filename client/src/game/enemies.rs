@@ -95,6 +95,9 @@ const VOLLEY: f32 = 0.14; // radians between a boss's bolts
 // (seconds after a dodge before it can dodge again, a plain one's: see
 // Rank::dodge_pace)
 const DODGE_COOLDOWN: f32 = 2.5;
+// (seconds it takes to react to a spell it sees coming, give or take, the
+// more skilled the sooner)
+const REACT: f32 = 0.3;
 const APPEAR: f32 = wizard_shader::enemies::appear_time; // seconds
 const REVIVE_GRACE: f32 = 2.0; // seconds he cannot be hurt after a chrono revive
 const RESPAWN: f32 = 5.0; // seconds after a defeat until the next one appears
@@ -283,6 +286,9 @@ struct Slot {
     dodge: f32, // seconds of dodging left
     dodge_dir: V3,
     dodge_cool: f32, // seconds until it can dodge again (see DODGE_COOLDOWN)
+    // a spell seen coming: the seconds until it reacts, and which way it
+    // will go (see REACT)
+    react: Option<(f32, V3)>,
     strafe: f32, // which way it drifts round him (-1 or 1), and for how long more
     strafe_t: f32,
     target: i32, // whom it casts at: him (HIS), or free for all another
@@ -310,6 +316,7 @@ impl Slot {
             dodge: 0.0,
             dodge_dir: [0.0; 3],
             dodge_cool: 0.0,
+            react: None,
             strafe: 1.0,
             strafe_t: 0.0,
             target: HIS,
@@ -658,7 +665,18 @@ impl Enemies {
                 // (his bolts and blades coming its way: out of their path,
                 // if it notices, the more skilled the sooner)
                 s.dodge_cool -= dt;
-                if s.dodge <= 0.0 && s.dodge_cool <= 0.0 {
+                // (a spell seen a moment ago: now it moves)
+                if let Some((left, dir)) = s.react {
+                    if left - dt <= 0.0 {
+                        s.react = None;
+                        s.dodge = 0.45;
+                        s.dodge_dir = dir;
+                        s.dodge_cool = DODGE_COOLDOWN * s.rank.dodge_pace();
+                    } else {
+                        s.react = Some((left - dt, dir));
+                    }
+                }
+                if s.dodge <= 0.0 && s.dodge_cool <= 0.0 && s.react.is_none() {
                     let chest = add(s.pos, [0.0, 1.1, 0.0]);
                     for &(p, v) in &missiles {
                         let rel = sub(chest, p);
@@ -670,9 +688,10 @@ impl Enemies {
                         let miss = sub(rel, scale(t, v));
                         if len(miss) < DODGE_BY && rng.uniform() < skill * dt * 8.0 {
                             let side = if len(miss) > 1e-3 { normalise(miss) } else { normalise([v[2], 0.0, -v[0]]) };
-                            s.dodge = 0.45;
-                            s.dodge_dir = scale(TOP_SPEED * 1.4, side);
-                            s.dodge_cool = DODGE_COOLDOWN * s.rank.dodge_pace();
+                            // (it takes a moment to react: less, the more skilled)
+                            let delay = REACT * (1.3 - 0.6 * skill) * (0.8 + 0.4 * rng.uniform());
+                            s.react = Some((delay, scale(TOP_SPEED * 1.4, side)));
+                            break;
                         }
                     }
                 }
@@ -877,10 +896,11 @@ mod tests {
         e.update(2.0, 1, 1, 0.0, him, &mut spells, &mut rng);
         let start = e.slots[0].pos;
         let chest = add(start, [0.0, 1.1, 0.0]);
-        let from = add(chest, scale(-12.0, normalise(sub(chest, him))));
+        // (from far enough off that it has time to react, then to move)
+        let from = add(chest, scale(-20.0, normalise(sub(chest, him))));
         spells.launch(FIRE, from, normalise(sub(chest, from)), HIS, None, &mut rng);
         let mut dodged = false;
-        for _ in 0..20 {
+        for _ in 0..40 {
             e.update(1.0 / 60.0, 1, 1, 0.0, him, &mut spells, &mut rng);
             spells.update(1.0 / 60.0, false);
             dodged |= e.slots[0].dodge > 0.0;
