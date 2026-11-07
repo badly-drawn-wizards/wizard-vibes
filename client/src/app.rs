@@ -989,10 +989,10 @@ pub fn url_param(name: &str) -> Option<String> {
         let search = web_sys::window()?.location().search().ok()?;
         search.trim_start_matches('?').split('&').find_map(|kv| kv.strip_prefix(name)?.strip_prefix('=')).map(String::from)
     }
+    // (natively, from the environment: WIZARD_OPEN=tree for ?open=tree)
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = name;
-        None
+        std::env::var(format!("WIZARD_{}", name.to_uppercase())).ok()
     }
 }
 

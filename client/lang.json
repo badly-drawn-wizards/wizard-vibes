@@ -12,7 +12,7 @@
       "title": "Skill tree",
       "next_level": "Next level: {souls} souls",
       "learnt": "Learnt in full",
-      "needs": "Needs {skill}",
+      "needs": "Needs {skill} {level}",
       "learn": "Learn",
       "back": "Back"
     },
@@ -454,7 +454,7 @@
       "title": "Árbol de habilidades",
       "next_level": "Siguiente nivel: {souls} almas",
       "learnt": "Aprendida del todo",
-      "needs": "Requiere {skill}",
+      "needs": "Necesita {skill} {level}",
       "learn": "Aprender",
       "back": "Volver"
     },

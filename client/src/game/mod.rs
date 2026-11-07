@@ -1935,7 +1935,7 @@ impl Game {
             // a line that breathes; else faint and dashed
             let now = ui.input(|i| i.time) as f32;
             for (k, s) in SKILLS.iter().enumerate() {
-                if let Some(n) = s.needs.and_then(|n| SKILLS.iter().position(|x| x.id == n)) {
+                if let Some(n) = s.parent().and_then(|n| SKILLS.iter().position(|x| x.id == n)) {
                     let pts = edge_curve(at(n), at(k), 32.0);
                     if self.skills.level(s.id) > 0 {
                         p.add(egui::Shape::line(pts.clone(), egui::Stroke::new(9.0, blue.gamma_multiply(0.12))));
@@ -1960,6 +1960,27 @@ impl Game {
                                 p.line_segment([*a, *b], egui::Stroke::new(1.2, hud::BORDER));
                             }
                         }
+                    }
+                }
+            }
+            // (and the other needs, each level's on another skill's: a
+            // faint dotted thread, lit once met, between their rims)
+            for (k, s) in SKILLS.iter().enumerate() {
+                for (i, &(id, lvl)) in s.needs.iter().flat_map(|n| n.iter()).enumerate() {
+                    if (i == 0 && Some(id) == s.parent()) || id == "soul" {
+                        continue;
+                    }
+                    let Some(n) = SKILLS.iter().position(|x| x.id == id) else { continue };
+                    let (a, b) = (at(n), at(k));
+                    let d = (b - a).normalized();
+                    let (a, b) = (a + d * 32.0, b - d * 32.0);
+                    let met = self.skills.level(id) >= lvl;
+                    let colour = if met { blue.gamma_multiply(0.55) } else { hud::BORDER.gamma_multiply(0.7) };
+                    let len = (b - a).length();
+                    let mut x = 0.0;
+                    while x < len {
+                        p.circle_filled(a + d * x, 1.3, colour);
+                        x += 7.0;
                     }
                 }
             }
@@ -2005,8 +2026,8 @@ impl Game {
                     p.circle_stroke(c, r, edge);
                 }
                 hud::paint_skill(&p, c, 0.6 * r, s.id, ink);
-                for l in 0..s.levels {
-                    let x = c.x + (l as f32 - 0.5 * (s.levels - 1) as f32) * 10.0;
+                for l in 0..s.levels() {
+                    let x = c.x + (l as f32 - 0.5 * (s.levels() - 1) as f32) * 10.0;
                     let pc = egui::pos2(x, c.y + r + 8.0);
                     if l < level {
                         p.circle_filled(pc, 3.0, blue);
@@ -2027,10 +2048,10 @@ impl Game {
             let level = self.skills.level(s.id);
             let state = match self.skills.cost(s) {
                 Some(c) => crate::i18n::text().tree_next_level(c),
-                None if level >= s.levels => text().tree_learnt().to_string(),
-                None => crate::i18n::text().tree_needs(s.needs.and_then(skills::skill).map_or("", |n| skills::shown(n).0)),
+                None if level >= s.levels() => text().tree_learnt().to_string(),
+                None => self.skills.wanting(s).map_or(String::new(), |(n, at)| crate::i18n::text().tree_needs(skills::shown(n).0, at)),
             };
-            let lines = [(format!("{name}  {level}/{}", s.levels), 1.4 * hud::FONT, hud::FG), (what.to_string(), hud::FONT, hud::FG), (state, hud::FONT, hud::DIM)];
+            let lines = [(format!("{name}  {level}/{}", s.levels()), 1.4 * hud::FONT, hud::FG), (what.to_string(), hud::FONT, hud::FG), (state, hud::FONT, hud::DIM)];
             let mut y = area.bottom() - 150.0;
             for (text, size, colour) in lines {
                 let g = p.layout_no_wrap(text, egui::FontId::proportional(size), colour);

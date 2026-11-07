@@ -10,35 +10,52 @@ pub struct Skill {
     pub id: &'static str,
     pub name: fn(&dyn Text) -> &'static str,
     pub what: fn(&dyn Text) -> &'static str, // a level's effect
-    pub levels: u8,
-    pub cost: u64, // the first level's; each after costs twice the one before
-    pub needs: Option<&'static str>,
+    // each level's cost, in souls (as many levels as there are costs)
+    pub costs: &'static [u64],
+    // what each level needs first (needs[0] the first level's, its first
+    // the skill it hangs from in the tree), as (skill, its level): some
+    // levels need another skill's, so the branches interleave
+    pub needs: &'static [&'static [(&'static str, u8)]],
     pub at: (f32, f32), // where in the tree (across, down: a grid's cells)
 }
 
+impl Skill {
+    pub fn levels(&self) -> u8 {
+        self.costs.len() as u8
+    }
+
+    // The skill it hangs from in the tree (its first level's first need).
+    pub fn parent(&self) -> Option<&'static str> {
+        self.needs.first().and_then(|n| n.first()).map(|n| n.0)
+    }
+}
+
+// (each skill's levels' costs rise less than doubling, unevenly; the
+// branches cross: vitality's third level waits on healing, healing's
+// mending on more vitality, and so on)
 pub const SKILLS: &[Skill] = &[
-    Skill { id: "soul", name: |t| t.skill_soul_name(), what: |t| t.skill_soul_what(), levels: 1, cost: 1, needs: None, at: (0.0, 0.0) },
-    Skill { id: "vitality", name: |t| t.skill_vitality_name(), what: |t| t.skill_vitality_what(), levels: 3, cost: 3, needs: Some("soul"), at: (-1.0, -1.0) },
-    Skill { id: "healing", name: |t| t.spell_healing(), what: |t| t.skill_healing_what(), levels: 1, cost: 6, needs: Some("vitality"), at: (-1.0, -2.0) },
-    Skill { id: "mending", name: |t| t.skill_mending_name(), what: |t| t.skill_mending_what(), levels: 3, cost: 5, needs: Some("healing"), at: (-1.0, -3.0) },
-    Skill { id: "well", name: |t| t.skill_well_name(), what: |t| t.skill_well_what(), levels: 3, cost: 3, needs: Some("soul"), at: (1.0, -1.0) },
-    Skill { id: "flow", name: |t| t.skill_flow_name(), what: |t| t.skill_flow_what(), levels: 3, cost: 5, needs: Some("well"), at: (1.0, -2.0) },
-    Skill { id: "kindling", name: |t| t.skill_kindling_name(), what: |t| t.skill_kindling_what(), levels: 3, cost: 4, needs: Some("soul"), at: (-2.0, 0.0) },
-    Skill { id: "inferno", name: |t| t.skill_inferno_name(), what: |t| t.skill_inferno_what(), levels: 2, cost: 8, needs: Some("kindling"), at: (-3.0, 0.0) },
-    Skill { id: "wind", name: |t| t.spell_wind_blade(), what: |t| t.skill_wind_what(), levels: 1, cost: 5, needs: Some("soul"), at: (2.0, 0.0) },
-    Skill { id: "cool", name: |t| t.skill_cool_name(), what: |t| t.skill_cool_what(), levels: 3, cost: 4, needs: Some("wind"), at: (3.0, 0.0) },
-    Skill { id: "lightning", name: |t| t.spell_lightning_strike(), what: |t| t.skill_lightning_what(), levels: 1, cost: 5, needs: Some("soul"), at: (1.0, 1.0) },
-    Skill { id: "static", name: |t| t.skill_static_name(), what: |t| t.skill_static_what(), levels: 2, cost: 6, needs: Some("lightning"), at: (1.0, 2.0) },
-    Skill { id: "slot2", name: |t| t.skill_slot_name(), what: |t| t.skill_slot2_what(), levels: 1, cost: 4, needs: Some("soul"), at: (0.0, -1.0) },
-    Skill { id: "slot3", name: |t| t.skill_slot_name(), what: |t| t.skill_slot3_what(), levels: 1, cost: 10, needs: Some("slot2"), at: (0.0, -2.0) },
-    Skill { id: "slot4", name: |t| t.skill_slot_name(), what: |t| t.skill_slot4_what(), levels: 1, cost: 20, needs: Some("slot3"), at: (0.0, -3.0) },
-    Skill { id: "frost", name: |t| t.spell_frost_lance(), what: |t| t.skill_frost_what(), levels: 1, cost: 6, needs: Some("wind"), at: (2.0, 1.0) },
-    Skill { id: "gravity", name: |t| t.spell_gravity_well(), what: |t| t.skill_gravity_what(), levels: 1, cost: 10, needs: Some("frost"), at: (3.0, 1.0) },
-    Skill { id: "arcane", name: |t| t.spell_arcane_missiles(), what: |t| t.skill_arcane_what(), levels: 1, cost: 6, needs: Some("soul"), at: (0.0, 1.0) },
-    Skill { id: "familiar", name: |t| t.spell_spirit_familiar(), what: |t| t.skill_familiar_what(), levels: 1, cost: 12, needs: Some("arcane"), at: (0.0, 2.0) },
-    Skill { id: "meteor", name: |t| t.spell_meteor(), what: |t| t.skill_meteor_what(), levels: 1, cost: 12, needs: Some("inferno"), at: (-3.0, -1.0) },
-    Skill { id: "chrono", name: |t| t.skill_chrono_name(), what: |t| t.skill_chrono_what(), levels: 4, cost: 8, needs: Some("healing"), at: (-2.0, -2.0) },
-    Skill { id: "reaper", name: |t| t.skill_reaper_name(), what: |t| t.skill_reaper_what(), levels: 3, cost: 10, needs: Some("soul"), at: (-1.0, 1.0) },
+    Skill { id: "soul", name: |t| t.skill_soul_name(), what: |t| t.skill_soul_what(), costs: &[1], needs: &[&[]], at: (0.0, 0.0) },
+    Skill { id: "vitality", name: |t| t.skill_vitality_name(), what: |t| t.skill_vitality_what(), costs: &[2, 4, 8, 14], needs: &[&[("soul", 1)], &[], &[("healing", 1)], &[("mending", 1)]], at: (-1.0, -1.0) },
+    Skill { id: "healing", name: |t| t.spell_healing(), what: |t| t.skill_healing_what(), costs: &[5], needs: &[&[("vitality", 2)]], at: (-1.0, -2.0) },
+    Skill { id: "mending", name: |t| t.skill_mending_name(), what: |t| t.skill_mending_what(), costs: &[5, 9, 15], needs: &[&[("healing", 1)], &[("vitality", 3)], &[("chrono", 1)]], at: (-1.0, -3.0) },
+    Skill { id: "chrono", name: |t| t.skill_chrono_name(), what: |t| t.skill_chrono_what(), costs: &[10, 14, 20, 28], needs: &[&[("healing", 1), ("vitality", 3)], &[("mending", 1)], &[("vitality", 4)], &[("mending", 3)]], at: (-2.0, -2.0) },
+    Skill { id: "well", name: |t| t.skill_well_name(), what: |t| t.skill_well_what(), costs: &[2, 5, 10], needs: &[&[("soul", 1)], &[], &[("flow", 1)]], at: (1.0, -1.0) },
+    Skill { id: "flow", name: |t| t.skill_flow_name(), what: |t| t.skill_flow_what(), costs: &[4, 8, 14], needs: &[&[("well", 2)], &[], &[("well", 3)]], at: (1.0, -2.0) },
+    Skill { id: "kindling", name: |t| t.skill_kindling_name(), what: |t| t.skill_kindling_what(), costs: &[3, 6, 11], needs: &[&[("soul", 1)], &[], &[("inferno", 1)]], at: (-2.0, 0.0) },
+    Skill { id: "inferno", name: |t| t.skill_inferno_name(), what: |t| t.skill_inferno_what(), costs: &[7, 14], needs: &[&[("kindling", 2)], &[("kindling", 3)]], at: (-3.0, 0.0) },
+    Skill { id: "meteor", name: |t| t.spell_meteor(), what: |t| t.skill_meteor_what(), costs: &[16], needs: &[&[("inferno", 1), ("vitality", 2)]], at: (-3.0, -1.0) },
+    Skill { id: "wind", name: |t| t.spell_wind_blade(), what: |t| t.skill_wind_what(), costs: &[4], needs: &[&[("soul", 1)]], at: (2.0, 0.0) },
+    Skill { id: "cool", name: |t| t.skill_cool_name(), what: |t| t.skill_cool_what(), costs: &[3, 6, 12], needs: &[&[("wind", 1)], &[], &[("frost", 1)]], at: (3.0, 0.0) },
+    Skill { id: "frost", name: |t| t.spell_frost_lance(), what: |t| t.skill_frost_what(), costs: &[7], needs: &[&[("wind", 1), ("cool", 1)]], at: (2.0, 1.0) },
+    Skill { id: "gravity", name: |t| t.spell_gravity_well(), what: |t| t.skill_gravity_what(), costs: &[14], needs: &[&[("frost", 1), ("static", 1)]], at: (3.0, 1.0) },
+    Skill { id: "lightning", name: |t| t.spell_lightning_strike(), what: |t| t.skill_lightning_what(), costs: &[4], needs: &[&[("soul", 1)]], at: (1.0, 1.0) },
+    Skill { id: "static", name: |t| t.skill_static_name(), what: |t| t.skill_static_what(), costs: &[5, 11], needs: &[&[("lightning", 1)], &[("arcane", 1)]], at: (1.0, 2.0) },
+    Skill { id: "arcane", name: |t| t.spell_arcane_missiles(), what: |t| t.skill_arcane_what(), costs: &[8], needs: &[&[("soul", 1), ("lightning", 1)]], at: (0.0, 1.0) },
+    Skill { id: "familiar", name: |t| t.spell_spirit_familiar(), what: |t| t.skill_familiar_what(), costs: &[15], needs: &[&[("arcane", 1), ("reaper", 1)]], at: (0.0, 2.0) },
+    Skill { id: "reaper", name: |t| t.skill_reaper_name(), what: |t| t.skill_reaper_what(), costs: &[8, 16, 30], needs: &[&[("soul", 1)], &[("slot2", 1)], &[("familiar", 1)]], at: (-1.0, 1.0) },
+    Skill { id: "slot2", name: |t| t.skill_slot_name(), what: |t| t.skill_slot2_what(), costs: &[5], needs: &[&[("soul", 1)]], at: (0.0, -1.0) },
+    Skill { id: "slot3", name: |t| t.skill_slot_name(), what: |t| t.skill_slot3_what(), costs: &[14], needs: &[&[("slot2", 1), ("vitality", 2)]], at: (0.0, -2.0) },
+    Skill { id: "slot4", name: |t| t.skill_slot_name(), what: |t| t.skill_slot4_what(), costs: &[30], needs: &[&[("slot3", 1), ("flow", 1)]], at: (0.0, -3.0) },
 ];
 
 // Whether a skill unlocks something new (a spell, or a spell slot), rather
@@ -79,12 +96,18 @@ impl Skills {
         self.levels.get(id).copied().unwrap_or(0)
     }
 
-    // The next level's cost, if there is one and it can be had (the skill
-    // before it learnt).
+    // The next level's cost, if there is one and it can be had (what it
+    // needs learnt).
     pub fn cost(&self, s: &Skill) -> Option<u64> {
-        let l = self.level(s.id);
-        let open = s.needs.is_none_or(|n| self.level(n) > 0);
-        (l < s.levels && open).then(|| s.cost << l)
+        let l = self.level(s.id) as usize;
+        let open = self.wanting(s).is_none();
+        (l < s.costs.len() && open).then(|| s.costs[l])
+    }
+
+    // What the next level of `s` still needs, if anything: (skill, level).
+    pub fn wanting(&self, s: &Skill) -> Option<(&'static Skill, u8)> {
+        let l = self.level(s.id) as usize;
+        s.needs.get(l).into_iter().flat_map(|n| n.iter()).find(|(id, at)| self.level(id) < *at).and_then(|&(id, at)| skill(id).map(|k| (k, at)))
     }
 
     // Learns the next level of `s` with `souls`, if there are enough.
@@ -137,7 +160,7 @@ impl Skills {
         for pair in s.split(',') {
             if let Some((k, v)) = pair.split_once(':') {
                 if let (Some(sk), Ok(v)) = (skill(k), v.parse::<u8>()) {
-                    out.levels.insert(sk.id.to_string(), v.min(sk.levels));
+                    out.levels.insert(sk.id.to_string(), v.min(sk.levels()));
                 }
             }
         }
@@ -161,6 +184,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_need_is_a_skill_s_level() {
+        for s in SKILLS {
+            assert_eq!(s.needs.len(), s.costs.len(), "{}", s.id);
+            for &(id, at) in s.needs.iter().flat_map(|n| n.iter()) {
+                let k = skill(id).unwrap_or_else(|| panic!("{} needs {id}", s.id));
+                assert!(at >= 1 && at <= k.levels(), "{} needs {id} {at}", s.id);
+            }
+        }
+    }
+
+    #[test]
     fn learnt_in_order_for_souls() {
         let mut k = Skills::default();
         let mut souls = 20;
@@ -171,8 +205,14 @@ mod tests {
         assert!(k.buy(skill("soul").unwrap(), &mut souls));
         assert!(k.buy(vit, &mut souls));
         assert!(k.buy(vit, &mut souls));
-        assert_eq!((k.level("vitality"), souls), (2, 20 - 1 - 3 - 6));
+        assert_eq!((k.level("vitality"), souls), (2, 20 - 1 - 2 - 4));
         assert_eq!(k.boosts().health, 4);
+        // (vitality's third level waits on healing)
+        assert_eq!(k.wanting(vit).map(|(s, l)| (s.id, l)), Some(("healing", 1)));
+        assert!(!k.buy(vit, &mut souls));
+        assert!(k.buy(skill("healing").unwrap(), &mut souls));
+        assert!(k.buy(vit, &mut souls));
+        assert_eq!(souls, 20 - 1 - 2 - 4 - 5 - 8);
         assert_eq!(Skills::restored(&k.saved()), k);
     }
 }

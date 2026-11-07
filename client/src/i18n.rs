@@ -26,7 +26,7 @@ pub trait Text: Sync {
     fn tree_title(&self) -> &'static str; // Skill tree
     fn tree_next_level(&self, souls: u64) -> String; // Next level: {souls} souls
     fn tree_learnt(&self) -> &'static str; // Learnt in full
-    fn tree_needs(&self, skill: &str) -> String; // Needs {skill}
+    fn tree_needs(&self, skill: &str, level: u8) -> String; // Needs {skill} {level}
     fn tree_learn(&self) -> &'static str; // Learn
     fn tree_back(&self) -> &'static str; // Back
 
