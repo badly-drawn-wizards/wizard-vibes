@@ -833,7 +833,7 @@ impl Game {
             }
             if p.pause {
                 self.pause_or_hold();
-            } else if p.back && self.paused && !self.menu_holds && self.tree.is_none() {
+            } else if p.back && self.paused && !self.menu_holds && self.tree.is_none() && self.loadout_open.is_none() {
                 self.pause_pressed();
             }
             if p.active {
