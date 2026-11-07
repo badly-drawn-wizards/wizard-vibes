@@ -46,6 +46,13 @@ pub trait Text: Sync {
     fn settings_render_scale(&self) -> &'static str; // Render scale
     fn settings_dynamic(&self) -> &'static str; // dynamic
     fn settings_target_fps(&self) -> &'static str; // Target fps
+    fn settings_progress(&self) -> &'static str; // Progress
+    fn settings_reset_progress(&self) -> &'static str; // Reset progress
+    fn settings_reset_progress_tip(&self) -> &'static str; // Forget every soul and skill, and start afresh
+    fn settings_reset_title(&self) -> &'static str; // Reset progress?
+    fn settings_reset_body(&self, souls: u64) -> String; // All {souls} souls and every skill learnt will be lost.
+    fn settings_reset_yes(&self) -> &'static str; // Reset
+    fn settings_reset_no(&self) -> &'static str; // Cancel
     fn settings_dynamic_tip(&self) -> &'static str; // Scale the resolution to keep the target frame rate
 
     // sides

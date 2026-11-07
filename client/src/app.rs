@@ -96,6 +96,8 @@ pub struct App {
     shot_asked: bool,
     // load the next shader even if it looks the same (a restarted server)
     reload: bool,
+    // the reset of his progress was being confirmed (last frame)
+    reset_was_open: bool,
 }
 
 impl App {
@@ -214,6 +216,7 @@ impl App {
             quality_loading: None,
             shot_asked: false,
             reload: false,
+            reset_was_open: false,
         }
     }
 
@@ -421,6 +424,21 @@ impl App {
             self.nav.active = true;
         }
         self.nav.begin();
+        // (the reset of his progress asked: its confirmation alone)
+        if self.game.confirm_reset {
+            if !self.reset_was_open {
+                self.nav.go(0, 1);
+            }
+            self.reset_was_open = true;
+            self.game.reset_ui(ctx, &mut self.nav);
+            self.nav.end();
+            self.game.menu_holds = self.nav.held();
+            return;
+        }
+        if self.reset_was_open {
+            self.reset_was_open = false;
+            self.nav.go(0, self.menu_tab);
+        }
         let nav = &mut self.nav;
         let names = [text().pause_settings(), text().pause_controls(), text().pause_parameters()];
         let pad = self.game.device() == crate::game::spellbar::Device::Pad;
@@ -567,6 +585,11 @@ impl App {
                     scale.set_target((fps + 5.0 * steps as f32).clamp(crate::scale::TARGET_MIN, crate::scale::target_max()));
                 }
             });
+            ui.end_row();
+
+            ui.label(text().settings_progress());
+            nav.row();
+            ui.horizontal(|ui| game.progress_ui(ui, nav));
             ui.end_row();
         });
     }

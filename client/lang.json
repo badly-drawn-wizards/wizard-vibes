@@ -32,7 +32,14 @@
       "render_scale": "Render scale",
       "dynamic": "dynamic",
       "target_fps": "Target fps",
-      "dynamic_tip": "Scale the resolution to keep the target frame rate"
+      "dynamic_tip": "Scale the resolution to keep the target frame rate",
+      "progress": "Progress",
+      "reset_progress": "Reset progress",
+      "reset_progress_tip": "Forget every soul and skill, and start afresh",
+      "reset_title": "Reset progress?",
+      "reset_body": "All {souls} souls and every skill learnt will be lost. This cannot be undone.",
+      "reset_yes": "Reset",
+      "reset_no": "Cancel"
     },
     "sides": {
       "one_vs_all": "1 vs all",
@@ -507,7 +514,14 @@
       "render_scale": "Escala de render",
       "dynamic": "dinámica",
       "target_fps": "Fps objetivo",
-      "dynamic_tip": "Ajusta la resolución para mantener los fps objetivo"
+      "dynamic_tip": "Ajusta la resolución para mantener los fps objetivo",
+      "progress": "Progreso",
+      "reset_progress": "Reiniciar progreso",
+      "reset_progress_tip": "Olvida todas las almas y habilidades y empieza de nuevo",
+      "reset_title": "¿Reiniciar el progreso?",
+      "reset_body": "Se perderán las {souls} almas y todas las habilidades aprendidas. No se puede deshacer.",
+      "reset_yes": "Reiniciar",
+      "reset_no": "Cancelar"
     },
     "sides": {
       "one_vs_all": "1 contra todos",

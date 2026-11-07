@@ -166,6 +166,9 @@ pub struct Game {
     history: std::collections::VecDeque<(f32, FreeFlight)>,
     rewound: Option<Instant>,
     reversal: Option<Reversal>,
+    // the settings' reset of his progress, asked: waiting on its
+    // confirmation (see reset_ui)
+    pub confirm_reset: bool,
     // the aim assist, smoothed: how far it turns his aim, and towards
     // which enemy, where (see assist)
     assist_k: f32,
@@ -384,6 +387,7 @@ impl Game {
             history: std::collections::VecDeque::new(),
             rewound: None,
             reversal: None,
+            confirm_reset: false,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -1507,7 +1511,10 @@ impl Game {
     }
 
     fn pause_pressed(&mut self) {
-        if self.loadout_open.is_some() {
+        if self.confirm_reset {
+            // (the reset's confirmation: given up)
+            self.confirm_reset = false;
+        } else if self.loadout_open.is_some() {
             self.close_loadout();
         } else if self.tree.is_some() {
             self.close_tree();
@@ -1520,6 +1527,68 @@ impl Game {
 
     // Whom the enemies fight (for the pause menu: a row of its navigation):
     // him alone, or each other too.
+    // His progress, for the settings (a row of its navigation): a button to
+    // reset it, asking first (see reset_ui).
+    pub fn progress_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
+        let red = egui::Color32::from_rgb(0xff, 0x70, 0x60);
+        let r = ui.add(egui::Button::new(egui::RichText::new(text().settings_reset_progress()).color(red))).on_hover_text(text().settings_reset_progress_tip());
+        nav.item(ui, &r);
+        if r.clicked() {
+            self.confirm_reset = true;
+        }
+    }
+
+    // The reset's confirmation, in place of the pause menu while it is
+    // asked: what will be lost, and Reset or Cancel (its own row of the
+    // navigation; Escape or B cancels).
+    pub fn reset_ui(&mut self, ctx: &egui::Context, nav: &mut crate::nav::Nav) {
+        let mut answer = None;
+        egui::Modal::new(egui::Id::unique("wizard-reset-progress")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.vertical_centered(|ui| {
+                ui.heading(text().settings_reset_title());
+                ui.add_space(6.0);
+                ui.label(text().settings_reset_body(self.souls));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    nav.row();
+                    let red = egui::Color32::from_rgb(0xff, 0x70, 0x60);
+                    let yes = ui.add(egui::Button::new(egui::RichText::new(text().settings_reset_yes()).color(red)));
+                    nav.item(ui, &yes);
+                    let no = ui.button(text().settings_reset_no());
+                    nav.item(ui, &no);
+                    if yes.clicked() {
+                        answer = Some(true);
+                    } else if no.clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+        });
+        match answer {
+            Some(true) => {
+                self.reset_progress();
+                self.confirm_reset = false;
+            }
+            Some(false) => self.confirm_reset = false,
+            None => {}
+        }
+    }
+
+    // His progress gone: no souls, no skills, one slot with the fire bolt;
+    // the fight started afresh (his health and mana as without skills).
+    pub fn reset_progress(&mut self) {
+        self.souls = 0;
+        self.skills = skills::Skills::default();
+        self.loadout = vec![Some(0)];
+        self.loadout_slots = 0;
+        self.spells.selected = 0;
+        self.combat.boosts = self.skills.boosts();
+        self.fit_loadout();
+        self.combat.restart();
+        log::info!("progress reset");
+    }
+
     pub fn sides_ui(&mut self, ui: &mut egui::Ui, nav: &mut crate::nav::Nav) {
         for (name, ffa, tip) in [
             (text().sides_one_vs_all(), false, text().sides_one_vs_all_tip()),
@@ -2522,6 +2591,22 @@ mod tests {
         let to_body = vec::normalise(vec::sub(c, origin));
         assert!(vec::dot(vec::normalise(vec::sub(cross, origin)), to_body) > 0.999, "{cross:?}");
         assert!(most < 0.002, "{most}");
+    }
+
+    #[test]
+    fn progress_resets_only_once_confirmed() {
+        let mut g = Game::new(None);
+        g.souls = 40;
+        g.skills = skills::Skills::restored("soul:1,slot2:1,wind:1");
+        g.paused = true;
+        // (asked, then given up with Escape or B: nothing lost, still paused)
+        g.confirm_reset = true;
+        g.pause_pressed();
+        assert!(!g.confirm_reset && g.paused && g.souls == 40);
+        // (confirmed: all gone)
+        g.reset_progress();
+        assert_eq!((g.souls, g.skills.level("wind"), g.loadout.iter().flatten().count()), (0, 0, 1));
+        assert_eq!(g.combat.boosts.slots, 1);
     }
 
     #[test]
