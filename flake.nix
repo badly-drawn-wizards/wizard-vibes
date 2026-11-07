@@ -31,7 +31,7 @@
         default = pkgs.mkShell {
           # dx: Dioxus's CLI, for Subsecond's hot-patching; wasm-bindgen's CLI
           # (the client's wasm-bindgen crate is pinned to its version)
-          packages = [ rust pkgs.dioxus-cli pkgs.wasm-bindgen-cli pkgs.pkg-config pkgs.alsa-lib pkgs.udev pkgs.cmake pkgs.python3 ];
+          packages = [ rust pkgs.dioxus-cli pkgs.wasm-bindgen-cli pkgs.pkg-config pkgs.alsa-lib pkgs.udev pkgs.cmake pkgs.python3 pkgs.clang pkgs.mold ];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (runtime ++ [ rust ]);
         };
         # For the Futhark reference (fut/): e.g. to compare the port with it.

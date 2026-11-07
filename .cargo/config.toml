@@ -1,0 +1,5 @@
+# Linking the native app with mold (from the flake's shell): far faster
+# than the system's ld, which matters most for dx's hot-patching builds.
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
