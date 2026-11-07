@@ -165,6 +165,7 @@ pub struct Game {
     clock: f32,
     history: std::collections::VecDeque<(f32, FreeFlight)>,
     rewound: Option<Instant>,
+    reversal: Option<Reversal>,
     // the aim assist, smoothed: how far it turns his aim, and towards
     // which enemy, where (see assist)
     assist_k: f32,
@@ -236,10 +237,25 @@ const PICTURE_HOLD: f32 = 0.4;
 // press still pauses, as it is let go).
 const GIVE_UP: f32 = 1.2;
 
-// A chrono revive takes him back this far (seconds of flight), and shows
-// for this long.
+// A chrono revive: he comes apart as in any defeat, time slowing to a stop
+// (DEATH_SLOW), then it all winds back over REVERSE seconds (eased): his
+// pieces back together, the scene's time backwards, his flight back along
+// its way to where it was REWIND seconds before; a violet wash over it all,
+// and "Time rewound" for REWOUND_SHOW after.
 const REWIND: f32 = 3.0;
-const REWOUND_SHOW: f32 = 1.4;
+const REVERSE: f32 = 1.6;
+const REWOUND_SHOW: f32 = 1.0;
+
+// Time winding back (a chrono revive): since when, and as it was when it
+// began: the scene's time, how far he had come apart, and the flight
+// memory's clock.
+#[derive(Clone, Copy, Debug)]
+struct Reversal {
+    since: Instant,
+    time: f32,
+    down: f32,
+    clock: f32,
+}
 
 // How near a structure he has its blessing: across the ground from its
 // centre, and above the ground there.
@@ -367,6 +383,7 @@ impl Game {
             clock: 0.0,
             history: std::collections::VecDeque::new(),
             rewound: None,
+            reversal: None,
             orb: [0.55, 2.1, 0.5],
             last_pos: None,
             vel: [0.0; 3],
@@ -1044,9 +1061,7 @@ impl Game {
                 self.history.pop_front();
             }
         }
-        if std::mem::take(&mut self.combat.enemies.rewind) {
-            self.rewind();
-        }
+        self.rewind();
         self.spellbar.spell = self.spells.selected;
         self.spellbar.unlocked = self.spells.unlocked;
         self.spellbar.loadout = self.loadout.clone();
@@ -1367,7 +1382,8 @@ impl Game {
     // Defeated: the overlay's seconds since, and by what (a kill code's
     // kind: 0 fire, 1 lightning, 2 wind).
     pub fn defeat_overlay(&self) -> Option<(f32, u32)> {
-        self.death.map(|d| (d.since.elapsed().as_secs_f32(), (d.code.max(0.0) as u32) % 4))
+        // (none while his chrono revive will have him back)
+        self.death.filter(|_| !self.combat.enemies.rewind).map(|d| (d.since.elapsed().as_secs_f32(), (d.code.max(0.0) as u32) % 4))
     }
 
     // How fast time runs: slowing to a stop as he comes apart.
@@ -1381,7 +1397,7 @@ impl Game {
     // Defeated, and time stopped: the defeat panel is up (and he may try
     // again).
     fn settled(&self) -> bool {
-        self.death.is_some_and(|d| d.since.elapsed().as_secs_f32() >= DEATH_SLOW)
+        !self.combat.enemies.rewind && self.death.is_some_and(|d| d.since.elapsed().as_secs_f32() >= DEATH_SLOW)
     }
 
     // Whether in picture mode (the scene still, the camera flown freely:
@@ -1441,16 +1457,46 @@ impl Game {
         }
     }
 
-    // A chrono revive: his flight as it was REWIND seconds back (as far as
-    // remembered), the enemies' spells gone from under him.
+    // A chrono revive, once he has come apart and time has stopped: it
+    // winds back (see Reversal), the enemies' spells gone from under him;
+    // wound back, he is up again.
     fn rewind(&mut self) {
-        if let Some((_, f)) = self.history.front() {
-            self.flight = f.clone();
+        if !self.combat.enemies.rewind {
+            self.reversal = None;
+            return;
         }
-        self.history.clear();
-        self.last_pos = None;
-        self.spells.clear_hostile();
-        self.rewound = Some(Instant::now());
+        let r = match self.reversal {
+            Some(r) => r,
+            None if self.death.is_some_and(|d| d.since.elapsed().as_secs_f32() >= DEATH_SLOW) => {
+                let r = Reversal { since: Instant::now(), time: self.time, down: self.combat.enemies.down, clock: self.clock };
+                self.reversal = Some(r);
+                self.spells.clear_hostile();
+                r
+            }
+            None => return,
+        };
+        let f = (r.since.elapsed().as_secs_f32() / REVERSE).min(1.0);
+        let k = f * f * (3.0 - 2.0 * f);
+        // (his pieces back together; the scene's time back as far; his
+        // flight back along its way)
+        self.combat.enemies.down = r.down * (1.0 - k);
+        let back = self.history.front().map_or(0.0, |(t, _)| r.clock - t);
+        self.time = r.time - k * back;
+        let at = r.clock - k * back;
+        while self.history.len() > 1 && self.history.back().is_some_and(|(t, _)| *t > at) {
+            self.history.pop_back();
+        }
+        if let Some((_, fl)) = self.history.back() {
+            self.flight = fl.clone();
+        }
+        if f >= 1.0 {
+            self.reversal = None;
+            self.history.clear();
+            self.last_pos = None;
+            self.death = None;
+            self.combat.enemies.revive_now();
+            self.rewound = Some(Instant::now());
+        }
     }
 
     // The structure he is near, as the renderer has the land (the shader
@@ -1579,14 +1625,20 @@ impl Game {
             .show(ctx, |ui| {
                 let painter = ui.painter_at(rect);
                 hud::hurt(&painter, rect, h.hurt);
-                // a chrono revive: the view washed violet a moment, a ring
-                // round the middle winding back
+                // a chrono revive: as time winds back, the view washed
+                // violet, a ring round the middle winding back; then, a
+                // moment, "Time rewound", fading
+                let violet = egui::Color32::from_rgb(0xb0, 0x8c, 0xff);
+                if let Some(r) = self.reversal {
+                    let f = (r.since.elapsed().as_secs_f32() / REVERSE).min(1.0);
+                    painter.rect_filled(rect, 0, violet.gamma_multiply(0.25 * (1.0 - 0.4 * f)));
+                    hud::ring_arc(&painter, rect.center(), 70.0, 1.0 - f, true, egui::Stroke::new(3.0, violet));
+                    ctx.request_repaint();
+                }
                 if let Some(t) = self.rewound {
                     let k = t.elapsed().as_secs_f32() / REWOUND_SHOW;
                     if k < 1.0 {
-                        let violet = egui::Color32::from_rgb(0xb0, 0x8c, 0xff);
-                        painter.rect_filled(rect, 0, violet.gamma_multiply(0.22 * (1.0 - k)));
-                        hud::ring_arc(&painter, rect.center(), 60.0 + 30.0 * k, 1.0 - k, true, egui::Stroke::new(3.0, violet.gamma_multiply(1.0 - k)));
+                        painter.rect_filled(rect, 0, violet.gamma_multiply(0.15 * (1.0 - k)));
                         let g = painter.layout_no_wrap(text().hud_rewound().to_string(), egui::FontId::proportional(18.0), violet.gamma_multiply(1.0 - k));
                         painter.galley(Align2::CENTER_TOP.anchor_size(rect.center() + Vec2::new(0.0, 100.0), g.size()).min, g, violet);
                         ctx.request_repaint();
@@ -2398,12 +2450,32 @@ mod tests {
         for _ in 0..5 {
             frame(&ctx, &mut g, &p, vec![]);
         }
-        // (remembered: where he was; then elsewhere, and rewound)
+        // (his chrono revive learnt; flying along, remembered as he goes)
+        g.skills = skills::Skills::restored("chrono:2");
+        for _ in 0..40 {
+            g.flight.vel = [10.0, 0.0, 0.0];
+            frame(&ctx, &mut g, &p, vec![]);
+        }
         let then = g.history.front().map(|h| h.1.pos).unwrap();
-        g.flight.pos = [then[0] + 50.0, then[1], then[2]];
-        g.combat.enemies.rewind = true;
+        // (defeated: he comes apart, time slowing; no defeat to show)
+        g.combat.enemies.hit_with(spells::HIS, spells::STRIKE, None, 99.0, 0);
         frame(&ctx, &mut g, &p, vec![]);
-        assert!(vec::dist(g.flight.pos, then) < 5.0, "{:?} {:?}", g.flight.pos, then);
+        assert!(g.death.is_some() && g.defeat_overlay().is_none() && g.combat.enemies.rewind);
+        let t0 = g.time;
+        // (time stopped: it winds back, the scene's time with it)
+        if let Some(d) = g.death.as_mut() {
+            d.since = Instant::now() - std::time::Duration::from_secs(3);
+        }
+        frame(&ctx, &mut g, &p, vec![]);
+        let r = g.reversal.expect("winding back");
+        g.reversal = Some(Reversal { since: Instant::now() - std::time::Duration::from_secs_f32(0.5 * REVERSE), ..r });
+        frame(&ctx, &mut g, &p, vec![]);
+        assert!(g.time < t0 && g.combat.enemies.down < r.down && g.combat.enemies.down > 0.0);
+        // (wound back: up again, where he was a moment before)
+        g.reversal = Some(Reversal { since: Instant::now() - std::time::Duration::from_secs(5), ..r });
+        frame(&ctx, &mut g, &p, vec![]);
+        assert!(g.death.is_none() && g.combat.enemies.down < 0.0 && g.combat.enemies.hp > 0);
+        assert!(vec::dist(g.flight.pos, then) < 1.0, "{:?} {:?}", g.flight.pos, then);
         assert!(g.rewound.is_some());
         // pause in a fight: held, not paused yet; held long, given up
         g.pause_or_hold();

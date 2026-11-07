@@ -550,7 +550,8 @@ impl Combat {
         h.mana = self.mana.value / self.mana.max;
         h.short = self.mana.short < 0.4;
         h.defeated = e.defeated;
-        let lost = n > 0 && e.down >= 0.0;
+        // (not while his chrono revive winds time back)
+        let lost = n > 0 && e.down >= 0.0 && !e.rewind;
         if lost != h.lost.is_some() {
             h.lost = lost.then(|| match e.defeated {
                 0 => crate::i18n::text().defeat_none_defeated().to_string(),
@@ -840,8 +841,14 @@ mod tests {
         let e = &mut c.enemies;
         e.hp = 1;
         e.hit(HIS, STRIKE);
-        // (back, with half his health, time to rewind, a moment unhurt)
-        assert_eq!((e.down, e.hp, e.rewind), (-1.0, e.max_hp / 2, true));
+        // (down, as ever, but to be wound back: no defeat panel)
+        assert!(e.down >= 0.0 && e.rewind && e.hp == 0);
+        c.update(&moment(), &mut spells, &mut rng);
+        assert!(c.hud.lost.is_none());
+        // (wound back: up, with half his health, a moment unhurt)
+        let e = &mut c.enemies;
+        e.revive_now();
+        assert_eq!((e.down, e.hp, e.rewind), (-1.0, e.max_hp / 2, false));
         e.hit(HIS, STRIKE);
         assert_eq!(e.hp, e.max_hp / 2);
         e.grace = 0.0;

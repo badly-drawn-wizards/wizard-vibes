@@ -351,8 +351,8 @@ pub struct Enemies {
     pub max_hp: i32, // his health, full (his skills raise it)
     // his chrono revive: the part of his health he comes back with, once a
     // run, from what would have defeated him (0: none), whether this run's
-    // is spent, and (set as it is) that time is to rewind; then, seconds he
-    // cannot be hurt
+    // is spent, and (set as he falls, until he is back) that he will be;
+    // then, seconds he cannot be hurt
     pub revive: f32,
     revived: bool,
     // how long his frost lances' chill lasts, times (his skills)
@@ -482,6 +482,18 @@ impl Enemies {
         self.placed = true;
     }
 
+    // Back from his defeat, time wound back (his chrono revive: see
+    // rewind): standing again, with its part of his health, a moment
+    // unhurt.
+    pub fn revive_now(&mut self) {
+        self.rewind = false;
+        self.down = -1.0;
+        self.hurt = 99.0;
+        self.grace = REVIVE_GRACE;
+        self.hp = ((self.revive * self.max_hp as f32).ceil() as i32).clamp(1, self.max_hp);
+        self.events.push(EnemyEvent::Revived);
+    }
+
     // He gives up: defeated, at once, by nothing (no revive).
     pub fn give_up(&mut self) {
         if self.down < 0.0 {
@@ -518,17 +530,17 @@ impl Enemies {
             self.hp = self.hp.max(0);
             self.hurt = 0.0;
             self.events.push(EnemyEvent::Hurt);
-            if self.hp == 0 && self.revive > 0.0 && !self.revived {
-                // (his chrono revive: back, as he was a moment ago)
-                self.revived = true;
-                self.rewind = true;
-                self.grace = REVIVE_GRACE;
-                self.hp = ((self.revive * self.max_hp as f32).ceil() as i32).clamp(1, self.max_hp);
-                self.events.push(EnemyEvent::Revived);
-            } else if self.hp == 0 {
+            if self.hp == 0 {
                 self.down = 0.0;
                 self.his_end = Some((kind, cut));
                 self.his_deaths += 1;
+                // (his chrono revive, unspent: he comes apart as ever, then
+                // time winds back, and he with it (see the game's
+                // Reversal, and revived))
+                if self.revive > 0.0 && !self.revived {
+                    self.revived = true;
+                    self.rewind = true;
+                }
             }
         } else {
             let him = self.seen.2;
