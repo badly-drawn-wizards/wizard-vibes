@@ -4902,6 +4902,7 @@ dependencies = [
  "web-sys",
  "web-time",
  "wgpu",
+ "winit",
  "wizard-i18n",
  "wizard-shader",
 ]
