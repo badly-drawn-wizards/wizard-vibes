@@ -64,6 +64,16 @@ impl Rank {
         }
     }
 
+    // Its time between dodges, times a plain one's (a boss, heavy, the
+    // slowest).
+    fn dodge_pace(self) -> f32 {
+        match self {
+            Rank::Normal => 1.0,
+            Rank::Elite => 0.7,
+            Rank::Boss => 1.6,
+        }
+    }
+
     // The souls its defeat brings.
     pub fn souls(self) -> usize {
         match self {
@@ -82,6 +92,9 @@ const ELITE_CHANCE: f32 = 0.08;
 const ELITE_RISE: f32 = 0.02;
 const ELITE_MOST: f32 = 0.4;
 const VOLLEY: f32 = 0.14; // radians between a boss's bolts
+// (seconds after a dodge before it can dodge again, a plain one's: see
+// Rank::dodge_pace)
+const DODGE_COOLDOWN: f32 = 2.5;
 const APPEAR: f32 = wizard_shader::enemies::appear_time; // seconds
 const REVIVE_GRACE: f32 = 2.0; // seconds he cannot be hurt after a chrono revive
 const RESPAWN: f32 = 5.0; // seconds after a defeat until the next one appears
@@ -269,6 +282,7 @@ struct Slot {
     telegraph: Option<u32>,
     dodge: f32, // seconds of dodging left
     dodge_dir: V3,
+    dodge_cool: f32, // seconds until it can dodge again (see DODGE_COOLDOWN)
     strafe: f32, // which way it drifts round him (-1 or 1), and for how long more
     strafe_t: f32,
     target: i32, // whom it casts at: him (HIS), or free for all another
@@ -295,6 +309,7 @@ impl Slot {
             telegraph: None,
             dodge: 0.0,
             dodge_dir: [0.0; 3],
+            dodge_cool: 0.0,
             strafe: 1.0,
             strafe_t: 0.0,
             target: HIS,
@@ -642,7 +657,8 @@ impl Enemies {
                 }
                 // (his bolts and blades coming its way: out of their path,
                 // if it notices, the more skilled the sooner)
-                if s.dodge <= 0.0 {
+                s.dodge_cool -= dt;
+                if s.dodge <= 0.0 && s.dodge_cool <= 0.0 {
                     let chest = add(s.pos, [0.0, 1.1, 0.0]);
                     for &(p, v) in &missiles {
                         let rel = sub(chest, p);
@@ -656,6 +672,7 @@ impl Enemies {
                             let side = if len(miss) > 1e-3 { normalise(miss) } else { normalise([v[2], 0.0, -v[0]]) };
                             s.dodge = 0.45;
                             s.dodge_dir = scale(TOP_SPEED * 1.4, side);
+                            s.dodge_cool = DODGE_COOLDOWN * s.rank.dodge_pace();
                         }
                     }
                 }
@@ -871,6 +888,33 @@ mod tests {
         assert!(dodged);
         let missed = len(sub(e.slots[0].pos, start));
         assert!(missed > 0.5, "{missed}");
+    }
+
+    #[test]
+    fn a_dodge_is_not_had_again_at_once() {
+        let mut e = Enemies::default();
+        let mut spells = Spells::default();
+        let mut rng = Rng::new(5);
+        let him = [0.0, 12.0, 0.0];
+        e.reset([0.0, 12.0, 12.0]);
+        e.update(2.0, 1, 1, 0.0, him, &mut spells, &mut rng);
+        // (bolt after bolt at it, a second apart: it dodges the first, and
+        // not again until its cooldown is out)
+        let mut starts = 0;
+        let mut was = false;
+        for f in 0..(60 * 2) {
+            if f % 20 == 0 {
+                let chest = add(e.slots[0].pos, [0.0, 1.1, 0.0]);
+                let from = add(chest, scale(-10.0, normalise(sub(chest, him))));
+                spells.launch(FIRE, from, normalise(sub(chest, from)), HIS, None, &mut rng);
+            }
+            e.update(1.0 / 60.0, 1, 1, 0.0, him, &mut spells, &mut rng);
+            spells.update(1.0 / 60.0, false);
+            let now = e.slots[0].dodge > 0.0;
+            starts += (now && !was) as u32;
+            was = now;
+        }
+        assert_eq!(starts, 1);
     }
 
     #[test]
